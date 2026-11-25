@@ -7,11 +7,11 @@ These documents describe the implemented system: the FastAPI application, the ex
 | Page | Covers |
 |---|---|
 | [Architecture overview](reference/01-architecture-overview.md) | Processes, application assembly, middleware order, mounted routers, execution paths, the component registry and the contracts package |
-| [Configuration](reference/02-configuration.md) | The settings production code reads, the 102 declared settings that have no effect, and components that read their own variables |
+| [Configuration](reference/02-configuration.md) | The settings production code reads, the 102 declared settings that have no effect and components that read their own variables |
 | [HTTP API](reference/03-http-api.md) | Conventions, the public-route allowlist, every mounted route group, error envelope and fixed responses |
 | [Authentication and tenancy](reference/04-authentication-and-tenancy.md) | RS256 JWTs, `AuthMiddleware`, WebSocket tokens, organization claims and tenant isolation |
 | [Research execution](reference/05-research-execution.md) | Execution authority, routing proposal, plan compilation, admission, topology execution, status, cancellation and checkpoints |
-| [MASR routing](reference/06-masr-routing.md) | Complexity analysis, collaboration modes, worker allocation, cost and quality estimates and the `/api/v1/masr` endpoints |
+| [MASR routing](reference/06-masr-routing.md) | The Multi-Agent System Router (MASR): complexity analysis, collaboration modes, worker allocation, cost and quality estimates and the `/api/v1/masr` endpoints |
 | [Agents and supervisors](reference/07-agents-and-supervisors.md) | The 17 worker agents, four domain supervisors, the direct agent API, the supervisor API and the verification gate |
 | [Durable runs and events](reference/08-durable-runs-and-events.md) | Run, task and attempt records, the append-only event log, the outbox relay, SSE and WebSocket run streams |
 | [Tool boundary, capabilities and evidence](reference/09-tool-boundary-and-evidence.md) | `ToolBoundary`, capability grants, the budget ledger, source snapshots, evidence rows and claim support |
@@ -27,7 +27,7 @@ These documents describe the implemented system: the FastAPI application, the ex
 | Guide | Use it to |
 |---|---|
 | [Development setup](development-setup-guide.md) | Install dependencies, configure the environment, run the stack, get an access token and run the smoke tests |
-| [Testing](testing-guide.md) | Run the Python suites, the live-provider evaluations and the web Playwright specs, and see which CI workflow runs each |
+| [Testing](testing-guide.md) | Run the Python suites, the live-provider evaluations and the web Playwright specs and see which CI workflow runs each |
 | [Deployment and monitoring](deployment-monitoring-guide.md) | Deploy with Docker Compose or Kustomize and read the health and metrics endpoints |
 | [Backup and recovery](backup-recovery.md) | Back up and restore each store that holds state |
 | [Performance tuning](performance-tuning.md) | Find the rate, concurrency, connection and model-call limits and where each is set |

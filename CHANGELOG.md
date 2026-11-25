@@ -12,17 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A tool boundary with capability grants, and evidence and claim-support records with provenance (#104).
 - Compiled execution plans enforced before dispatch, and one research kernel behind every execution route (#94, #95).
 - Execution authority on the convenience endpoints (#96).
-- Completed the mediated execution seams (#120).
+- Mediated tool execution from end to end: persisted capability grants, durable tool audit with events and leases, a final-report artifact, claim-support resolution and a model tool-call loop that parses a strict envelope and reports a failure instead of inventing an answer (#120).
 - Execution budget ceilings (#227).
-- Pinned PDF text extraction producing an `extracted_text` artifact, a deterministic span-alignment primitive, a minimal author-date citation renderer, detection of citation-shaped prose the renderer did not emit, and deterministic citation validation dimensions (#181, #130, #182, #133, #239).
+- Pinned PDF text extraction that produces an `extracted_text` artifact (#181).
+- A deterministic span-alignment primitive for pinned-text checks (#130).
+- A minimal author-date citation renderer (#182).
+- Detection of citation-shaped prose that the citation renderer did not emit (#133).
+- Deterministic citation validation dimensions, with a fixture corpus (#239).
 - Academic search results persisted as run-owned evidence, and claim spans bound to citations from sourced metadata (#224, #223).
 - A required reason code on abstained evaluation results (#131).
 
 ### Changed
-- Web workbench redesign (Direction A): migrated the frontend design-token system in `cerebro/web/src/index.css` to a warm cream/teal light palette with a single teal signal accent and a warm (non-navy) dark mode with a stepped surface ladder. Dark mode is carried by the Tailwind `.dark` class. Loaded Fraunces (display), IBM Plex Sans (UI), and IBM Plex Mono (data) type families and pointed `cerebro/web/tailwind.config.js` font families at them.
-- Rebuilt the web landing page (`/`) around the project's real positioning: an editorial hero, the six core primitives, a `research-cli agents` command reference, a traceability priorities ledger, and an open-source closing. Removed the previous fabricated content (mock terminal demo, invented testimonials, "beta" pill). All CLI commands shown are real and copy-paste runnable.
-- Restyled the workflow launch surface (`/app/workflows`): workflow attributes now render in hairline grids, maturity is a pill, and provenance/status chips share a consistent pill treatment. Fixed the call-to-action hierarchy so the page has a single primary action ("Start controlled run"); the per-card configure control is now a secondary toggle that reports its state via `aria-pressed`.
-- Restyled the run trace detail surface (`/app/runs/:id`): consolidated claim-support, evidence-availability, lifecycle, and evaluation badges into one semantic pill (`StatusBadge`); gave the claims↔evidence inspector numbered citations that match numbered evidence cards; and gave the evidence rail an internal scroll region with a pinned head so long runs stay navigable. Evidence excerpts, task/event log, evaluation cards, and the operational ledger were restyled while preserving the existing citation-focus interaction and provenance/honesty semantics.
+- Redesigned the web workbench. The design tokens in `cerebro/web/src/index.css` now give a warm cream and teal light theme with one teal accent, and a warm, non-navy dark theme built on a stepped ladder of surface colors. The Tailwind `.dark` class switches themes. The app loads Fraunces (display), IBM Plex Sans (UI) and IBM Plex Mono (data), and `cerebro/web/tailwind.config.js` points its font families at them.
+- Rebuilt the web landing page (`/`). It now has a hero, the six core primitives, a `research-cli agents` command reference, a traceability priorities ledger and an open-source closing section. Removed the mock terminal demo, the invented testimonials and the "beta" pill. Every CLI command shown is real and runs as written.
+- Restyled the workflow launch page (`/app/workflows`). Workflow attributes render in hairline grids, maturity is a pill, and provenance and status chips share one pill style. The page has a single primary action ("Start controlled run"), and the per-card configure control is a secondary toggle that reports its state through `aria-pressed`.
+- Restyled the run trace detail page (`/app/runs/:id`). Claim-support, evidence-availability, lifecycle and evaluation badges share one `StatusBadge` pill. The claims-to-evidence inspector numbers its citations to match the numbered evidence cards, and the evidence rail scrolls internally under a pinned head so long runs stay navigable. Evidence excerpts, the task and event log, evaluation cards and the operational ledger were restyled; the citation-focus interaction and the provenance and honesty semantics are unchanged.
 - Required an authenticated caller on every API route except an explicit public allowlist (#226).
 - Probed the database and Redis in `/ready`, which returns 503 when either fails (#198).
 - Paged `GET /reports` by offset and reported the real total (#201).
@@ -38,10 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Derived chain and mixture status from member results (#204).
 - Filtered research projects by the statuses the API returns and rejected unknown values with 422 (#188).
 - Stopped reporting metadata-only citation sources as verified (#194).
-- Made the MASR routing circuit breaker open, and stopped it wedging in HALF_OPEN (#195).
+- Fixed the MASR routing circuit breaker: it never opened because each attempt recorded a success first, and it stayed in HALF_OPEN after a successful probe (#195).
 - Shared one `JWTService` and Redis client per process instead of per request (#177).
 - Bounded routing history and dropped unread execution history (#187).
-- Passed numeric series to comparative correlation, rejected malformed `comparison_data` and dropped degraded content (#183).
+- Fixed comparative correlation: it now takes numeric series from `comparison_data`, rejects malformed `comparison_data` with an error, and no longer returns stand-in content from a failed analysis (#183).
 - Annotated pre-fix fabricated verification rows on the research results read path (#127).
 - Made the Kubernetes manifests runnable by mounting JWT keys and dropping the removed worker (#207).
 - Copied the alembic and uvicorn console scripts into the production image (#173).
@@ -49,12 +53,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Imported experiment and report models so alembic autogenerate sees every table, and aligned the experiment models with their tables (#191, #209).
 - Indexed report project and user filters and `report_formats.report_id`, and batched `BaseRepository` bulk updates and deletes (#205, #124).
 - Deleted report files only after the database deletes commit in `cleanup_old_reports` (#122).
-- Stopped duplicate WebSocket delivery, and survived mid-broadcast disconnects (#242).
+- Stopped duplicate WebSocket delivery across instances, and kept broadcasting when a client disconnected mid-broadcast (#242).
 - Resolved the tenant for agent metrics, system statistics, active executions and performance comparison from the token without opening a database session (#246).
 
 ### Removed
 - Six unmounted API routers (#185).
-- The unmounted security rate limiter and validators, the unused `CORSSecurityMiddleware`, and the unmounted MASR router fork and unused event catalogue (#186, #129, #125).
+- The unmounted security rate limiter and validators, the unused `CORSSecurityMiddleware` and the unmounted MASR router fork and unused event catalogue (#186, #129, #125).
 - Five inert kill-switch settings (#128).
 - The never-adopted `agent_tasks` table and `TaskRepository` (#184).
 - Four unreachable duplicate authentication tables, through migration `f8c9d0e1a2b3` (#118).
@@ -62,13 +66,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The GCR image workflow (`docker-build.yml`) and the unparseable reusable test workflow (`reusable-test.yml`) (#245).
 
 ### Fixed
-- Cache TTL wrapped at 24 hours (#240).
+- Cache expiry no longer serves entries older than 24 hours as fresh; it used `timedelta.seconds`, which wraps at 24 hours (#240).
 - A rejected request no longer spends an idempotency key (#106); idempotency keys are scoped to the caller and reserved before executing (#190).
 - Rejected requests no longer amplify durable audit writes (#225).
 - Registration unique-index collisions return 409, and `lower(email)` and `lower(username)` are indexed (#202).
 
 ### Security
-- Hardened request admission and local runtime boundaries (#118).
+- Required authenticated WebSocket handshakes and failed closed when token revocation storage is unavailable, persisted durable audit events for request admission and outcome, kept the MCP service on the internal Compose network, ran migrations in the production image entrypoint, and answered CORS preflights at the outer middleware (#118).
 - Locked accounts after repeated failed logins, and trusted `X-Forwarded-For` only from configured proxies (#228).
 - Keyed unauthenticated rate limiting on the client address rather than `X-API-Key` (#200).
 - Restricted GDPR deletion to the account owner or a superuser, and made erasure delete dependent rows and revoke the user's tokens (#134, #244).

@@ -40,7 +40,7 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 
 > **Not wired.** `settings_to_router_config` maps `MASR_COMPLEXITY_WEIGHTS` and `MASR_COMPLEXITY_THRESHOLDS` into `complexity_analyzer.weights` and `complexity_analyzer.thresholds`. Changing them does not change analysis: `QueryComplexityAnalyzer` reads the key `complexity_weights`, which the mapping never sets, and it has no thresholds key (the level cutoffs above are constants in `_determine_complexity_level`).
 
-`QueryDecomposer.decompose_query` runs when the analysis finds more than one domain and `general` is not among them. It matches keyword lists for five domains (`research`, `content`, `analytics`, `service`, `finance`) and returns a `QueryDecomposition` with per-domain sub-queries, a `research` to `content` dependency when both are detected, and the `is_multi_domain` property. The result is stored on `ComplexityAnalysis.decomposition`. No production code reads `decomposition` or `is_multi_domain`, so the decomposition does not alter routing.
+`QueryDecomposer.decompose_query` runs when the analysis finds more than one domain and `general` is not among them. It matches keyword lists for five domains (`research`, `content`, `analytics`, `service`, `finance`) and returns a `QueryDecomposition` with per-domain sub-queries, a `research` to `content` dependency when both are detected and the `is_multi_domain` property. The result is stored on `ComplexityAnalysis.decomposition`. No production code reads `decomposition` or `is_multi_domain`, so the decomposition does not alter routing.
 
 ## Collaboration modes
 
@@ -79,9 +79,9 @@ Without an explicit strategy, `_select_routing_strategy` applies these rules in 
 5. `quality_focused` for a `complex` query.
 6. The default strategy.
 
-The strategy maps to a cost-optimizer strategy: `speed_first` to `latency_optimized`, `cost_efficient` to `cost_minimized`, `quality_focused` to `performance_optimized`, and both `balanced` and `adaptive` to `balanced`.
+The strategy maps to a cost-optimizer strategy: `speed_first` to `latency_optimized`, `cost_efficient` to `cost_minimized`, `quality_focused` to `performance_optimized` and both `balanced` and `adaptive` to `balanced`.
 
-`MASR_ENABLE_ADAPTIVE` (default `true`) controls only the history-based heuristic in `RoutingMetricsCollector.get_adaptive_strategy`. It never enables the Thompson-sampling allocation described under [Adaptive routing](#adaptive-routing); `settings_to_router_config` documents this and only `ADAPTIVE_ROUTING_ENABLED` can enable it. The heuristic reads up to 10,000 retained decisions from the last 24 hours and returns the strategy with the best average confidence, but it labels every decision `balanced`, so once the history exceeds 100 decisions and no context override is given it returns `balanced` (or the default strategy when none of the retained decisions is recent).
+`MASR_ENABLE_ADAPTIVE` (default `true`) controls only the history-based heuristic in `RoutingMetricsCollector.get_adaptive_strategy`. It never enables the Thompson-sampling allocation described under [Adaptive routing](#adaptive-routing); `settings_to_router_config` documents this and only `ADAPTIVE_ROUTING_ENABLED` can enable it. The heuristic reads up to 10,000 retained decisions from the last 24 hours and returns the strategy with the best average confidence. Because it labels every decision `balanced`, it returns `balanced` once the history exceeds 100 decisions and no context override is given. When none of the retained decisions is recent, it returns the default strategy.
 
 ## Worker allocation
 
@@ -105,14 +105,14 @@ The strategy budget caps `parallel` and `hierarchical` counts (`_get_strategy_bu
 | `quality_focused` | 4 | 10 | 3 | 5 |
 | `balanced`, `adaptive` | 3 | 6 | 3 | 3 |
 
-The supervisor type comes from the first detected domain: `research`, `content`, `analytics`, `finance` and `service` map to themselves, `multimodal` maps to `content`, and an unknown or missing domain maps to `research`. The worker type names are the strings in `MASRouter._get_domain_worker_types` (for example `research_specialist` and `financial_analysis`); they are routing labels and are not keys of the agent catalogue described in [agents and supervisors](07-agents-and-supervisors.md).
+The supervisor type comes from the first detected domain: `research`, `content`, `analytics`, `finance` and `service` map to themselves, `multimodal` maps to `content` and an unknown or missing domain maps to `research`. The worker type names are the strings in `MASRouter._get_domain_worker_types` (for example `research_specialist` and `financial_analysis`); they are routing labels and are not keys of the agent catalogue described in [agents and supervisors](07-agents-and-supervisors.md).
 
 ## Cost model and limits
 
 `CostOptimizer.optimize` (`src/ai_brain/router/cost_optimizer.py`) filters candidate models and then picks one by the mapped strategy:
 
-- Filter: estimated request cost at most `max_cost_per_request` (0.10), `avg_latency_ms` at most 5000, `quality_score` at least 0.7, context window at least twice the estimated tokens, and domain strengths compatible with the detected domains. An empty candidate list raises `ValueError`, which `route` turns into the fallback decision.
-- Pick: `cost_minimized` takes the cheapest, `performance_optimized` the highest quality, `latency_optimized` the lowest latency, and `balanced` the best weighted score (cost 0.4, quality 0.4, latency 0.2).
+- Filter: estimated request cost at most `max_cost_per_request` (0.10), `avg_latency_ms` at most 5000, `quality_score` at least 0.7, context window at least twice the estimated tokens and domain strengths compatible with the detected domains. An empty candidate list raises `ValueError`, which `route` turns into the fallback decision.
+- Pick: `cost_minimized` takes the cheapest, `performance_optimized` the highest quality, `latency_optimized` the lowest latency and `balanced` the best weighted score (cost 0.4, quality 0.4, latency 0.2).
 - Up to two fallback models are chosen by availability and then cost.
 
 The application constructs `MASRouter` with `model_config_manager=None` (`create_masr_router`), so the optimizer uses `_initialize_models_legacy`, a fixed set of five model specifications in the `basic`, `standard`, `premium` and `specialized` tiers (including `llama-3.3-70b`, `deepseek-v3`, `gemini-pro` and `qwen3-72b`). The optimizer's thresholds are constructor defaults; no setting feeds them.
@@ -196,7 +196,7 @@ The models are in `src/models/masr_api_models.py`. The handlers are in `src/api/
 
 ### Errors
 
-Handlers raise `HTTPException` with `detail` set to a `MASRErrorResponse` (`error`, `error_code`, `details`, `suggestions`, `timestamp`), so the JSON body is `{"detail": {...}}`. `POST /route` and `POST /feedback` turn a `ValueError` into 400; every other exception, and every exception on the remaining routes, becomes 500, and `details.error` carries the exception text.
+Handlers raise `HTTPException` with `detail` set to a `MASRErrorResponse` (`error`, `error_code`, `details`, `suggestions`, `timestamp`), so the JSON body is `{"detail": {...}}`. `POST /route` and `POST /feedback` turn a `ValueError` into 400; every other exception, and every exception on the remaining routes, becomes 500 and `details.error` carries the exception text.
 
 | Route | Error codes |
 |---|---|
@@ -211,7 +211,7 @@ Handlers raise `HTTPException` with `detail` set to a `MASRErrorResponse` (`erro
 
 ## Adaptive routing
 
-> **Off by default.** Adaptive routing adjusts the worker count of `parallel` and `hierarchical` allocations by -2 to +2 using a per-mode Thompson-sampling bandit (`AdaptiveAllocationEngine`). Enable with `ADAPTIVE_ROUTING_ENABLED=true`. Learning also needs a non-empty `ADAPTIVE_ROUTING_ALLOWED_EVALUATORS` and a Redis instance at `REDIS_URL`.
+> **Off by default.** With `ADAPTIVE_ROUTING_ENABLED=true`, adaptive routing adjusts the worker count of `parallel` and `hierarchical` allocations by -2 to +2 using a per-mode Thompson-sampling bandit (`AdaptiveAllocationEngine`). Learning also needs a non-empty `ADAPTIVE_ROUTING_ALLOWED_EVALUATORS` and a Redis instance at `REDIS_URL`.
 
 With the flag off, `MASRRuntime.create` uses an in-memory state store and no Redis client; with it on, it creates a `RedisAdaptiveStateStore` and restores the stored snapshot at startup. State lives under the key prefix `cerebro:masr:adaptive`, namespaced by schema and policy version, and updates use an atomic compare-and-set with a per-outcome idempotency marker kept for 7 days and 5 minutes.
 
@@ -240,7 +240,7 @@ Two offline scripts evaluate the allocation policy without enabling it; see the 
 ## Routing outcomes and metrics
 
 - `RoutingMetricsCollector` (`routing_metrics.py`) keeps a deque of up to 10,000 decisions and a counter of total decisions. `get_metrics` returns that counter; the other `RoutingMetrics` fields stay at zero, and `adapt_from_decision` does nothing.
-- `RoutingOutcome` (`routing_outcome.py`) is the typed outcome record: opaque identifiers, source, collaboration mode, proposed and applied arm, final worker count, execution status, latency, cost and quality with their availability, and an eligibility result. It has no field for query text or output.
+- `RoutingOutcome` (`routing_outcome.py`) is the typed outcome record: opaque identifiers, source, collaboration mode, proposed and applied arm, final worker count, execution status, latency, cost and quality with their availability and an eligibility result. It has no field for query text or output.
 
 > **Not wired.** `RoutingOutcomeRecorder` (`outcome_recorder.py`) turns an executed allocation into a `RoutingOutcome` with retry-stable identifiers and delivers it to `MASRouter.record_routing_outcome`. `DirectExecutionService` constructs one as `outcome_recorder` and nothing calls `record`, so production runs do not record outcomes. The offline evaluation scripts call `record_routing_outcome` directly.
 
@@ -255,27 +255,27 @@ It exposes `POST /route`, `GET /health`, `GET /metrics`, `GET /stats` and the Fa
 
 ## Source map
 
-- `src/ai_brain/router/masr.py` — `MASRouter`, `RoutingDecision`, mode selection, allocation, adaptive state handling
-- `src/ai_brain/router/factory.py` — `MASRRuntime`, `create_masr_router`, `settings_to_router_config`
-- `src/ai_brain/router/query_analyzer.py` — `QueryComplexityAnalyzer`, `ComplexityAnalysis`, `QueryDomain`
-- `src/ai_brain/router/query_decomposer.py` — `QueryDecomposer`, `QueryDecomposition`
-- `src/ai_brain/router/cost_optimizer.py` — `CostOptimizer`, `OptimizationStrategy`, legacy model specifications
-- `src/ai_brain/router/hierarchical_cost_model.py` — `HierarchicalCostOptimizer` (unused)
-- `src/ai_brain/router/routing_cache.py` — `RoutingCacheManager`
-- `src/ai_brain/router/routing_types.py` — `RoutingStrategy`, `AgentAllocation`, `RoutingExecutionPolicy`, adaptive metadata types
-- `src/ai_brain/router/routing_metrics.py` — `RoutingMetricsCollector`
-- `src/ai_brain/router/routing_outcome.py` — `RoutingOutcome`, `EvaluatorEligibilityPolicy`
-- `src/ai_brain/router/outcome_recorder.py` — `RoutingOutcomeRecorder`
-- `src/ai_brain/router/adaptive_state_store.py` — in-memory and Redis adaptive state stores
-- `src/ai_brain/router/routing_observability.py` — Prometheus series
-- `src/ai_brain/router/execution_plan_compiler.py` — `ExecutionPlanCompiler`
-- `src/ai_brain/router/masr_service.py` — standalone service
-- `src/ai_brain/experimentation/core/adaptive_allocation_engine.py` — `AdaptiveAllocationEngine`
-- `src/ai_brain/experimentation/eval/adaptive_routing_eval.py`, `adaptive_routing_promotion.py` — offline evaluation and promotion gate
-- `src/reliability/retry_strategies.py` — `CircuitBreaker`
-- `src/core/contracts/execution_plan.py` — `CollaborationMode`, `COLLABORATION_MODE_SUPPORT`
-- `src/api/routes/masr_api.py` — HTTP routes
-- `src/models/masr_api_models.py` — request and response models
-- `src/api/services/masr_routing_service.py` — `MASRRoutingService`
-- `src/ai_brain/config/model_schemas.py` — `ModelTier`
-- `config/adaptive_routing_promotion_criteria.example.json` — promotion criteria template
+- `src/ai_brain/router/masr.py`: `MASRouter`, `RoutingDecision`, mode selection, allocation, adaptive state handling
+- `src/ai_brain/router/factory.py`: `MASRRuntime`, `create_masr_router`, `settings_to_router_config`
+- `src/ai_brain/router/query_analyzer.py`: `QueryComplexityAnalyzer`, `ComplexityAnalysis`, `QueryDomain`
+- `src/ai_brain/router/query_decomposer.py`: `QueryDecomposer`, `QueryDecomposition`
+- `src/ai_brain/router/cost_optimizer.py`: `CostOptimizer`, `OptimizationStrategy`, legacy model specifications
+- `src/ai_brain/router/hierarchical_cost_model.py`: `HierarchicalCostOptimizer` (unused)
+- `src/ai_brain/router/routing_cache.py`: `RoutingCacheManager`
+- `src/ai_brain/router/routing_types.py`: `RoutingStrategy`, `AgentAllocation`, `RoutingExecutionPolicy`, adaptive metadata types
+- `src/ai_brain/router/routing_metrics.py`: `RoutingMetricsCollector`
+- `src/ai_brain/router/routing_outcome.py`: `RoutingOutcome`, `EvaluatorEligibilityPolicy`
+- `src/ai_brain/router/outcome_recorder.py`: `RoutingOutcomeRecorder`
+- `src/ai_brain/router/adaptive_state_store.py`: in-memory and Redis adaptive state stores
+- `src/ai_brain/router/routing_observability.py`: Prometheus series
+- `src/ai_brain/router/execution_plan_compiler.py`: `ExecutionPlanCompiler`
+- `src/ai_brain/router/masr_service.py`: standalone service
+- `src/ai_brain/experimentation/core/adaptive_allocation_engine.py`: `AdaptiveAllocationEngine`
+- `src/ai_brain/experimentation/eval/adaptive_routing_eval.py`, `adaptive_routing_promotion.py`: offline evaluation and promotion gate
+- `src/reliability/retry_strategies.py`: `CircuitBreaker`
+- `src/core/contracts/execution_plan.py`: `CollaborationMode`, `COLLABORATION_MODE_SUPPORT`
+- `src/api/routes/masr_api.py`: HTTP routes
+- `src/models/masr_api_models.py`: request and response models
+- `src/api/services/masr_routing_service.py`: `MASRRoutingService`
+- `src/ai_brain/config/model_schemas.py`: `ModelTier`
+- `config/adaptive_routing_promotion_criteria.example.json`: promotion criteria template

@@ -1,6 +1,6 @@
 # Backup and recovery
 
-The repository ships no backup scripts beyond two Make targets, `make db-backup` and `make backup-all`. This guide lists what holds state, the commands that back it up and restore it, and what losing each store costs. Commands use the development stack (`docker compose`); for the production stack add `-f docker-compose.production.yml`, and supply the passwords it requires.
+The repository ships no backup scripts beyond two Make targets, `make db-backup` and `make backup-all`. This guide lists what holds state, the commands that back it up and restore it and what losing each store costs. Commands use the development stack (`docker compose`); for the production stack add `-f docker-compose.production.yml`, and supply the passwords it requires.
 
 ## What holds state
 
@@ -48,7 +48,7 @@ The development compose file sets the role `research`, the password `research123
 
 ## Restore Postgres
 
-Stop the API so nothing writes during the restore, drop and recreate the database, load the dump, and start the API again:
+Stop the API so nothing writes during the restore, drop and recreate the database, load the dump and start the API again:
 
 ```bash
 docker compose stop api
@@ -71,7 +71,7 @@ docker compose exec redis redis-cli LASTSAVE
 docker compose cp redis:/data/dump.rdb ./backups/dump.rdb
 ```
 
-Run `LASTSAVE` until its timestamp changes to confirm the save finished. The production Redis requires a password: add `-a "$REDIS_PASSWORD" --no-auth-warning` to each `redis-cli` call. The development service runs with `--appendonly yes`, so its volume also keeps an append-only file. To restore, stop Redis, place `dump.rdb` in `/data` of the volume, and start it; where append-only persistence is on, Redis loads the append-only files in preference to `dump.rdb`, so remove them from `/data` first. With an empty Redis, the effects in the table above apply.
+Run `LASTSAVE` until its timestamp changes to confirm the save finished. The production Redis requires a password: add `-a "$REDIS_PASSWORD" --no-auth-warning` to each `redis-cli` call. The development service runs with `--appendonly yes`, so its volume also keeps an append-only file. To restore, stop Redis, place `dump.rdb` in `/data` of the volume and start it; where append-only persistence is on, Redis loads the append-only files in preference to `dump.rdb`, so remove them from `/data` first. With an empty Redis, the effects in the table above apply.
 
 ## Files
 
@@ -98,4 +98,13 @@ backup-all:
 	@echo "Full system backup created in backups/$$(date +%Y%m%d)/"
 ```
 
-It creates a dated directory on the host, runs `make db-backup` (which writes to `backups/`, not the dated directory), runs `redis-cli --rdb` inside the Redis container with a relative path, so the file is written inside the container rather than to the host directory, and copies the `src` directory. It uses the `docker-compose` command rather than `docker compose`. It does not copy snapshots, reports or keys. Use the commands above for a complete backup.
+The target:
+
+- creates a dated directory on the host;
+- runs `make db-backup`, which writes to `backups/`, not the dated directory;
+- runs `redis-cli --rdb` inside the Redis container with a relative path, so the file is written inside the container, not to the host directory;
+- copies the `src` directory;
+- uses the `docker-compose` command rather than `docker compose`;
+- does not copy snapshots, reports or keys.
+
+Use the commands above for a complete backup.

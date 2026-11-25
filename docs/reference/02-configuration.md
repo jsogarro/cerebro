@@ -1,6 +1,6 @@
 # Configuration
 
-Cerebro reads configuration from process environment variables, optional dotenv files, and defaults declared on the `Settings` class. A few components read their own variables outside `Settings`. This page separates the settings that production code reads from the fields that are declared and never read.
+Cerebro reads configuration from process environment variables, optional dotenv files and defaults declared on the `Settings` class. A few components read their own variables outside `Settings`. This page separates the settings that production code reads from the fields that are declared and never read.
 
 ## Summary
 
@@ -92,7 +92,7 @@ A field is listed here when a production module outside `src/core/config.py` rea
 
 ### Adaptive routing
 
-> **Off by default.** The Thompson-sampling allocator adjusts worker counts and collaboration mode from observed outcomes. Enable with `ADAPTIVE_ROUTING_ENABLED=true`. Durable state needs the Redis instance at `REDIS_URL`.
+> **Off by default.** With `ADAPTIVE_ROUTING_ENABLED=true`, the Thompson-sampling allocator adjusts worker counts and collaboration mode from observed outcomes. Durable state needs the Redis instance at `REDIS_URL`.
 
 | Setting | Default | Read by | Effect |
 |---|---|---|---|
@@ -137,16 +137,16 @@ A field is listed here when a production module outside `src/core/config.py` rea
 
 ### MCP tool path
 
-> **Off by default.** Plan workers receive the mediated tool path (capability grants, audit store, source snapshots). Enable with `MCP_TOOL_PATH_ENABLED=true`. The bridge needs an explicit audit store or a session factory, otherwise `MASRSupervisorBridge` raises `RuntimeError`.
+> **Off by default.** With `MCP_TOOL_PATH_ENABLED=true`, plan workers receive the mediated tool path (capability grants, audit store, source snapshots). The bridge needs an explicit audit store or a session factory, otherwise `MASRSupervisorBridge` raises `RuntimeError`.
 
 | Setting | Default | Read by | Effect |
 |---|---|---|---|
-| `MCP_TOOL_PATH_ENABLED` | `false` | `src/ai_brain/integration/masr_supervisor_bridge.py` (`_mcp_tool_path_enabled`, `_execute_plan_worker`) | when true, plan workers are configured with an `MCPIntegration` (capability grants, audit store, evidence recorder); when false that configuration is not added |
+| `MCP_TOOL_PATH_ENABLED` | `false` | `src/ai_brain/integration/masr_supervisor_bridge.py` (`_mcp_tool_path_enabled`, `_execute_plan_worker`) | when true, plan workers are configured with an `MCPIntegration` (capability grants, audit store, evidence recorder); when false, the bridge adds no such configuration |
 | `SOURCE_SNAPSHOT_DIR` | `data/source_snapshots` | `src/ai_brain/integration/masr_supervisor_bridge.py` (`_execute_plan_worker`) | root of the filesystem snapshot store for cited sources; the validator resolves a relative path against the working directory at startup |
 
 ### Constraint pinning
 
-> **Off by default.** Constraint extraction runs before compaction in supervisors and only logs what it finds. Enable with `ENABLE_CONSTRAINT_PINNING=true`.
+> **Off by default.** With `ENABLE_CONSTRAINT_PINNING=true`, supervisors extract constraints before compaction and only log what they find.
 
 | Setting | Default | Read by | Effect |
 |---|---|---|---|
@@ -155,7 +155,7 @@ A field is listed here when a production module outside `src/core/config.py` rea
 
 ### Tracing and telemetry
 
-> **Off by default.** Langfuse tracing and compaction telemetry are disabled. Enable with `LANGFUSE_ENABLED=true` (plus both keys) and `ENABLE_CONTEXT_COMPACTION_TELEMETRY=true`.
+> **Off by default.** Langfuse tracing (`LANGFUSE_ENABLED=true`, plus both keys) and compaction telemetry (`ENABLE_CONTEXT_COMPACTION_TELEMETRY=true`) are disabled.
 
 | Setting | Default | Read by | Effect |
 |---|---|---|---|
@@ -298,7 +298,7 @@ Notes on specific rows:
 - `SECRET_KEY` is never used for signing or encryption. Its validator still runs: it rejects any value shorter than 32 characters in every environment, which includes the placeholder default (in production the placeholder also gets its own error message), so the application cannot import `src.core.config` without a `SECRET_KEY` of at least 32 characters.
 - `JWT_ALGORITHM` is not read; `JWTService` fixes the algorithm at RS256.
 - `LOG_LEVEL` is not read by the API process. The legacy MASR service reads the environment variable directly (see [Environment variables read outside Settings](#environment-variables-read-outside-settings)).
-- `DEEPSEEK_ENABLED`, `LLAMA_ENABLED`, `GEMINI_ENABLED` and `OPENROUTER_ENABLED` are emitted into the provider configuration, but `_build_plan_route` overwrites `enabled` with true, and no other path reads them. `MODEL_PROVIDERS_ENABLED` is emitted as `providers["enabled"]`, which no code reads.
+- `DEEPSEEK_ENABLED`, `LLAMA_ENABLED`, `GEMINI_ENABLED` and `OPENROUTER_ENABLED` are emitted into the provider configuration, but `_build_plan_route` overwrites `enabled` with true and no other path reads them. `MODEL_PROVIDERS_ENABLED` is emitted as `providers["enabled"]`, which no code reads.
 - `OPENROUTER_VALIDATE_SLUGS_ON_STARTUP` is not emitted; `OpenRouterProvider` reads its own `validate_slugs_on_startup` key from the provider configuration, and no caller supplies it (see [LLM providers](10-llm-providers.md)).
 - `MODEL_ROUTER_*` values are not passed to `ModelRouter`, which reads `health_check_interval`, `max_retries` and `enable_fallback` from its own configuration dictionary with its own defaults.
 - `MCP_PORT` is not read by the API. The compose `mcp-server` command reads the process variable `MCP_PORT` directly (see [Compose-level variables](#compose-level-variables)).
@@ -383,7 +383,7 @@ It reads these process variables directly: `MASR_HOST` (default `0.0.0.0`), `MAS
 
 ### Database migrations
 
-`alembic/env.py` reads `DATABASE_URL` from the process environment, rewrites a `postgres://` or `postgresql://` scheme to `postgresql+asyncpg://`, and falls back to `sqlalchemy.url` in `alembic.ini` and then to the local development URL. It does not read `.env` files; the container entrypoint (`docker/entrypoint.sh`) runs `alembic upgrade head` before starting the application and refuses to start when the migration fails.
+`alembic/env.py` reads `DATABASE_URL` from the process environment, rewrites a `postgres://` or `postgresql://` scheme to `postgresql+asyncpg://` and falls back to `sqlalchemy.url` in `alembic.ini` and then to the local development URL. It does not read `.env` files; the container entrypoint (`docker/entrypoint.sh`) runs `alembic upgrade head` before starting the application and refuses to start when the migration fails.
 
 ### Compose-level variables
 
@@ -447,14 +447,14 @@ The file also sets values that differ from the code defaults: `DEBUG=true` (defa
 
 ## Source map
 
-- `src/core/config.py` — `Settings`, validators, `get_settings`, `get_ai_brain_config`
-- `src/core/environment.py` — dotenv merge and precedence (`load_environment`)
-- `src/services/gemini_config.py` — `GeminiConfig` and its `from_env` reader
-- `src/services/report_config.py` — `ReportSettings` and report format, template and quality tables
-- `src/cli/config.py` — `CLIConfig` and `RESEARCH_*` variables
-- `src/core/memory_encryption.py` — `MEMORY_ENCRYPTION_KEY` reader
-- `src/ai_brain/router/factory.py` — maps `Settings` onto the MASR router configuration
-- `src/ai_brain/router/masr_service.py` — legacy standalone service and its direct environment reads
-- `alembic/env.py` — `DATABASE_URL` for migrations
-- `.env.example`, `.env.production.example`, `.env.cli.example` — environment templates
-- `docker-compose.yml`, `docker-compose.production.yml` — compose-level variables and literal service environment
+- `src/core/config.py`: `Settings`, validators, `get_settings`, `get_ai_brain_config`
+- `src/core/environment.py`: dotenv merge and precedence (`load_environment`)
+- `src/services/gemini_config.py`: `GeminiConfig` and its `from_env` reader
+- `src/services/report_config.py`: `ReportSettings` and report format, template and quality tables
+- `src/cli/config.py`: `CLIConfig` and `RESEARCH_*` variables
+- `src/core/memory_encryption.py`: `MEMORY_ENCRYPTION_KEY` reader
+- `src/ai_brain/router/factory.py`: maps `Settings` onto the MASR router configuration
+- `src/ai_brain/router/masr_service.py`: legacy standalone service and its direct environment reads
+- `alembic/env.py`: `DATABASE_URL` for migrations
+- `.env.example`, `.env.production.example`, `.env.cli.example`: environment templates
+- `docker-compose.yml`, `docker-compose.production.yml`: compose-level variables and literal service environment

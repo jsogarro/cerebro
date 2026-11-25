@@ -2,7 +2,7 @@
 
 Commands use the development stack from `docker-compose.yml`; for the production stack add `-f docker-compose.production.yml`.
 
-> **Naming.** The deployment artifacts carry the name `research-platform`: the FastAPI app is titled "Research Platform API", the Postgres database is `research_db`, the CLI entry point is `research-cli`, and the Kubernetes objects are `research-api` and friends.
+> **Naming.** The deployment artifacts carry the name `research-platform`: the FastAPI app is titled "Research Platform API", the Postgres database is `research_db`, the CLI entry point is `research-cli` and the Kubernetes objects are `research-api` and friends.
 
 ## Contents
 
@@ -63,7 +63,7 @@ The CLI reads `~/.research-cli.env` (keys `RESEARCH_API_URL` and `RESEARCH_AUTH_
 
 ### WebSocket connection fails
 
-The WebSocket routes are `/ws`, `/ws/projects/{project_id}`, `/ws/cli/{project_id}` and `/ws/runs/{run_id}`, plus `GET /ws/health`. The supervisor and TalkHier routers add their own WebSocket routes under `/api/v1/supervisors/` and `/api/v1/talkhier/`.
+The WebSocket routes are `/ws`, `/ws/projects/{project_id}`, `/ws/cli/{project_id}` and `/ws/runs/{run_id}`, plus `GET /ws/health`. The supervisor and TalkHier (supervisor messaging) routers add their own WebSocket routes under `/api/v1/supervisors/` and `/api/v1/talkhier/`.
 
 1. Check the unauthenticated probe: `curl http://localhost:8000/ws/health`.
 2. Pass the access token as the `token` query parameter (`ws://localhost:8000/ws?token=<access-token>`). An `Authorization` header alone does not authenticate a WebSocket connection, and the route dependency `require_authenticated_websocket` rejects a connection without a token.
@@ -75,11 +75,11 @@ The WebSocket routes are `/ws`, `/ws/projects/{project_id}`, `/ws/cli/{project_i
 
 Authentication is enforced by `AuthMiddleware`. Every route except the ten entries in `PUBLIC_ROUTE_ALLOWLIST` needs `Authorization: Bearer <access-token>`; the list is in [HTTP API](reference/03-http-api.md#authentication-requirement). Access tokens last 15 minutes and refresh tokens 7 days (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`, `JWT_REFRESH_TOKEN_EXPIRE_DAYS`).
 
-### 401, 403 and 404
+### Status codes
 
 | Status | Cause |
 |---|---|
-| 401 | The bearer token is missing, malformed, expired, revoked, or the route is not in the allowlist and no token was sent |
+| 401 | The bearer token is missing, malformed, expired or revoked, or the route is not in the allowlist and no token was sent |
 | 403 | The token has no `organization_id` claim on a tenant-scoped route (`require_organization_id` in `src/middleware/tenant_context.py`), or a caller deleted another user's data through `DELETE /api/v1/users/{user_id}/gdpr` without being that user or a superuser |
 | 404 | The resource does not exist, or it belongs to another organization: tenant-scoped lookups report a foreign resource exactly like a missing one |
 | 503 | The authentication service is unavailable, typically because Redis (token blacklist) cannot be reached |
@@ -128,7 +128,7 @@ docker compose run --rm --entrypoint alembic api heads
 docker compose run --rm --entrypoint alembic api history
 ```
 
-`alembic current` shows the revision the database is at, `heads` the revisions in `alembic/versions/`, and `history` the chain. More than one head means two branches of migrations need merging. After fixing the cause, `docker compose up -d api` runs `alembic upgrade head` again. Do not edit or drop the `alembic_version` table by hand.
+`alembic current` shows the revision the database is at, `heads` the revisions in `alembic/versions/` and `history` the chain. More than one head means two branches of migrations need merging. After fixing the cause, `docker compose up -d api` runs `alembic upgrade head` again. Do not edit or drop the `alembic_version` table by hand.
 
 ## Agent and model failures
 
@@ -172,7 +172,7 @@ An execution that belongs to another organization is reported as not found. See 
 
 ### Execution seems stuck
 
-1. Poll the status endpoint and read the progress fields.
+1. Poll the status endpoint and read `status`, `progress_percentage` and `current_phase`.
 2. Search the logs for the id: `docker compose logs api | grep "<execution-id>"`.
 3. If the API restarted mid-run, `POST /api/v1/query/execution/<project-id>/resume` rebuilds the execution record from the latest recoverable checkpoint and registers it so its status can be read. It does not start any work ([research execution](reference/05-research-execution.md)).
 
@@ -217,7 +217,7 @@ Redis runs from `redis:7-alpine`. For "OOM command not allowed", check usage wit
 
 ### Standalone MASR container
 
-The `masr-router` container (port 9100, profile `legacy-masr-service`) is not on the query path: routing runs in the `api` process, and `MASR_SERVICE_URL` is not read by the application. See [MASR routing](reference/06-masr-routing.md).
+The `masr-router` container (port 9100, profile `legacy-masr-service`) runs the Multi-Agent System Router (MASR) as a standalone service. It is not on the query path: routing runs in the `api` process, and `MASR_SERVICE_URL` is not read by the application. See [MASR routing](reference/06-masr-routing.md).
 
 ## Debug logging
 

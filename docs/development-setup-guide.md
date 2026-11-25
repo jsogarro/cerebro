@@ -1,6 +1,6 @@
 # Development setup
 
-How to install the dependencies, configure the environment, run the stack, authenticate against it, and check code quality locally. For the test suites see the [testing guide](testing-guide.md); for settings see [configuration](reference/02-configuration.md); for failures see [troubleshooting](troubleshooting.md).
+How to install the dependencies, configure the environment, run the stack, authenticate against it and check code quality locally. For the test suites see the [testing guide](testing-guide.md); for settings see [configuration](reference/02-configuration.md); for failures see [troubleshooting](troubleshooting.md).
 
 ## Prerequisites
 
@@ -23,7 +23,7 @@ pre-commit install
 
 `make install-pip` is the alternative that does not need uv: it runs `scripts/setup-python-env.sh`, which creates `.venv` with `python3.11` (or `python3.12`, or the interpreter named in `PYTHON`), installs `requirements-dev.txt`, then runs `pip install -e .`. Activate it with `. .venv/bin/activate`.
 
-The `dev` extra in `pyproject.toml` contains pytest and its plugins, `ruff`, `black`, `mypy`, `pre-commit`, `testcontainers`, `locust`, `playwright`, `factory-boy`, `faker`, `aiosqlite`, and the `mcp` and `stats` extras (`fastmcp`, `scipy`) that some tests import.
+The `dev` extra in `pyproject.toml` contains pytest and its plugins, `ruff`, `black`, `mypy`, `pre-commit`, `testcontainers`, `locust`, `playwright`, `factory-boy`, `faker`, `aiosqlite` and the `mcp` and `stats` extras (`fastmcp`, `scipy`) that some tests import.
 
 ## Configure
 
@@ -34,7 +34,7 @@ cp .env.example .env
 How the environment is read:
 
 - `Settings` in `src/core/config.py` sets no `env_file`. Dotenv files are loaded into the process environment by `load_environment` in `src/core/environment.py`, which runs when `src/core/config.py` is imported.
-- Precedence is the existing process environment first, then `~/.env`, then the project `.env`. Setting `CEREBRO_DISABLE_DOTENV` to `1`, `true`, `yes`, or `on` skips both files.
+- Precedence is the existing process environment first, then `~/.env`, then the project `.env`. Setting `CEREBRO_DISABLE_DOTENV` to `1`, `true`, `yes` or `on` skips both files.
 - `scripts/compose.sh` passes the project `.env` and `~/.env` to Compose as `--env-file`, so they feed Compose variable substitution (`${GEMINI_API_KEY:-}`, `${API_HOST_PORT:-8000}`, and so on).
 
 Values that matter for local work:
@@ -47,7 +47,13 @@ Values that matter for local work:
 | `GEMINI_API_KEY` | Optional. When it is unset, the lifespan in `src/api/main.py` logs `GEMINI_API_KEY not set` as a warning and creates no `GeminiService`. See [LLM providers](reference/10-llm-providers.md). |
 | `JWT_PRIVATE_KEY_PATH`, `JWT_PUBLIC_KEY_PATH` | Default to `/secrets/jwt_private.pem` and `/secrets/jwt_public.pem`. See below. |
 
-JWT keys (`src/auth/jwt_service.py`, `JWTService`): when the configured private key file exists it is loaded. When it does not exist and `ENVIRONMENT` is not `production`, the service generates an RSA key pair and tries to write it to the configured paths. If the directory is not writable it logs `jwt_private_key_path_not_writable_using_ephemeral` and keeps an in-memory key that does not survive a restart. When `ENVIRONMENT` is `production`, a missing or unreadable key file raises `RuntimeError`. The compose file mounts no volume at `/secrets`. The settings are described in [configuration](reference/02-configuration.md).
+JWT keys (`src/auth/jwt_service.py`, `JWTService`):
+
+- When the configured private key file exists, it is loaded.
+- When it does not exist and `ENVIRONMENT` is not `production`, the service generates an RSA key pair and tries to write it to the configured paths. If the directory is not writable, it logs `jwt_private_key_path_not_writable_using_ephemeral` and keeps an in-memory key that does not survive a restart.
+- When `ENVIRONMENT` is `production`, a missing or unreadable key file raises `RuntimeError`.
+
+The compose file mounts no volume at `/secrets`. The settings are described in [configuration](reference/02-configuration.md).
 
 ## Run the stack
 
@@ -74,7 +80,7 @@ Services in `docker-compose.yml` and their host ports:
 | `redis-commander` | 8081 | Profile `dev-tools` |
 | `masr-router` | 9100 | Profile `legacy-masr-service` |
 
-Migrations: the `api` service uses `/entrypoint.sh` (`docker/entrypoint.sh`), which runs `alembic upgrade head`, exits with the migration's status if it fails, and otherwise `exec`s the command. `make db-init` runs the same upgrade inside a running `api` container.
+Migrations: the `api` service uses `/entrypoint.sh` (`docker/entrypoint.sh`), which runs `alembic upgrade head`, exits with the migration's status if it fails and otherwise `exec`s the command. `make db-init` runs the same upgrade inside a running `api` container.
 
 Web workbench: the web client calls the relative base URL `/api/v1` (`cerebro/web/src/api/client.ts`), so it needs a same-origin proxy. Through Compose, open `http://localhost` (the `nginx` service, `NGINX_HTTP_HOST_PORT`). For a local dev server, run `npm install` and `npm run dev` in `cerebro/web`; `cerebro/web/vite.config.ts` proxies `/api` and `/ws` to `VITE_API_URL`, or to `http://localhost:8000` when it is unset. The Playwright config starts that dev server on port 5173 (`PLAYWRIGHT_PORT`).
 
@@ -82,7 +88,7 @@ Optional profiles:
 
 ```bash
 ./scripts/compose.sh --profile dev-tools up -d     # pgAdmin and Redis Commander
-make legacy-masr                                   # the standalone MASR diagnostics service on port 9100
+make legacy-masr                                   # the standalone MASR (Multi-Agent System Router) diagnostics service on port 9100
 ```
 
 The Makefile describes `legacy-masr` as the "non-authoritative standalone MASR diagnostics service". The API routes through the in-process router (see [MASR routing](reference/06-masr-routing.md)).
@@ -105,9 +111,9 @@ curl -s -X POST http://localhost:8000/api/v1/auth/register \
   }'
 ```
 
-Field rules: `username` is 3 to 50 characters from letters, digits, `_`, and `-`, and is lowercased; `password` is at least 12 characters with an uppercase letter, a lowercase letter, a digit, and one of `!@#$%^&*()_+-=[]{}|;:,.<>?`; `confirm_password` must equal `password`; `accept_terms` must be `true`. `full_name` and `organization` are optional. `register` also rejects, with 400, a password that is one of `123456`, `password`, `qwerty`, `abc123`, `111111`, `123123`, `admin` or `letmein`, that contains the username or the email local part, that has three ascending or descending sequential characters or three repeated characters, or whose entropy is below 40, and a password found in the HaveIBeenPwned breach list. A duplicate email returns 409.
+Field rules: `username` is 3 to 50 characters from letters, digits, `_` and `-`, and is lowercased; `password` is at least 12 characters with an uppercase letter, a lowercase letter, a digit and one of `!@#$%^&*()_+-=[]{}|;:,.<>?`; `confirm_password` must equal `password`; `accept_terms` must be `true`. `full_name` and `organization` are optional. `register` also rejects, with 400, a password that is one of `123456`, `password`, `qwerty`, `abc123`, `111111`, `123123`, `admin` or `letmein`, contains the username or the email local part, has three ascending or descending sequential characters or three repeated characters, or has an entropy below 40. It rejects, with 400, a password found in the HaveIBeenPwned breach list. A duplicate email returns 409.
 
-The 201 response is an `AuthResponse`: a `user` object and a `tokens` object with `access_token`, `refresh_token`, `token_type`, and `expires_in`. Log in later with `POST /api/v1/auth/login` and `{"email": ..., "password": ...}`, which applies the same password rules and returns the same shape.
+The 201 response is an `AuthResponse`: a `user` object and a `tokens` object with `access_token`, `refresh_token`, `token_type` and `expires_in`. Log in later with `POST /api/v1/auth/login` and `{"email": ..., "password": ...}`, which applies the same password rules and returns the same shape.
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
@@ -119,7 +125,9 @@ curl -s http://localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN"
 curl -s http://localhost:8000/api/v1/research/projects -H "Authorization: Bearer $TOKEN"
 ```
 
-Organization claim: tenant-scoped routes resolve their caller through `get_tenant_context` or `get_tenant_identity` (`src/middleware/tenant_context.py`), which call `require_organization_id` and answer 403 `Tenant organization claim is required` when the token has no `organization_id`. A local user always gets one: `register` creates the user with a fresh `uuid4()` organization, and `login` assigns one through `provisioned_organization_id` when the user has none, then puts it in the token (`src/api/auth/auth_router.py`). See [authentication and tenancy](reference/04-authentication-and-tenancy.md).
+Organization claim: tenant-scoped routes resolve their caller through `get_tenant_context` or `get_tenant_identity` (`src/middleware/tenant_context.py`). Both call `require_organization_id` and answer 403 `Tenant organization claim is required` when the token has no `organization_id`.
+
+A local user always gets one: `register` creates the user with a fresh `uuid4()` organization, and `login` assigns one through `provisioned_organization_id` when the user has none, then puts it in the token (`src/api/auth/auth_router.py`). See [authentication and tenancy](reference/04-authentication-and-tenancy.md).
 
 ## Execution authority
 
@@ -142,7 +150,7 @@ research-cli projects list                        # authenticated
 
 With `DEBUG` false the API serves no interactive documentation pages, and the nginx `/docs` location is a separate static root that returns 404, so it is not FastAPI's `/docs`.
 
-`FastAPI(...)` in `src/api/main.py` sets `docs_url` and `redoc_url` to `/docs` and `/redoc` only when `DEBUG` is true, and leaves `openapi_url` at FastAPI's default `/openapi.json`. `AuthMiddleware` applies to all three paths, so a browser request without an `Authorization` header receives 401 (`tests/security/test_route_authentication_boundary.py` asserts this for `/docs`, `/redoc`, and `/openapi.json`). Fetch the schema with a token:
+`FastAPI(...)` in `src/api/main.py` sets `docs_url` and `redoc_url` to `/docs` and `/redoc` only when `DEBUG` is true, and leaves `openapi_url` at FastAPI's default `/openapi.json`. `AuthMiddleware` applies to all three paths, so a browser request without an `Authorization` header receives 401 (`tests/security/test_route_authentication_boundary.py` asserts this for `/docs`, `/redoc` and `/openapi.json`). Fetch the schema with a token:
 
 ```bash
 curl -s http://localhost:8000/openapi.json -H "Authorization: Bearer $TOKEN"
@@ -152,9 +160,15 @@ curl -s http://localhost:8000/openapi.json -H "Authorization: Bearer $TOKEN"
 
 Both smoke scripts currently fail their last check. They send the final `POST /api/v1/query/research` without a token and expect 200, so the route's `401` is reported as `FAIL` and the script exits 1 even when every earlier check passes.
 
-`./scripts/smoke_test.sh` boots the API in a tmux session named `cerebro-smoke` on port 8099 with `DATABASE_URL=sqlite+aiosqlite:///./cerebro_smoke_test.db`. It generates an RSA key pair in `/tmp/cerebro_smoke_keys` with `.venv/bin/python3`, mints an access token itself (subject `00000000-0000-0000-0000-00000000beef`, organization `00000000-0000-0000-0000-00000000cafe`), so it does not call `register` or `login`. It then checks `GET /health`; `POST`, `GET`, `GET .../progress`, list, `GET .../results` (expects 404), a missing project (expects 404), and `POST .../cancel` (expects 204) under `/api/v1/research/projects`; and finally `POST /api/v1/query/research`. Each check prints `PASS` or `FAIL` with the status code; the script prints `SMOKE TEST PASSED` and exits 0, or `SMOKE TEST FAILED` and exits 1. It removes the tmux session, database file, and keys on exit. It requires `.venv`, `tmux`, and an `httpx` importable from `python3`.
+`./scripts/smoke_test.sh` boots the API in a tmux session named `cerebro-smoke` on port 8099 with `DATABASE_URL=sqlite+aiosqlite:///./cerebro_smoke_test.db`. It generates an RSA key pair in `/tmp/cerebro_smoke_keys` with `.venv/bin/python3` and mints an access token itself (subject `00000000-0000-0000-0000-00000000beef`, organization `00000000-0000-0000-0000-00000000cafe`), so it does not call `register` or `login`. It then runs these checks:
 
-`./scripts/smoke_test_postgres.sh` targets an already running Compose stack on `http://localhost:8000`. It registers a unique user through `/api/v1/auth/register`, logs in through `/api/v1/auth/login`, and runs the same project checks with the login token, then the same final query check, which sends no token. The same pass and fail output and exit codes apply. Its start-up check is `docker compose ps | grep -q research-api`; the dev compose file sets no `container_name`, so the check matches only when the Compose project name makes the container name contain `research-api` (for example `COMPOSE_PROJECT_NAME=research`).
+- `GET /health`.
+- Under `/api/v1/research/projects`: `POST`, `GET`, `GET .../progress`, list, `GET .../results` (expects 404), a missing project (expects 404) and `POST .../cancel` (expects 204).
+- `POST /api/v1/query/research`.
+
+Each check prints `PASS` or `FAIL` with the status code. The script prints `SMOKE TEST PASSED` and exits 0, or `SMOKE TEST FAILED` and exits 1, and on exit it removes the tmux session, the database file and the keys. It requires `.venv`, `tmux` and an `httpx` importable from `python3`.
+
+`./scripts/smoke_test_postgres.sh` targets an already running Compose stack on `http://localhost:8000`. It registers a unique user through `/api/v1/auth/register`, logs in through `/api/v1/auth/login` and runs the same project checks with the login token, then the same final query check, which sends no token. The same pass and fail output and exit codes apply. Its start-up check is `docker compose ps | grep -q research-api`; the dev compose file sets no `container_name`, so the check matches only when the Compose project name makes the container name contain `research-api` (for example `COMPOSE_PROJECT_NAME=research`).
 
 That route is not in `PUBLIC_ROUTE_ALLOWLIST`, and `query_api.router` declares `Depends(get_current_token)`, which is why the unauthenticated request receives 401.
 
@@ -169,7 +183,7 @@ make quality                      # make format lint type-check
 
 - `make format` runs `black src tests` (rewrites files); `make lint` runs `ruff check src tests`; `make type-check` runs `mypy src`; `make quality-fix` runs `format` and `lint-fix`. CI and pre-commit format with `ruff format`, not `black`.
 - `[tool.ruff]` sets `fix = true`, so `ruff check` rewrites fixable findings in place. Add `--no-fix` to only report.
-- Pre-commit hooks (`.pre-commit-config.yaml`): `ruff` with `--fix --exit-non-zero-on-fix`, `ruff-format`, `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `check-added-large-files` (`--maxkb=500`), `check-merge-conflict`, and `detect-private-key`.
+- Pre-commit hooks (`.pre-commit-config.yaml`): `ruff` with `--fix --exit-non-zero-on-fix`, `ruff-format`, `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `check-added-large-files` (`--maxkb=500`), `check-merge-conflict` and `detect-private-key`.
 - Pre-commit pins ruff `v0.8.0`, while the `dev` extra declares `ruff>=0.8.0` and CI installs it unpinned, so CI uses the newest release. To reproduce CI findings run `uvx ruff@latest check src tests`.
 - Web: `cd cerebro/web && npm run lint && npm run build` (`build` is `tsc -b && vite build`).
 
@@ -196,15 +210,15 @@ Targets whose recipes reference only files and services that exist:
 | `cli-health`, `cli-projects`, `cli-test` | `research-cli health`, `research-cli projects list`, `research-cli projects create --title "Test Project" --query "Test query" --domains "test"` |
 | `masr-health` | `python -c` that constructs `MASRouter()` from `src/ai_brain/router/masr.py` and prints `health_check()` |
 | `load-test` | `locust -f tests/load/locustfile.py --host=http://localhost:8000` (see the [testing guide](testing-guide.md#load-tests)) |
-| `k8s-namespace`, `k8s-config`, `k8s-deploy`, `k8s-status`, `k8s-logs`, `k8s-clean` | `kubectl` against `k8s/namespace.yaml`, `k8s/configmap.yaml`, `k8s/` (kustomize, which does not build, so `k8s-deploy` and `k8s-clean` fail), and namespace `cerebro` |
-| `logs-api`, `logs-masr`, `logs-all` | `./scripts/compose.sh logs -f` for `api`, `masr-router` (with the `legacy-masr-service` profile), and all services |
-| `clean`, `clean-docker` | delete `__pycache__`, `*.pyc`, and tool caches; `docker system prune -f`, `docker volume prune -f`, `docker network prune -f` |
+| `k8s-namespace`, `k8s-config`, `k8s-deploy`, `k8s-status`, `k8s-logs`, `k8s-clean` | `kubectl` against `k8s/namespace.yaml`, `k8s/configmap.yaml`, `k8s/` (kustomize, which does not build, so `k8s-deploy` and `k8s-clean` fail) and namespace `cerebro` |
+| `logs-api`, `logs-masr`, `logs-all` | `./scripts/compose.sh logs -f` for `api`, `masr-router` (with the `legacy-masr-service` profile) and all services |
+| `clean`, `clean-docker` | delete `__pycache__`, `*.pyc` and tool caches; `docker system prune -f`, `docker volume prune -f`, `docker network prune -f` |
 | `dev-workflow`, `ci-workflow`, `quick-test`, `quick-format` | `make format lint type-check test`; `make quality test test-docker`; `pytest tests/unit -x -v`; `black src tests && ruff check --fix src tests` |
 | `docker-login`, `docker-push-dev`, `docker-push-prod` | `docker login` with `DOCKER_REGISTRY_TOKEN` and `DOCKER_REGISTRY`; `docker-compose build` and `push` for the dev and production files |
-| `version` | prints Python, Docker, `docker-compose`, and `kubectl` versions |
-| `backup-all` | `make db-backup`, `docker-compose exec redis redis-cli --rdb ...`, and `cp -r src` into `backups/<date>/` |
+| `version` | prints Python, Docker, `docker-compose` and `kubectl` versions |
+| `backup-all` | `make db-backup`, `docker-compose exec redis redis-cli --rdb ...` and `cp -r src` into `backups/<date>/` |
 
-The targets `test-docker`, `docker-push-*`, `backup-all`, `version`, `metrics`, and `status` call the legacy `docker-compose` binary instead of `docker compose`.
+The targets `test-docker`, `docker-push-*`, `backup-all`, `version`, `metrics` and `status` call the legacy `docker-compose` binary instead of `docker compose`.
 
 ### Targets that reference missing files
 

@@ -1,6 +1,6 @@
 # CLI and web clients
 
-Two clients talk to the HTTP API: the `research-cli` command-line tool in `src/cli/` and the React workbench in `cerebro/web/`. Both authenticate with a bearer token and neither has a sign-in flow of its own. Part of the workbench calls routes the API does not mount.
+Two clients talk to the HTTP API: the `research-cli` command-line tool in `src/cli/` and the React workbench in `cerebro/web/`. Both authenticate with a bearer token and neither has a sign-in flow of its own. The workflows, runs, run detail and memory pages call routes the API does not mount.
 
 ## Summary
 
@@ -25,7 +25,7 @@ Two clients talk to the HTTP API: the `research-cli` command-line tool in `src/c
 docker compose exec api research-cli health
 ```
 
-The `api` service publishes host port `${API_HOST_PORT:-8000}`, so a CLI installed on the host reaches it at the default `http://localhost:8000`. The Makefile wraps three calls: `make cli-health` (`research-cli health`), `make cli-projects` (`research-cli projects list`), and `make cli-test` (creates a project titled "Test Project").
+The `api` service publishes host port `${API_HOST_PORT:-8000}`, so a CLI installed on the host reaches it at the default `http://localhost:8000`. The Makefile wraps three calls: `make cli-health` (`research-cli health`), `make cli-projects` (`research-cli projects list`) and `make cli-test` (creates a project titled "Test Project").
 
 ### Configuration
 
@@ -36,8 +36,8 @@ The `api` service publishes host port `${API_HOST_PORT:-8000}`, so a CLI install
 | `RESEARCH_API_URL` | `http://localhost:8000` | API base URL. Must start with `http://` or `https://`; a trailing slash is removed. |
 | `RESEARCH_API_TIMEOUT` | `30` | Request timeout in seconds. |
 | `RESEARCH_OUTPUT_FORMAT` | `table` | One of `table`, `json`, `yaml`, `csv`. |
-| `RESEARCH_VERBOSE` | `false` | `true`, `1`, or `yes` enables verbose output. |
-| `RESEARCH_COLOR` | `true` | `true`, `1`, or `yes` keeps colored output. |
+| `RESEARCH_VERBOSE` | `false` | `true`, `1` or `yes` enables verbose output. |
+| `RESEARCH_COLOR` | `true` | `true`, `1` or `yes` keeps colored output. |
 | `RESEARCH_MAX_RETRIES` | `3` | Attempts for a request that fails at the transport level. |
 | `RESEARCH_API_KEY` | none | Sent as the `X-API-Key` header. |
 | `RESEARCH_AUTH_TOKEN` | none | Sent as `Authorization: Bearer <token>`. |
@@ -50,7 +50,7 @@ The `--format` option always has a value (its default is `table`) and is applied
 - `set KEY VALUE` changes a value for the current process only. Setting `max_retries` has no effect, because the retry decorator reads `config.max_retries` when `src/cli/client.py` is imported. `verbose` and `color` accept `true`, `1`, `yes`; `api_timeout` and `max_retries` are integers.
 - `save` writes the configuration to `~/.research-cli.env`.
 
-Because `set` does not persist, use `--api-url`, an exported `RESEARCH_*` variable, or `config save` after exporting the variable to keep a setting.
+Because `set` does not persist, use `--api-url`, an exported `RESEARCH_*` variable or `config save` after exporting the variable to keep a setting.
 
 The client retries only `httpx.TransportError` and `httpx.TimeoutException`, with exponential backoff between 4 and 10 seconds. HTTP error responses are raised at once and not retried.
 
@@ -91,7 +91,7 @@ A failed API call in an `agents` or `projects` command prints an error and exits
 | `chain` | `QUERY_TEXT`; `--agents`/`-a` (repeatable, required, in order); `--authority-id`; `--authority-version` | `POST /api/v1/agents/chain` |
 | `status` | none | `GET /api/v1/masr/status` |
 
-`--authority-id` and `--authority-version` must be given together; either one alone is a usage error. Together they are sent as `authority_reference` with `authority_id` and `authority_version`. `query`, `execute`, and `chain` print the `results` field of the response, or the whole response when it has none.
+`--authority-id` and `--authority-version` must be given together; either one alone is a usage error. Together they are sent as `authority_reference` with `authority_id` and `authority_version`. `query`, `execute` and `chain` print the `results` field of the response or the whole response when it has none.
 
 **`research-cli projects`**
 
@@ -107,18 +107,18 @@ A failed API call in an `agents` or `projects` command prints an error and exits
 
 Notes on individual commands:
 
-- **`create`** works in three modes. With `--file`, a `.yaml`, `.yml`, or `.json` file holds one project or a list of projects, each with `title`, `query_text`, and `domains` (`depth_level` defaults to `comprehensive`), and the command prints a created/failed summary. With `--interactive`, it prompts for each value. Otherwise `--title`, `--query`, and `--domains` are all required. `--scope` values are parsed to booleans, integers, floats, or bracketed lists when they look like them.
+- **`create`** works in three modes. With `--file`, a `.yaml`, `.yml` or `.json` file holds one project or a list of projects, each with `title`, `query_text` and `domains` (`depth_level` defaults to `comprehensive`), and the command prints a created/failed summary. With `--interactive`, it prompts for each value. Otherwise `--title`, `--query` and `--domains` are all required. `--scope` values are parsed to booleans, integers, floats or bracketed lists when they look like them.
 - **`progress`** prints the current progress once. `--watch` polls every `--interval` seconds until `progress_percentage` reaches 100. `--stream` opens a WebSocket to `/ws/cli/{project_id}` with the token in a `token` query parameter and prints updates as they arrive; when the connection fails it falls back to polling. `--watch` and `--stream` cannot be combined.
-- **`results`** prints the results as JSON. With `--output` it writes a file: JSON for `--format json`, YAML for `--format yaml`, and the Python `str()` of the results for `--format table`. `--format csv` raises an uncaught `TypeError`, because the writer calls `f.write` on a dictionary.
+- **`results`** prints the results as JSON. With `--output` it writes a file: JSON for `--format json`, YAML for `--format yaml` and the Python `str()` of the results for `--format table`. `--format csv` raises an uncaught `TypeError`, because the writer calls `f.write` on a dictionary.
 - **`refine`** exits with an error when no scope parameter is given.
 
 ### Output formats
 
-`--format` selects `table`, `json`, `yaml`, or `csv` for the `projects` commands that print projects or progress. Project lists and single projects support all four formats, with `csv` rendered by `tabulate`. Progress is rendered as `table` text for both `table` and `csv`. The `agents` commands print with Rich and ignore `--format`.
+`--format` selects `table`, `json`, `yaml` or `csv` for the `projects` commands that print projects or progress. Project lists and single projects support all four formats, with `csv` rendered by `tabulate`. Progress is rendered as `table` text for both `table` and `csv`. The `agents` commands print with Rich and ignore `--format`.
 
 ### Errors
 
-A failed request prints `<operation> failed: <detail>` (for example `Failed to fetch project: ...`) and exits with status `1`. `<detail>` is the `detail` field of the JSON error body when the body has one, and the raw response text otherwise. The API's error envelope is `{"error": {"code", "message", "details"}}` with no `detail` key, so the CLI prints that JSON text. A `404` from `projects get`, `progress`, or `cancel` prints `Project not found: <id>`, and from `projects results` prints `Results not found for project: <id>`. No command treats `401`, `403`, or `422` differently from other statuses. `health` prints `Failed to connect to API: ...` when the connection fails.
+A failed request prints `<operation> failed: <detail>` (for example `Failed to fetch project: ...`) and exits with status `1`. `<detail>` is the `detail` field of the JSON error body when the body has one, and the raw response text otherwise. The API's error envelope is `{"error": {"code", "message", "details"}}` with no `detail` key, so the CLI prints that JSON text. A `404` from `projects get`, `progress` or `cancel` prints `Project not found: <id>`, and from `projects results` prints `Results not found for project: <id>`. No command treats `401`, `403` or `422` differently from other statuses. `health` prints `Failed to connect to API: ...` when the connection fails.
 
 ## research-platform script
 
@@ -128,7 +128,7 @@ A failed request prints `<operation> failed: <detail>` (for example `Failed to f
 
 ### Stack and commands
 
-`cerebro/web` is a Vite single-page app: React 19, TypeScript, React Router 7, TanStack Query 5, axios, zustand, Tailwind CSS 3, and Radix UI components. `package.json` declares no Node engine.
+`cerebro/web` is a Vite single-page app: React 19, TypeScript, React Router 7, TanStack Query 5, axios, zustand, Tailwind CSS 3 and Radix UI components. `package.json` declares no Node engine.
 
 | Command | What it runs |
 |---|---|
@@ -148,7 +148,7 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 
 ### Pages
 
-> **Not wired.** The workflows, runs, run detail, and memory pages call routes the API does not mount. The API mounts no `/api/v1/workflows`, no `/api/v1/runs` list, create, or detail route, no `/api/v1/runs/{id}/cancel`, no `/api/v1/memory/nodes`, and no `/api/v1/agents/{id}/logs`. The only run route it mounts is `GET /api/v1/runs/{run_id}/events`, which streams server-sent events rather than returning a JSON collection. The dashboard, QA, costs, and benchmarks pages never call the API: the dashboard holds its figures in the component, and the QA, costs, and benchmarks clients return fixed values with the real call commented out. The settings page has inputs and a switch with no handlers.
+> **Not wired.** The workflows, runs, run detail and memory pages call routes the API does not mount. The API mounts no `/api/v1/workflows`, no `/api/v1/runs` list, create or detail route, no `/api/v1/runs/{id}/cancel`, no `/api/v1/memory/nodes` and no `/api/v1/agents/{id}/logs`. The only run route it mounts is `GET /api/v1/runs/{run_id}/events`, which streams server-sent events rather than returning a JSON collection. The dashboard, QA, costs and benchmarks pages never call the API: the dashboard holds its figures in the component, and the QA, costs and benchmarks clients return fixed values with the real call commented out. The settings page has inputs and a switch with no handlers.
 
 | Route | Page | Backend calls | Backed |
 |---|---|---|---|
@@ -168,23 +168,23 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 
 ### End-to-end tests
 
-`cerebro/web/tests/e2e/` holds Playwright specs written in TypeScript: accessibility (`a11y-axe`, `a11y-keyboard`, `dark-mode-axe`, `wave6-accessibility`), layout and theme (`responsive-walkthrough`, `theme-tokens`, `landing`), and workbench behaviour (`runs`, `run-detail`, `workflows`, `workbench-ui`, `workbench-contracts`, `user-journey`, `api-contract`, `golden-run`). Run them from `cerebro/web` with `npm run test:e2e`. `playwright.config.ts` runs one Chromium project, starts `npm run dev` on `127.0.0.1:5173` (override with `PLAYWRIGHT_HOST` and `PLAYWRIGHT_PORT`), points the dev server at `PLAYWRIGHT_BACKEND_URL` (then `VITE_API_URL`, then `http://127.0.0.1:8000`), and retries twice when `CI` is set. The `user-journey`, `api-contract`, `wave6-accessibility`, and `workbench-ui` specs intercept API calls with `page.route`. `golden-run.spec.ts` skips itself unless `PLAYWRIGHT_REAL_BACKEND=1`.
+`cerebro/web/tests/e2e/` holds Playwright specs written in TypeScript: accessibility (`a11y-axe`, `a11y-keyboard`, `dark-mode-axe`, `wave6-accessibility`), layout and theme (`responsive-walkthrough`, `theme-tokens`, `landing`) and workbench behaviour (`runs`, `run-detail`, `workflows`, `workbench-ui`, `workbench-contracts`, `user-journey`, `api-contract`, `golden-run`). Run them from `cerebro/web` with `npm run test:e2e`. `playwright.config.ts` runs one Chromium project, starts `npm run dev` on `127.0.0.1:5173` (override with `PLAYWRIGHT_HOST` and `PLAYWRIGHT_PORT`), points the dev server at `PLAYWRIGHT_BACKEND_URL` (then `VITE_API_URL`, then `http://127.0.0.1:8000`), and retries twice when `CI` is set. The `user-journey`, `api-contract`, `wave6-accessibility` and `workbench-ui` specs intercept API calls with `page.route`. `golden-run.spec.ts` skips itself unless `PLAYWRIGHT_REAL_BACKEND=1`.
 
 ## Source map
 
-- `pyproject.toml` — `[project.scripts]` entries `research-cli` and `research-platform`
-- `src/cli/main.py` — root group, `config`, `health`, `completion`
-- `src/cli/commands/agents.py`, `src/cli/commands/projects.py` — command groups
-- `src/cli/client.py` — `ResearchAPIClient`, `APIError`, retry policy, token subject decoding
-- `src/cli/config.py` — `CLIConfig` and the `RESEARCH_*` variables
-- `src/cli/formatters.py` — `OutputFormatter` for table, JSON, YAML, and CSV
-- `src/cli/websocket_client.py` — `CLIWebSocketClient` used by `progress --stream`
-- `src/cli/utils.py` — file loading, `key=value` parsing, interactive prompts
-- `.env.cli.example` — example CLI environment file
-- `src/research_platform/__init__.py` — the `research-platform` entry point stub
-- `cerebro/web/src/router/index.tsx` — route table
-- `cerebro/web/src/api/` — API clients (`client.ts`, `auth.ts`, `websocket.ts`, `research.ts`, `agents.ts`, `runs.ts`, `workflows.ts`, `workbench.ts` (run and workflow contract types), `memory.ts`, `qa.ts`, `costs.ts`, `benchmarks.ts`)
-- `cerebro/web/src/pages/` — page components
-- `cerebro/web/tests/e2e/`, `cerebro/web/playwright.config.ts` — end-to-end suite
-- `cerebro/web/Dockerfile`, `cerebro/web/nginx.conf` — web image
-- `docker-compose.yml`, `docker/nginx/nginx.conf` — `web` and `nginx` services and the reverse proxy
+- `pyproject.toml`: `[project.scripts]` entries `research-cli` and `research-platform`
+- `src/cli/main.py`: root group, `config`, `health`, `completion`
+- `src/cli/commands/agents.py`, `src/cli/commands/projects.py`: command groups
+- `src/cli/client.py`: `ResearchAPIClient`, `APIError`, retry policy, token subject decoding
+- `src/cli/config.py`: `CLIConfig` and the `RESEARCH_*` variables
+- `src/cli/formatters.py`: `OutputFormatter` for table, JSON, YAML and CSV
+- `src/cli/websocket_client.py`: `CLIWebSocketClient` used by `progress --stream`
+- `src/cli/utils.py`: file loading, `key=value` parsing, interactive prompts
+- `.env.cli.example`: example CLI environment file
+- `src/research_platform/__init__.py`: the `research-platform` entry point stub
+- `cerebro/web/src/router/index.tsx`: route table
+- `cerebro/web/src/api/`: API clients (`client.ts`, `auth.ts`, `websocket.ts`, `research.ts`, `agents.ts`, `runs.ts`, `workflows.ts`, `workbench.ts` (run and workflow contract types), `memory.ts`, `qa.ts`, `costs.ts`, `benchmarks.ts`)
+- `cerebro/web/src/pages/`: page components
+- `cerebro/web/tests/e2e/`, `cerebro/web/playwright.config.ts`: end-to-end suite
+- `cerebro/web/Dockerfile`, `cerebro/web/nginx.conf`: web image
+- `docker-compose.yml`, `docker/nginx/nginx.conf`: `web` and `nginx` services and the reverse proxy

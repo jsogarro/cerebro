@@ -1,6 +1,6 @@
 # HTTP API
 
-The FastAPI application in `src/api/main.py` serves the HTTP and WebSocket API under the title "Research Platform API". Domain routers are mounted under `/api/v1`; the health probes and the `/ws` WebSocket routes are mounted at the root, and the supervisor and TalkHier WebSocket routes sit under their routers' prefixes. Every request passes through the middleware stack described in [Conventions](#conventions) before it reaches a router.
+The FastAPI application in `src/api/main.py` serves the HTTP and WebSocket API under the title "Research Platform API". Domain routers are mounted under `/api/v1`; the health probes and the `/ws` WebSocket routes are mounted at the root, and the supervisor and TalkHier (supervisor messaging, see [agents and supervisors](07-agents-and-supervisors.md#talkhier-api)) WebSocket routes sit under their routers' prefixes. Every request passes through the middleware stack described in [Conventions](#conventions) before it reaches a router.
 
 ## Summary
 
@@ -60,7 +60,7 @@ The FastAPI application in `src/api/main.py` serves the HTTP and WebSocket API u
 | `POST` | `/api/v1/auth/reset-password` | password recovery bootstrap |
 | `GET` | `/api/v1/auth/verify-email` | email verification bootstrap |
 
-Every other path, including `/metrics`, `/docs`, `OPTIONS` requests that are not terminated by the CORS preflight handler, and unknown paths, requires a valid token. A missing or malformed header returns `401` with code `AUTHENTICATION_REQUIRED`; an invalid or revoked token returns `401`; an unavailable key or revocation store returns `503` with code `AUTHENTICATION_SERVICE_UNAVAILABLE`.
+Every other path, including `/metrics`, `/docs`, `OPTIONS` requests that are not terminated by the CORS preflight handler and unknown paths, requires a valid token. A missing or malformed header returns `401` with code `AUTHENTICATION_REQUIRED`; an invalid or revoked token returns `401`; an unavailable key or revocation store returns `503` with code `AUTHENTICATION_SERVICE_UNAVAILABLE`.
 
 The domain routers add `get_current_token` as a router-level or route-level dependency as well. Routers marked tenant-scoped below additionally resolve a `TenantContext` and return `403` when the token has no `organization_id` claim. WebSocket routes authenticate through a `token` query parameter instead of the header. See [authentication and tenancy](04-authentication-and-tenancy.md).
 
@@ -144,7 +144,7 @@ Mounted at `/api/v1/research`. Every route except `/projects/{project_id}/refine
 | `scope` | `ResearchScope` or null | optional |
 | `authority_reference` | object or null | optional |
 
-The project row is created first. The route calls `start_research_execution` without an `organization_id`, so the start attempt is refused, the failure is logged, and the project is returned with status `pending`; there is no error response for that case. `POST /api/v1/query/research` is the route that starts execution.
+The project row is created first. The route calls `start_research_execution` without an `organization_id`, so the start attempt is refused, the failure is logged and the project is returned with status `pending`; there is no error response for that case. `POST /api/v1/query/research` is the route that starts execution.
 
 **`ResearchQuery`** (`src/models/research_project.py`).
 
@@ -257,7 +257,7 @@ Mounted at `/api/v1/agents`; `get_current_token` is a router-level dependency. T
 | `GET` | `/health/summary` | none | Health summary across agent types. | 500 |
 | `GET` | `/performance/comparison` | `get_tenant_identity` | Performance comparison across agent types. | 500 |
 
-`execute`, `chain` and `mixture` return `422` with code `EXECUTION_AUTHORITY_REQUIRED` when the body has no `authority_reference`, `EXECUTION_AUTHORITY_UNAVAILABLE` when no resolver can supply it for the caller's organization, and the code of the authority error otherwise. `/literature-review/search`, `/workflows/literature-analysis` and `/workflows/comprehensive-research` accept `authority_id` and `authority_version` as query parameters instead. `/citation/format` and `/synthesis/combine` take them as fields of the JSON body (for example `{"sources": [...], "style": "APA", "authority_id": "...", "authority_version": "..."}`). Giving only one of the two returns `422` with `AUTHORITY_REFERENCE_INCOMPLETE`. The caller's organization comes from the token, never from the request body.
+`execute`, `chain` and `mixture` return `422` with code `EXECUTION_AUTHORITY_REQUIRED` when the body has no `authority_reference`, `EXECUTION_AUTHORITY_UNAVAILABLE` when no resolver can supply it for the caller's organization and the code of the authority error otherwise. `/literature-review/search`, `/workflows/literature-analysis` and `/workflows/comprehensive-research` accept `authority_id` and `authority_version` as query parameters instead. `/citation/format` and `/synthesis/combine` take them as fields of the JSON body (for example `{"sources": [...], "style": "APA", "authority_id": "...", "authority_version": "..."}`). Giving only one of the two returns `422` with `AUTHORITY_REFERENCE_INCOMPLETE`. The caller's organization comes from the token, never from the request body.
 
 ## MASR
 
@@ -320,7 +320,7 @@ Mounted at `/api/v1/talkhier`. `get_current_token` is a dependency on every HTTP
 |---|---|---|---|---|
 | `GET` | `/api/v1/runs/{run_id}/events` | Server-sent events for one run, read from the durable event log. `cursor` query parameter or `Last-Event-ID` header resumes from a position. | 200 | 400 invalid cursor, 403 token has no organization claim, 404 run not found in the caller's organization, 503 |
 
-Each frame carries the cursor as the SSE `id`, the event type as `event`, and the message as JSON `data`. Delivery is at least once; clients deduplicate on the frame's `idempotency_key`. Event semantics are in [durable runs and events](08-durable-runs-and-events.md).
+Each frame carries the cursor as the SSE `id`, the event type as `event` and the message as JSON `data`. Delivery is at least once; clients deduplicate on the frame's `idempotency_key`. Event semantics are in [durable runs and events](08-durable-runs-and-events.md).
 
 ## WebSockets
 
@@ -360,7 +360,7 @@ Message contracts, cursors and delivery guarantees are in [durable runs and even
 
 **Forwarded codes.** When `HTTPException.detail` is an object, `http_exception_handler` reads `code` (or `error_code`) for the code, `message` (or `error`) for the message, and `details` for the details. A string detail becomes the message. An object without a message yields the message `Request failed`.
 
-**Validation (422).** `validation_exception_handler` returns code `VALIDATION_ERROR`, message `Invalid request`, and `details.errors` holding the field error list.
+**Validation (422).** `validation_exception_handler` returns code `VALIDATION_ERROR`, message `Invalid request` and `details.errors` holding the field error list.
 
 **Unhandled errors (500).** `global_exception_handler` in `src/api/main.py` returns code `INTERNAL_SERVER_ERROR` and message `Internal server error`; the exception is logged, not returned. Several route handlers catch exceptions themselves and return `500` with a message that includes the exception text.
 
@@ -414,15 +414,15 @@ These routes return values that do not come from live computation.
 
 ## Source map
 
-- `src/api/main.py` — application, middleware registration, router mounts, exception handlers, `docs_url`.
-- `src/api/routes/` — one module per router: `health.py`, `users.py`, `research.py`, `reports.py`, `query_api.py`, `agent_api.py`, `masr_api.py`, `supervisor_api.py`, `talkhier_api.py`, `run_stream.py`, `websocket.py`.
-- `src/api/auth/auth_router.py` — `/api/v1/auth` routes.
-- `src/api/middleware/error_envelope.py` — error envelope, status-to-code map, handlers.
-- `src/api/middleware/idempotency.py` — `Idempotency-Key` handling and stores.
-- `src/api/middleware/rate_limiter.py` — fixed-window limiter and stores.
-- `src/api/client_ip.py` — client address and `TRUSTED_PROXIES`.
-- `src/middleware/auth_middleware.py` — `PUBLIC_ROUTE_ALLOWLIST`, `AuthMiddleware`, `get_current_token`.
-- `src/middleware/tenant_context.py` — `TenantContext`, `get_tenant_context`, `get_tenant_identity`.
-- `src/api/websocket/auth.py` — WebSocket token dependency and project access check.
-- `src/models/research_project.py` — research request and response models.
-- `src/core/config.py` — `DEBUG`, `CORS_ORIGINS`, `ENABLE_RATE_LIMITING`, `MAX_REQUESTS_PER_MINUTE`, `TRUSTED_PROXIES`.
+- `src/api/main.py`: application, middleware registration, router mounts, exception handlers, `docs_url`.
+- `src/api/routes/`: one module per router: `health.py`, `users.py`, `research.py`, `reports.py`, `query_api.py`, `agent_api.py`, `masr_api.py`, `supervisor_api.py`, `talkhier_api.py`, `run_stream.py`, `websocket.py`.
+- `src/api/auth/auth_router.py`: `/api/v1/auth` routes.
+- `src/api/middleware/error_envelope.py`: error envelope, status-to-code map, handlers.
+- `src/api/middleware/idempotency.py`: `Idempotency-Key` handling and stores.
+- `src/api/middleware/rate_limiter.py`: fixed-window limiter and stores.
+- `src/api/client_ip.py`: client address and `TRUSTED_PROXIES`.
+- `src/middleware/auth_middleware.py`: `PUBLIC_ROUTE_ALLOWLIST`, `AuthMiddleware`, `get_current_token`.
+- `src/middleware/tenant_context.py`: `TenantContext`, `get_tenant_context`, `get_tenant_identity`.
+- `src/api/websocket/auth.py`: WebSocket token dependency and project access check.
+- `src/models/research_project.py`: research request and response models.
+- `src/core/config.py`: `DEBUG`, `CORS_ORIGINS`, `ENABLE_RATE_LIMITING`, `MAX_REQUESTS_PER_MINUTE`, `TRUSTED_PROXIES`.

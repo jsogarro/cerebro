@@ -1,6 +1,6 @@
 # Code that is not wired
 
-This page lists code and settings present in the repository that no production path calls. Nothing listed here runs in the default configuration or when any setting is changed, unless a row says otherwise. "Production path" means the processes the repository starts: the API (`uvicorn src.api.main:app`), the `research-cli` script, and the MCP server container. Other reference pages link here instead of repeating detail.
+This page lists code and settings present in the repository that no production path calls. Nothing listed here runs in the default configuration or when any setting is changed, unless a row says otherwise. "Production path" means the processes the repository starts: the API (`uvicorn src.api.main:app`), the `research-cli` script and the MCP server container. Other reference pages link here instead of repeating detail.
 
 ## Summary
 
@@ -21,22 +21,22 @@ This page lists code and settings present in the repository that no production p
 
 ## Multi-tier memory
 
-> **Not wired.** `MultiTierMemorySystem` composes `WorkingMemoryManager`, `EpisodicMemoryManager`, `SemanticMemoryManager`, and `ProceduralMemoryManager`. No production code constructs `MultiTierMemorySystem`, and `app.state.memory_system`, which `get_memory_system` in `src/api/routes/users.py` reads, is never assigned.
+> **Not wired.** `MultiTierMemorySystem` composes `WorkingMemoryManager`, `EpisodicMemoryManager`, `SemanticMemoryManager` and `ProceduralMemoryManager`. No production code constructs `MultiTierMemorySystem`, and `app.state.memory_system`, which `get_memory_system` in `src/api/routes/users.py` reads, is never assigned.
 
 Consequences of the missing assignment:
 
-- `MASRouter.episodic_memory`, `MASRouter.procedural_memory`, and `LLMWorkerAgentBase.procedural_memory` stay `None`. The memory-informed worker adjustment in `MASRouter` and the procedural-memory prompt context in `LLMWorkerAgentBase` return `None` when their manager is `None`, so `MEMORY_INFORMED_ROUTING_ENABLED=true` changes nothing.
+- `MASRouter.episodic_memory`, `MASRouter.procedural_memory` and `LLMWorkerAgentBase.procedural_memory` stay `None`. The memory-informed worker adjustment in `MASRouter` and the procedural-memory prompt context in `LLMWorkerAgentBase` return `None` when their manager is `None`, so `MEMORY_INFORMED_ROUTING_ENABLED=true` changes nothing.
 - The memory purge branch of the user-erasure route never runs, because `get_memory_system` always returns `None`.
 
-Modules: `src/ai_brain/memory/multi_tier_memory.py`, `working_memory.py`, `episodic_memory.py`, `semantic_memory.py`, `procedural_memory.py`, and `src/core/memory_encryption.py` (`MemoryEncryption`, keyed by `MEMORY_ENCRYPTION_KEY`, used only by the working and episodic managers).
+Modules: `src/ai_brain/memory/multi_tier_memory.py`, `working_memory.py`, `episodic_memory.py`, `semantic_memory.py`, `procedural_memory.py` and `src/core/memory_encryption.py` (`MemoryEncryption`, keyed by `MEMORY_ENCRYPTION_KEY`, used only by the working and episodic managers).
 
-Settings: `WORKING_MEMORY_*`, `EPISODIC_MEMORY_*`, `SEMANTIC_MEMORY_*`, `PROCEDURAL_MEMORY_*`, `MEMORY_ENABLE_CROSS_TIER`, `MEMORY_MAX_RECALL_ITEMS`, and `MEMORY_CONSOLIDATION_INTERVAL` are read only by `Settings.get_ai_brain_config`, whose single caller reads only its `providers` entry. `MEMORY_INFORMED_ROUTING_ENABLED` (default `false`), `MEMORY_ROUTING_MAX_WORKER_ADJUST`, `MEMORY_ROUTING_FRESHNESS_DAYS`, and `MEMORY_PROMPT_MAX_PROCEDURES` are read, but only the memory paths above use them.
+Settings: `WORKING_MEMORY_*`, `EPISODIC_MEMORY_*`, `SEMANTIC_MEMORY_*`, `PROCEDURAL_MEMORY_*`, `MEMORY_ENABLE_CROSS_TIER`, `MEMORY_MAX_RECALL_ITEMS` and `MEMORY_CONSOLIDATION_INTERVAL` are read only by `Settings.get_ai_brain_config`, whose single caller reads only its `providers` entry. `MEMORY_INFORMED_ROUTING_ENABLED` (default `false`), `MEMORY_ROUTING_MAX_WORKER_ADJUST`, `MEMORY_ROUTING_FRESHNESS_DAYS` and `MEMORY_PROMPT_MAX_PROCEDURES` are read, but only the memory paths above use them.
 
 Tests that exercise it: `tests/test_memory_architecture_ttl.py`, `tests/test_context_compaction_telemetry.py`, `tests/test_pii_privacy.py`.
 
 ## A/B experimentation framework
 
-> **Not wired.** `src/ai_brain/experimentation/` holds an experiment manager, a registry, statistical analyzers, a dashboard, an optimizer, and integrations for MASR, the API, and the agent framework. Nothing on a production path imports them. The exceptions are `core/adaptive_allocation_engine.py` and, through it, `MultiBanditOptimizer` and `BanditAlgorithm` in `statistical/enhanced_statistical_engine.py`: `MASRouter` builds an `AdaptiveAllocationEngine` only when `ADAPTIVE_ROUTING_ENABLED` is true, and the setting defaults to `false`. See [MASR routing](06-masr-routing.md).
+> **Not wired.** `src/ai_brain/experimentation/` holds an experiment manager, a registry, statistical analyzers, a dashboard, an optimizer and integrations for MASR, the API and the agent framework. Nothing on a production path imports them. The exceptions are `core/adaptive_allocation_engine.py` and, through it, `MultiBanditOptimizer` and `BanditAlgorithm` in `statistical/enhanced_statistical_engine.py`: `MASRouter` builds an `AdaptiveAllocationEngine` only when `ADAPTIVE_ROUTING_ENABLED` is true, and the setting defaults to `false`. See [MASR routing](06-masr-routing.md).
 
 Not wired:
 
@@ -55,7 +55,7 @@ Not wired:
 
 The `eval/` subpackage (`adaptive_routing_eval.py`, `adaptive_routing_promotion.py`) is imported only by `scripts/run_adaptive_routing_eval.py` and `scripts/evaluate_adaptive_routing_promotion.py`.
 
-The five tables `experiments`, `experiment_variants`, `experiment_assignments`, `experiment_results`, and `experiment_analyses` are defined in `src/models/db/experiment.py` and created by Alembic migrations. No repository and no route reads or writes them.
+The five tables `experiments`, `experiment_variants`, `experiment_assignments`, `experiment_results` and `experiment_analyses` are defined in `src/models/db/experiment.py` and created by Alembic migrations. No repository and no route reads or writes them.
 
 Tests that exercise it: `tests/test_ab_testing_integration.py`, `tests/test_ab_testing_math.py`, `tests/test_ab_testing_optimizer_integration.py`, `tests/test_ab_testing_dashboard.py`, `tests/unit/ai_brain/experimentation/test_continuous_beta_update.py`.
 
@@ -63,11 +63,11 @@ Tests that exercise it: `tests/test_ab_testing_integration.py`, `tests/test_ab_t
 
 > **Not wired.** `SupervisionFeedbackLearner` in `src/ai_brain/learning/supervision_feedback.py` records execution feedback and recommends routing strategies. `MASRRoutingService.__init__` assigns one to `self.feedback_learner`, and no code calls a method on it.
 
-The `src/improvement/` package is listed under [Stub packages](#stub-packages). `SELF_IMPROVEMENT_REFLECTION_FREQUENCY`, `SELF_IMPROVEMENT_PERFORMANCE_THRESHOLD`, `SELF_IMPROVEMENT_ENABLE_PROMPT_OPTIMIZATION`, `FINE_TUNING_ENABLED`, `FINE_TUNING_MIN_EXAMPLES`, `FINE_TUNING_QUALITY_THRESHOLD`, and `FINE_TUNING_AUTO_TRIGGER` are read only by `Settings.get_ai_brain_config`.
+The `src/improvement/` package is listed under [Stub packages](#stub-packages). `SELF_IMPROVEMENT_REFLECTION_FREQUENCY`, `SELF_IMPROVEMENT_PERFORMANCE_THRESHOLD`, `SELF_IMPROVEMENT_ENABLE_PROMPT_OPTIMIZATION`, `FINE_TUNING_ENABLED`, `FINE_TUNING_MIN_EXAMPLES`, `FINE_TUNING_QUALITY_THRESHOLD` and `FINE_TUNING_AUTO_TRIGGER` are read only by `Settings.get_ai_brain_config`.
 
 ## Model configuration manager
 
-> **Not wired.** `ModelConfigManager` in `src/ai_brain/config/model_config_manager.py` loads `configs/models/base.yaml` and an environment file (`development.yaml` or `production.yaml`). It is constructed only by `ConfigurationIntegrationService` (`integration_service.py`) and by the module-level `get_model_config_manager`, and no production code calls either. `MASRouter`, `CostOptimizer`, and the providers accept an optional `model_config_manager` argument that production code never passes, so the YAML files are never loaded.
+> **Not wired.** `ModelConfigManager` in `src/ai_brain/config/model_config_manager.py` loads `configs/models/base.yaml` and an environment file (`development.yaml` or `production.yaml`). It is constructed only by `ConfigurationIntegrationService` (`integration_service.py`) and by the module-level `get_model_config_manager`, and no production code calls either. `MASRouter`, `CostOptimizer` and the providers accept an optional `model_config_manager` argument that production code never passes, so the YAML files are never loaded.
 
 Other modules in the group: `legacy_adapter.py` (`LegacyConfigurationAdapter`, `LegacyProviderWrapper`), which nothing imports. `model_schemas.py` is in use: `ModelTier` and `RoutingStrategy` are imported by `MASRRoutingService` and `src/models/masr_api_models.py`. `supervisor_config.py` is imported by `MASRRoutingService`, which stores a `SupervisorConfigurationManager` in `self.config_manager`; nothing reads that attribute.
 
@@ -75,19 +75,19 @@ Other modules in the group: `legacy_adapter.py` (`LegacyConfigurationAdapter`, `
 
 > **Not wired.** `PromptManager` in `src/prompts/manager.py` loads YAML templates from `src/prompts/templates/` (`agents`, `refinement`, `supervisors`, `workers`). The only production reference is `BaseSupervisor.coordinate_refinement_round`, which calls `get_prompt_manager()` with no configuration. That call raises `ValueError` because nothing initialises the manager, and no production code calls `coordinate_refinement_round`.
 
-`src/prompts/versioning.py` (`PromptVersionManager`) is imported by `UnifiedExperimentManager`, which is itself not wired, and re-exported by `src/prompts/__init__.py`, which loads whenever `src.prompts.manager` is imported. No code constructs or calls it. The prompts the agents send come from Python modules under `src/services/prompts/`, imported by `src/agents/base.py`, `src/agents/literature_review_agent.py`, `src/agents/comparative_analysis_agent.py`, and `src/services/gemini_service.py`. Prompt identity pinning is part of the tool boundary; see [tool boundary and evidence](09-tool-boundary-and-evidence.md).
+`src/prompts/versioning.py` (`PromptVersionManager`) is imported by `UnifiedExperimentManager`, which is itself not wired, and re-exported by `src/prompts/__init__.py`, which loads whenever `src.prompts.manager` is imported. No code constructs or calls it. The prompts the agents send come from Python modules under `src/services/prompts/`, imported by `src/agents/base.py`, `src/agents/literature_review_agent.py`, `src/agents/comparative_analysis_agent.py` and `src/services/gemini_service.py`. Prompt identity pinning is part of the tool boundary; see [tool boundary and evidence](09-tool-boundary-and-evidence.md).
 
 Tests that exercise it: `tests/test_prompt_safety.py`, `tests/test_cache_ttl_expiry.py`.
 
 ## Reliability service registry
 
-> **Not wired.** `src/reliability/service_registry.py` defines `ServiceRegistry`, `ServiceDiscovery`, `LoadBalancer`, and the helpers `initialize_service_registry`, `get_service_registry`, and `get_service_discovery`. `src/reliability/__init__.py` re-exports them, and no code constructs or calls any of them.
+> **Not wired.** `src/reliability/service_registry.py` defines `ServiceRegistry`, `ServiceDiscovery`, `LoadBalancer` and the helpers `initialize_service_registry`, `get_service_registry` and `get_service_discovery`. `src/reliability/__init__.py` re-exports them, and no code constructs or calls any of them.
 
 The one part of `src/reliability/` in production use is `retry_strategies.CircuitBreaker`, which `MASRouter` uses as its routing circuit breaker.
 
 ## Stub packages
 
-> **Not wired.** These packages hold small in-memory dataclass modules. Nothing under `src/`, `tests/`, `evals/`, or `scripts/` imports them.
+> **Not wired.** These packages hold small in-memory dataclass modules. Nothing under `src/`, `tests/`, `evals/` or `scripts/` imports them.
 
 | Package | Contents |
 |---|---|
@@ -99,7 +99,7 @@ The one part of `src/reliability/` in production use is `retry_strategies.Circui
 
 ## Citation binding and PDF text extraction
 
-> **Not wired.** These modules bind claim spans to citations rendered from held metadata, validate citations against a registry corpus, and extract text from PDF snapshots. Only their own unit tests import them.
+> **Not wired.** These modules bind claim spans to citations rendered from held metadata, validate citations against a registry corpus and extract text from PDF snapshots. Only their own unit tests import them.
 
 - `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`
 - `src/core/contracts/citation.py`
@@ -131,28 +131,28 @@ Tests that exercise them live in `tests/unit/core/claims/` and `tests/unit/core/
 
 - `DirectExecutionService.max_domain_parallelism` is assigned `4` in `__init__` and read nowhere.
 - `DirectExecutionService._fast_path_passes_quality` is a method that nothing calls.
-- `DirectExecutionService._fast_path_provider` is initialised to `None`, never assigned a provider, and only closed and reset in `close`.
+- `DirectExecutionService._fast_path_provider` is initialised to `None`, never assigned a provider and only closed and reset in `close`.
 - `Settings.MULTI_DOMAIN_MERGE_STRATEGY` (default `concat`) and `Settings.MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT` (default 4000) are read by no code under `src/`.
 
 ## Settings with no effect
 
-Many `Settings` fields are declared and read by no code that acts on them, apart from `get_ai_brain_config`. The full list, split from the settings that code does read, is in [configuration](02-configuration.md).
+102 of the 163 `Settings` fields are declared and read by no code that acts on them, apart from `get_ai_brain_config`. The full list, split from the settings that code does read, is in [configuration](02-configuration.md).
 
 ## Unbacked web pages
 
-The web workbench pages for workflows, runs, run detail, and memory call API routes that are not mounted, and its dashboard, QA, costs, and benchmarks pages show fixed values. The page-by-page table is in [CLI and web clients](13-cli-and-web-clients.md).
+The web workbench pages for workflows, runs, run detail and memory call API routes that are not mounted and its dashboard, QA, costs and benchmarks pages show fixed values. The page-by-page table is in [CLI and web clients](13-cli-and-web-clients.md).
 
 ## Source map
 
-- `src/ai_brain/memory/` — the four memory managers and `MultiTierMemorySystem`
-- `src/core/memory_encryption.py` — `MemoryEncryption`
-- `src/ai_brain/experimentation/` — experiment framework; `core/adaptive_allocation_engine.py` is the part `MASRouter` uses
-- `src/models/db/experiment.py` — the five experiment tables
-- `src/ai_brain/learning/supervision_feedback.py` — `SupervisionFeedbackLearner`
-- `src/ai_brain/config/`, `configs/models/` — model configuration manager and YAML files
-- `src/prompts/` — `PromptManager`, versioning, templates
-- `src/reliability/` — `service_registry.py` (not wired) and `retry_strategies.py` (used)
-- `src/benchmarks/`, `src/costs/`, `src/improvement/`, `src/memory/`, `src/research_platform/` — stub packages
-- `src/core/claims/`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py` — citation and PDF text modules
-- `tests/architecture/test_module_reachability.py` — import-graph test that lists the modules no entry point reaches
-- `src/api/services/direct_execution_service.py` — the dead execution attributes
+- `src/ai_brain/memory/`: the four memory managers and `MultiTierMemorySystem`
+- `src/core/memory_encryption.py`: `MemoryEncryption`
+- `src/ai_brain/experimentation/`: experiment framework; `core/adaptive_allocation_engine.py` is the part `MASRouter` uses
+- `src/models/db/experiment.py`: the five experiment tables
+- `src/ai_brain/learning/supervision_feedback.py`: `SupervisionFeedbackLearner`
+- `src/ai_brain/config/`, `configs/models/`: model configuration manager and YAML files
+- `src/prompts/`: `PromptManager`, versioning, templates
+- `src/reliability/`: `service_registry.py` (not wired) and `retry_strategies.py` (used)
+- `src/benchmarks/`, `src/costs/`, `src/improvement/`, `src/memory/`, `src/research_platform/`: stub packages
+- `src/core/claims/`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py`: citation and PDF text modules
+- `tests/architecture/test_module_reachability.py`: import-graph test that lists the modules no entry point reaches
+- `src/api/services/direct_execution_service.py`: the dead execution attributes

@@ -1,6 +1,6 @@
 # Reports
 
-The reports subsystem renders structured research reports into HTML, Markdown, JSON, PDF, LaTeX and DOCX, stores them per tenant, and serves them through `/api/v1/reports`. A request creates a database row, queues a background task and returns immediately; the task builds the report and stores its formats.
+The reports subsystem renders structured research reports into HTML, Markdown, JSON, PDF, LaTeX and DOCX, stores them per tenant and serves them through `/api/v1/reports`. A request creates a database row, queues a background task and returns immediately; the task builds the report and stores its formats.
 
 ## Summary
 
@@ -36,8 +36,8 @@ Details:
 
 - **Create.** The route validates the user and project, builds a `ReportConfiguration`, inserts the report row with `generation_status="pending"`, reloads it, queues `_generate_report_task` as a background task and returns the row. The response `id` is the id of that row. Every `ReportResponse` carries `id`, `title`, `query`, `report_type`, `generation_status`, `formats_generated`, `word_count`, `page_count`, `quality_score`, `confidence_score`, `created_at`, `generation_time_seconds` and `download_urls`.
 - **List.** Query parameters are `user_id`, `status_filter`, `page` (default 1), `page_size` (default 20, at most 100) and `report_type`. Results are newest first, `total_count` comes from a count query over the same filter, and `has_more` is true when `offset + len(reports) < total_count`. The `report_type` parameter is declared but not applied to the query.
-- **Search.** The body takes `search_term`, optional `user_id`, `report_type`, `min_quality_score` (0 to 1), `limit` (default 20, at most 100) and `offset` (default 0). It matches `title`, `query` and `content_preview` case-insensitively, returns only reports with status `completed`, and orders newest first.
-- **Statistics.** Query parameters are `user_id` and `days` (default 30, 1 to 365). The response holds `total_reports`, `status_counts`, `type_counts`, the average quality score, confidence score, generation time and word count, `total_access_count`, and `storage_statistics` with `total_storage_mb` and `total_files`.
+- **Search.** The body takes `search_term`, optional `user_id`, `report_type`, `min_quality_score` (0 to 1), `limit` (default 20, at most 100) and `offset` (default 0). It matches `title`, `query` and `content_preview` case-insensitively, returns only reports with status `completed` and orders newest first.
+- **Statistics.** Query parameters are `user_id` and `days` (default 30, 1 to 365). The response holds `total_reports`, `status_counts`, `type_counts`, the average quality score, confidence score, generation time and word count, `total_access_count` and `storage_statistics` with `total_storage_mb` and `total_files`.
 - **Download.** The `format_type` path segment is matched against stored formats. The response sets `Content-Disposition: attachment; filename=report_<id>.<extension>` and the stored MIME type, and updates the report's access statistics. Content is read from the database columns `content_text` or `content_binary`; the file on disk is read only when both are empty.
 - **Integrity.** For each stored format the check confirms the file exists and, when a hash is stored, that the SHA-256 of the content matches. The result has `status` (`ok`, `degraded` or `failed`), `formats_checked`, `formats_valid`, `formats_invalid`, `missing_files` and `errors`. The existence check runs only when a format has a `file_path`, a missing file skips the hash check, and `status` is `failed` whenever `formats_valid` is 0, including for a report stored with no formats (for example `save_to_storage=false`). An unknown report returns the dictionary `{"status": "error", "message": "Report not found"}` with HTTP 200.
 - **Delete.** The query parameter `delete_files` (default true) removes the report's storage directory. The database row is hard-deleted and its `report_formats` rows are removed with it.
@@ -65,7 +65,7 @@ The first entry of `formats` becomes the configuration's `format`. `include_meth
 
 ## Data source
 
-> **Not wired.** Reports generated with a `project_id` use placeholder content. The route always passes the caller's validated project id into `ReportGenerationRequest`; `ReportGenerator._extract_input_data` takes the `project_id` branch first, and `_load_project_data` is a mock that returns a fixed title (`Research Project <id>`), the query `Sample research question`, and empty sources, findings and citations. `workflow_data` is used only when no `project_id` is supplied.
+> **Not wired.** Reports generated with a `project_id` use placeholder content. The route always passes the caller's validated project id into `ReportGenerationRequest`; `ReportGenerator._extract_input_data` takes the `project_id` branch first, and `_load_project_data` is a mock that returns a fixed title (`Research Project <id>`), the query `Sample research question` and empty sources, findings and citations. `workflow_data` is used only when no `project_id` is supplied.
 
 Without a `project_id`, the route merges the caller's `workflow_data` with `title`, `query` and `domains` from the request. `_validate_workflow_data` requires `title` and `query`, and fills `aggregated_results`, `quality_report` and `metadata` with empty defaults when absent. Section content comes from the keys of `workflow_data["aggregated_results"]`: `sources`, `findings`, `insights`, `citations`, `recommendations`, `methodologies`, `comparisons`, `conflict_resolutions`, `limitations`, `metrics` and `confidence_score`. No route fills these from stored research results.
 
@@ -75,7 +75,7 @@ The background task `_generate_report_task` runs after the response is sent:
 
 1. It sets the row to `generating`.
 2. `ReportGenerator._extract_input_data` normalises the input (see above).
-3. `ReportGenerator._build_report_structure` (through `ReportStructureBuilder`) creates a `Report`: sections for the report type, citations, visualization specifications when `include_visualizations` is true, metadata, an executive summary when `include_executive_summary` is true, and a quality check. The quality check logs warnings for a word count or source count below the per-type minimum and for missing citations; it never fails a report.
+3. `ReportGenerator._build_report_structure` (through `ReportStructureBuilder`) creates a `Report`: sections for the report type, citations, visualization specifications when `include_visualizations` is true, metadata, an executive summary when `include_executive_summary` is true and a quality check. The quality check logs warnings for a word count or source count below the per-type minimum and for missing citations; it never fails a report.
 4. `ReportOutputGenerator.generate_formats` renders each requested format. HTML uses `TemplateRenderer`; Markdown and JSON are built directly; PDF renders the HTML through WeasyPrint; LaTeX and DOCX use their exporters. When more than one format is requested and `PARALLEL_REPORT_GENERATION` is true the formats run concurrently.
 5. With `save_to_storage`, `ReportStorageService.store_report` writes each format and marks the row `completed`; otherwise the task updates the row's metadata and marks it `completed` with no formats. The task then commits.
 
@@ -91,18 +91,18 @@ Formats:
 | `markdown` | `ReportOutputGenerator.generate_markdown` | title, summary, sections, references |
 | `json` | `ReportOutputGenerator.generate_json` | the serialised `Report` |
 | `pdf` | `PDFExporter` (WeasyPrint) | needs `weasyprint`; built from the HTML output |
-| `latex` | `LaTeXExporter` | returns `.tex` source; no PDF compilation is requested, and the exporters read neither `pdf_settings` nor `latex_settings` from the configuration. The HTML template `base.html.j2` does read `config.pdf_settings` (font, size, margins), and the PDF is built from that HTML, so the defaults of `pdf_settings` affect PDF output; the request model cannot set them |
+| `latex` | `LaTeXExporter` | returns `.tex` source; no PDF compilation is requested, and the exporters read neither `pdf_settings` nor `latex_settings` from the configuration. The HTML template `base.html.j2` does read `config.pdf_settings` (font, size, margins) and the PDF is built from that HTML, so the defaults of `pdf_settings` affect PDF output; the request model cannot set them |
 | `docx` | `DOCXExporter` (`python-docx`) | |
 
 ### Templates
 
-`TemplateRenderer` builds a Jinja environment over `REPORT_TEMPLATE_PATH` with `FileSystemLoader`, HTML and XML autoescaping, `trim_blocks` and `lstrip_blocks`, and registers filters (`markdown`, `truncate_words`, `format_number`, `format_percentage`, `strip_markdown`, `format_citation_count`, `capitalize_words`, `extract_first_sentence`, `format_duration`) and helper functions. The directory `src/templates/reports/` holds four templates: `base.html.j2`, `comprehensive_report.html.j2`, `executive_summary.html.j2` and `academic_paper.html.j2`. The report types `literature_review`, `methodology` and `synthesis` name templates that do not exist; the renderer then uses `base.html.j2`. When even the base template is missing, `generate_html` logs a warning and returns the basic HTML page. With `ENABLE_TEMPLATE_CACHE` true, loaded templates are cached per renderer instance with no expiry.
+`TemplateRenderer` builds a Jinja environment over `REPORT_TEMPLATE_PATH` with `FileSystemLoader`, HTML and XML autoescaping, `trim_blocks` and `lstrip_blocks` and registers filters (`markdown`, `truncate_words`, `format_number`, `format_percentage`, `strip_markdown`, `format_citation_count`, `capitalize_words`, `extract_first_sentence`, `format_duration`) and helper functions. The directory `src/templates/reports/` holds four templates: `base.html.j2`, `comprehensive_report.html.j2`, `executive_summary.html.j2` and `academic_paper.html.j2`. The report types `literature_review`, `methodology` and `synthesis` name templates that do not exist; the renderer then uses `base.html.j2`. When even the base template is missing, `generate_html` logs a warning and returns the basic HTML page. With `ENABLE_TEMPLATE_CACHE` true, loaded templates are cached per renderer instance with no expiry.
 
 > **Not wired.** `VisualizationGenerator` can produce charts, but no production module imports it. The generator records visualization specifications only (a source-by-year bar chart when sources span more than one year, and a domain pie chart when more than one domain is given), and `base.html.j2` renders each as a placeholder block with the title and type. No chart image is produced.
 
 ## Configuration
 
-Report behaviour is set by `ReportSettings` variables such as `REPORT_STORAGE_PATH` (default `./reports`), `REPORT_TEMPLATE_PATH`, `ENABLE_PDF_GENERATION`, `ENABLE_LATEX_GENERATION` and `PARALLEL_REPORT_GENERATION`. [Configuration](02-configuration.md) lists every variable with its default and whether code reads it. Each request constructs a `ReportGenerator`, which creates the storage directory if it is missing.
+The `ReportSettings` variables (for example `REPORT_STORAGE_PATH`, default `./reports`) are listed in [configuration](02-configuration.md). Each request constructs a `ReportGenerator`, which creates the storage directory if it is missing.
 
 ## Persistence
 
@@ -117,16 +117,16 @@ Stored files are written to `<REPORT_STORAGE_PATH>/<report_id>/report.<extension
 
 ## Source map
 
-- `src/api/routes/reports.py` — routes, request and response models, `_generate_report_task`
-- `src/services/report_generator.py` — `ReportGenerator`, input normalisation, mock project loader
-- `src/services/report_structure_builder.py` — sections, citations, visualization specifications, quality check
-- `src/services/report_output_generator.py` — per-format rendering and the basic HTML fallback
-- `src/services/template_renderer.py` — Jinja environment, filters and template selection
-- `src/services/exporters/` — PDF, LaTeX and DOCX exporters
-- `src/services/report_storage.py` — file and database storage, search, statistics, integrity, deletion
-- `src/services/report_config.py` — `ReportSettings` and the type, format and quality tables
-- `src/services/visualization_generator.py` — chart generator with no production importer
-- `src/templates/reports/` — Jinja templates
-- `src/models/report.py` — `Report`, `ReportConfiguration`, request models and enums
-- `src/models/db/generated_report.py` — `GeneratedReport` and `ReportFormat` tables
-- `src/repositories/report_repository.py` — tenant-scoped report and format queries
+- `src/api/routes/reports.py`: routes, request and response models, `_generate_report_task`
+- `src/services/report_generator.py`: `ReportGenerator`, input normalisation, mock project loader
+- `src/services/report_structure_builder.py`: sections, citations, visualization specifications, quality check
+- `src/services/report_output_generator.py`: per-format rendering and the basic HTML fallback
+- `src/services/template_renderer.py`: Jinja environment, filters and template selection
+- `src/services/exporters/`: PDF, LaTeX and DOCX exporters
+- `src/services/report_storage.py`: file and database storage, search, statistics, integrity, deletion
+- `src/services/report_config.py`: `ReportSettings` and the type, format and quality tables
+- `src/services/visualization_generator.py`: chart generator with no production importer
+- `src/templates/reports/`: Jinja templates
+- `src/models/report.py`: `Report`, `ReportConfiguration`, request models and enums
+- `src/models/db/generated_report.py`: `GeneratedReport` and `ReportFormat` tables
+- `src/repositories/report_repository.py`: tenant-scoped report and format queries

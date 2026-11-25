@@ -1,6 +1,6 @@
 # LLM providers
 
-Language-model calls go through two layers. `GeminiService` is the default client that workers, supervisors and the TalkHier services call directly. The provider package (`BaseProvider` and a `ModelRouter`) serves execution-plan routes and the optional multi-provider route.
+Language-model calls go through two layers. `GeminiService` is the default client that workers, supervisors and the TalkHier services (the supervisors' multi-round messaging) call directly. The provider package (`BaseProvider` and a `ModelRouter`) serves execution-plan routes and the optional multi-provider route.
 
 ## Summary
 
@@ -79,7 +79,7 @@ Behaviour specific to each provider:
 1. **Plan-backed task.** When `task.input_data["provider_model_policy"]` is present (attached by `ExecutionPlanTopologyExecutor` for a compiled execution plan), `_build_plan_route` builds a `ModelRouter` containing only the plan's primary provider. Its configuration is `settings.get_ai_brain_config()["providers"][<provider>]` with `enabled` forced to true, with `enable_fallback=False`. The routing decision names the primary provider and model and lists no fallbacks. A failed response or an exception raises `PlanProviderUnavailableError`; the worker never substitutes another provider.
 2. **Multi-provider route.** Otherwise `_build_legacy_openrouter_route` applies.
 
-   > **Off by default.** Non-plan worker calls go to a `ModelRouter` that holds an OpenRouter provider, with models picked by tier. Enable with `MULTI_PROVIDER_ROUTING_ENABLED=true`. It also needs `OPENROUTER_API_KEY`; `OPENROUTER_ENDPOINT` and `OPENROUTER_TIER_MAPPING` set the URL and the tier map.
+   > **Off by default.** With `MULTI_PROVIDER_ROUTING_ENABLED=true`, non-plan worker calls go to a `ModelRouter` that holds an OpenRouter provider, with models picked by tier. It also needs `OPENROUTER_API_KEY`; `OPENROUTER_ENDPOINT` and `OPENROUTER_TIER_MAPPING` set the URL and the tier map.
 
    When the route returns a failed response or raises, the worker logs a warning and falls back to `GeminiService`.
 3. **Default.** With no policy and the flag off, the worker calls `GeminiService` directly (`_generate_with_gemini`, or `generate_structured_content` for structured output).
@@ -102,17 +102,17 @@ See [security, audit and observability](12-security-audit-observability.md) for 
 
 ## Source map
 
-- `src/services/gemini_service.py` — `GeminiService` generation, structured output, research helpers, cache hooks
-- `src/services/gemini_config.py` — `GeminiConfig` defaults and `from_env`
-- `src/services/gemini_limiter.py` — `RateLimiter` token bucket
-- `src/services/parsers/` — response parsers; `json_parser.py` is the one used in production
-- `src/services/prompts/` — prompt builders used by `GeminiService` and agents
-- `src/ai_brain/providers/base_provider.py` — `BaseProvider`, request, response and health types
-- `src/ai_brain/providers/model_router.py` — `ModelRouter`, provider registry, health caching
-- `src/ai_brain/providers/gemini_provider.py`, `deepseek_provider.py`, `llama_provider.py`, `openrouter_provider.py` — provider implementations
-- `src/api/services/component_catalog.py` — provider class registration
-- `src/core/kernel/component_keys.py` — `PROVIDER_KEYS`
-- `src/agents/llm_worker_base.py` — route selection and budget-metered generation
-- `src/core/pii_redactor.py` — `redact_pii`
-- `src/core/observability.py` — `record_llm_call` and LLM metrics
-- `src/core/tracing.py` — Langfuse client and provider-call spans
+- `src/services/gemini_service.py`: `GeminiService` generation, structured output, research helpers, cache hooks
+- `src/services/gemini_config.py`: `GeminiConfig` defaults and `from_env`
+- `src/services/gemini_limiter.py`: `RateLimiter` token bucket
+- `src/services/parsers/`: response parsers; `json_parser.py` is the one used in production
+- `src/services/prompts/`: prompt builders used by `GeminiService` and agents
+- `src/ai_brain/providers/base_provider.py`: `BaseProvider`, request, response and health types
+- `src/ai_brain/providers/model_router.py`: `ModelRouter`, provider registry, health caching
+- `src/ai_brain/providers/gemini_provider.py`, `deepseek_provider.py`, `llama_provider.py`, `openrouter_provider.py`: provider implementations
+- `src/api/services/component_catalog.py`: provider class registration
+- `src/core/kernel/component_keys.py`: `PROVIDER_KEYS`
+- `src/agents/llm_worker_base.py`: route selection and budget-metered generation
+- `src/core/pii_redactor.py`: `redact_pii`
+- `src/core/observability.py`: `record_llm_call` and LLM metrics
+- `src/core/tracing.py`: Langfuse client and provider-call spans

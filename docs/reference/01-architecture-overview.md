@@ -1,6 +1,6 @@
 # Architecture overview
 
-Cerebro is a FastAPI application that accepts research queries, routes each one through the MASR router, runs the routed work through in-process workers, and records each run in Postgres. This page describes the processes, the application assembly, the request path, the execution paths and the shared registry and contracts that the other reference pages build on.
+Cerebro is a FastAPI application that accepts research queries, routes each one through MASR, the Multi-Agent System Router ([MASR routing](06-masr-routing.md)), runs the routed work through in-process workers and records each run in Postgres. This page describes the processes, the application assembly, the request path, the execution paths and the shared registry and contracts that the other reference pages build on.
 
 ## Summary
 
@@ -11,7 +11,7 @@ Cerebro is a FastAPI application that accepts research queries, routes each one 
 | Research execution | Active | `POST /api/v1/query/research` | `src/api/services/direct_execution_service.py` (`DirectExecutionService.start_research_execution`) |
 | MASR routing | Active | `MASRouter.route`, called by `DirectExecutionService._propose_routing` | `src/ai_brain/router/masr.py` (`MASRouter`) |
 | Agents and supervisors | Active | `/api/v1/agents`, `/api/v1/supervisors` | `src/api/routes/agent_api.py`, `src/api/routes/supervisor_api.py` |
-| TalkHier and supervisor coordination | Active | `/api/v1/talkhier`, `/api/v1/supervisors` | `src/api/services/talkhier_session_service.py` (`TalkHierSessionService`), `src/api/services/supervisor_coordination_service.py` (`SupervisorCoordinationService`) |
+| TalkHier (multi-round supervisor messaging) and supervisor coordination | Active | `/api/v1/talkhier`, `/api/v1/supervisors` | `src/api/services/talkhier_session_service.py` (`TalkHierSessionService`), `src/api/services/supervisor_coordination_service.py` (`SupervisorCoordinationService`) |
 | Durable runs and events | Active | run admission in `DirectExecutionService._admit_run` | `src/models/db/run_lifecycle.py`, `src/models/db/run_event.py`, `src/api/services/outbox_relay.py` (`OutboxRelay`) |
 | Realtime delivery | Active | `/ws`, `/ws/projects/{project_id}`, `/ws/cli/{project_id}`, `/ws/runs/{run_id}`, `GET /api/v1/runs/{run_id}/events` | `src/api/routes/websocket.py`, `src/api/routes/run_stream.py` |
 | Tool boundary: in-process tools | Active | `ToolRegistry` used by `LLMWorkerAgentBase` | `src/agents/tools/registry.py` (`ToolRegistry`), `src/core/tools/boundary.py` (`ToolBoundary`) |
@@ -30,9 +30,7 @@ Cerebro is a FastAPI application that accepts research queries, routes each one 
 | Legacy standalone MASR service | Active (optional profile) | `docker compose --profile legacy-masr-service up masr-router` | `docker-compose.yml` (`masr-router`), `docker/Dockerfile.masr` |
 | Code that is not wired | Not wired | none | see [not wired](15-not-wired.md) |
 
-Each subsystem has its own reference page; see the [documentation index](../README.md).
-
-Code that exists but has no production caller is listed in [not wired](15-not-wired.md). Two instances that belong to this page are the citation contract module (`src/core/contracts/citation.py`) and the execution-policy fixture mode of `DirectExecutionService`; the second is described in [research execution](05-research-execution.md).
+Subsystems are detailed on their own pages ([documentation index](../README.md)). Code with no production caller is listed in [not wired](15-not-wired.md); two instances belong here: the citation contract module (`src/core/contracts/citation.py`) and the execution-policy fixture mode of `DirectExecutionService`; the second is described in [research execution](05-research-execution.md).
 
 ## Processes
 
@@ -44,7 +42,7 @@ The `docker-compose.yml` stack runs these services.
 | `postgres` | `postgres:16-alpine`, initialised from `docker/init.sql`. |
 | `redis` | `redis:7-alpine` with `--appendonly yes`. The API's idempotency store and rate-limit store connect to it through `REDIS_URL`. |
 | `web` | The React workbench built from `cerebro/web`, served by its own nginx on container port 8080. |
-| `nginx` | A reverse proxy built from `docker/nginx/nginx.conf`. It answers `/health` itself, proxies `/api/` and `/ws` to the `api` upstream, serves `/docs` from its own static root, and proxies every other path to the `web` upstream. |
+| `nginx` | A reverse proxy built from `docker/nginx/nginx.conf`. It answers `/health` itself, proxies `/api/` and `/ws` to the `api` upstream, serves `/docs` from its own static root and proxies every other path to the `web` upstream. |
 | `mcp-server` | A Python process that constructs `MCPServer` (`src/mcp/server.py`) and calls `server.mcp.run(transport="http", host="0.0.0.0", port=int(os.environ.get("MCP_PORT", "9000")))`. It depends on `redis`. |
 | `masr-router` | The standalone MASR service from `docker/Dockerfile.masr`, on port 9100. It belongs to the `legacy-masr-service` compose profile and is not started by default. The API process does not call it; the router the API uses is built in-process by `MASRRuntime.create`. |
 | `pgadmin`, `redis-commander` | Development tools in the `dev-tools` profile. |
@@ -64,7 +62,7 @@ See the [deployment guide](../deployment-monitoring-guide.md) for how the servic
 
 ## Application assembly
 
-`src/api/main.py` (`lifespan`) assembles the application. Steps run in this order.
+`src/api/main.py` (`lifespan`) assembles the application. `lifespan` runs these steps in order.
 
 1. Registers the JWT service for closing at shutdown (`close_jwt_service`).
 2. Builds the MASR runtime with `MASRRuntime.create(settings)` and stores it on `app.state.masr_runtime`.
@@ -84,7 +82,7 @@ See the [deployment guide](../deployment-monitoring-guide.md) for how the servic
 16. Creates `MASRRoutingService`, `TalkHierSessionService` and `SupervisorCoordinationService` and stores them on `app.state` as `masr_routing_service`, `talkhier_session_service` and `supervisor_coordination_service`.
 17. When `LANGFUSE_ENABLED` is true, creates the Langfuse client on a worker thread so the first request does not pay for it.
 
-When the database is unavailable at startup, the service runs with no session factory: runs are held in process memory only, no durable rows or events are written, the outbox relay does not start, and `execution_authority_resolver` is `None`, so every request that starts a research execution is refused with `EXECUTION_AUTHORITY_UNAVAILABLE` (or `EXECUTION_AUTHORITY_REQUIRED` when it carries no authority reference).
+When the database is unavailable at startup, the service runs with no session factory: runs are held in process memory only, no durable rows or events are written, the outbox relay does not start and `execution_authority_resolver` is `None`, so the API refuses every request that starts a research execution with `EXECUTION_AUTHORITY_UNAVAILABLE` (or `EXECUTION_AUTHORITY_REQUIRED` when it carries no authority reference).
 
 On shutdown, `lifespan` first closes `websocket_manager`, then shuts down Langfuse with a 5 second timeout, then closes the resources registered above in reverse order of registration. A failure while closing one resource is logged and does not stop the others (`_close_lifespan_resource`). The lifespan does not call `close_db`.
 
@@ -129,7 +127,7 @@ See [HTTP API](03-http-api.md) for the request and response contracts and [authe
 
 ## Execution paths
 
-**(a) The plan path.** `POST /api/v1/query/research` (and its `/analyze` and `/synthesize` wrappers) call `DirectExecutionService.start_research_execution`; the `/literature`, `/methodology` and `/comparison` wrappers build their request without an `authority_reference`, so their start attempt is refused with `EXECUTION_AUTHORITY_REQUIRED` (see [research execution](05-research-execution.md#entry-points)); `POST /api/v1/research/projects` calls it too, without an `organization_id`, so that start attempt is refused (see [research execution](05-research-execution.md#entry-points)). The service resolves an execution authority binding, asks MASR for a routing proposal (`_propose_routing`), compiles the proposal against the binding with `ExecutionPlanCompiler`, validates the plan with `MASRSupervisorBridge.admit_execution_plan`, admits the run in the database (`_admit_run`) and starts a background task. The task calls `MASRSupervisorBridge.execute_execution_plan`, which delegates to `ExecutionPlanTopologyExecutor`. That executor runs plan-local worker instances directly: it does not consult MASR, supervisors, LangGraph StateGraphs or the verification gate. [Research execution](05-research-execution.md) documents this path step by step.
+**(a) The plan path.** `POST /api/v1/query/research` (and its `/analyze` and `/synthesize` wrappers) call `DirectExecutionService.start_research_execution`; the `/literature`, `/methodology` and `/comparison` wrappers build their request without an `authority_reference`, so their start attempt is refused with `EXECUTION_AUTHORITY_REQUIRED` (see [research execution](05-research-execution.md#entry-points)); `POST /api/v1/research/projects` calls it too, without an `organization_id`, so that start attempt is refused (see [research execution](05-research-execution.md#entry-points)). The service resolves an execution authority binding and asks MASR for a routing proposal (`_propose_routing`). It compiles the proposal against the binding with `ExecutionPlanCompiler`, validates the plan with `MASRSupervisorBridge.admit_execution_plan`, admits the run in the database (`_admit_run`) and starts a background task. The task calls `MASRSupervisorBridge.execute_execution_plan`, which delegates to `ExecutionPlanTopologyExecutor`. That executor runs plan-local worker instances directly: it does not consult MASR, supervisors, LangGraph StateGraphs or the verification gate. [Research execution](05-research-execution.md) documents this path step by step.
 
 ```mermaid
 flowchart TD
@@ -164,13 +162,13 @@ flowchart TD
 | `PROVIDER_KEYS` | `deepseek`, `gemini`, `llama`, `openrouter` |
 | workflow keys | `ROUTED_RESEARCH_WORKFLOW_KEY`, `DIRECT_AGENT_WORKFLOW_KEY`, `AGENT_CHAIN_WORKFLOW_KEY`, `AGENT_MIXTURE_WORKFLOW_KEY`, `COLLABORATION_MODE_WORKFLOW_KEY` |
 
-`build_application_component_registry()` in `src/api/services/component_catalog.py` registers 17 agents, 4 supervisors, 7 domains, 4 providers and 5 workflows, 37 entries in all. Each domain entry maps a domain name to a supervisor name: `finance` and `general` map to `research`, `multimodal` maps to `content`, and `service` maps to `service`. `DirectExecutionService` validates that `SUPERVISOR_KEYS["research"]` resolves and that every registered supervisor is a `BaseSupervisor` subclass (`_validate_supervisor_registry`).
+`build_application_component_registry()` in `src/api/services/component_catalog.py` registers 17 agents, 4 supervisors, 7 domains, 4 providers and 5 workflows, 37 entries in all. Each domain entry maps a domain name to a supervisor name: `finance` and `general` map to `research`, `multimodal` maps to `content` and `service` maps to `service`. `DirectExecutionService` validates that `SUPERVISOR_KEYS["research"]` resolves and that every registered supervisor is a `BaseSupervisor` subclass (`_validate_supervisor_registry`).
 
 `src/api/services/research_kernel.py` wraps the registry in a `ResearchKernel`, whose `execute` delegates to one executor callable. `compose_application_research_kernel` builds the adapter the query and agent routes call; for routed research the adapter resolves `ROUTED_RESEARCH_WORKFLOW_KEY` and calls it, and the registered workflow (`execute_routed_research`) calls `DirectExecutionService.start_research_execution`. The kernel package also holds `BoundedTaskRunner` (`src/core/kernel/bounded_concurrency.py`), used by `BaseSupervisor.execute_workers_parallel` and by the agent mixture path of `AgentExecutionService`.
 
 ## Contracts package
 
-`src/core/contracts/` holds the frozen Pydantic records that the runtime, the repositories and the database models share. The runtime imports it: `src/api/services/direct_execution_service.py` imports `Run`, `Task`, `Attempt`, `RunStatus` and the artifact and capability contracts, and `src/api/services/outbox_relay.py` imports the event contracts.
+`src/core/contracts/` holds the frozen Pydantic records that the runtime, the repositories and the database models share. The runtime imports it: `src/api/services/direct_execution_service.py` imports `Run`, `Task`, `Attempt`, `RunStatus` and the artifact and capability contracts and `src/api/services/outbox_relay.py` imports the event contracts.
 
 | Module | Contents | Detailed on |
 |---|---|---|
@@ -192,19 +190,19 @@ flowchart TD
 
 ## LangGraph usage
 
-`langgraph>=0.2.0` is declared in `pyproject.toml`. Modules under `src/agents/supervisors/` are the only ones in `src` that import it; each concrete supervisor (`ResearchSupervisor`, `ContentSupervisor`, `AnalyticsSupervisor`, `FinanceSupervisor`) builds its own `StateGraph` in `_build_workflow_graph`, and `BaseSupervisor.execute` runs it with `ainvoke`. The plan path described above does not use LangGraph.
+`langgraph>=0.2.0` is declared in `pyproject.toml`. Modules under `src/agents/supervisors/` are the only ones in `src` that import it; each concrete supervisor (`ResearchSupervisor`, `ContentSupervisor`, `AnalyticsSupervisor`, `FinanceSupervisor`) builds its own `StateGraph` in `_build_workflow_graph` and `BaseSupervisor.execute` runs it with `ainvoke`. The plan path described above does not use LangGraph.
 
 ## Source map
 
-- `src/api/main.py` — application construction, lifespan, middleware order and router mounts
-- `src/api/services/direct_execution_service.py` — the plan path: admission, execution, durable transitions, status and cancellation
-- `src/api/services/research_kernel.py` — kernel composition and the adapter the routes call
-- `src/api/services/component_catalog.py` — `build_application_component_registry` and the registered workflow callables
-- `src/core/kernel/` — `TypedRegistry`, `RegistryKey`, component key sets, `ResearchKernel`, `BoundedTaskRunner`
-- `src/core/contracts/` — frozen contract records shared by the runtime and the database layer
-- `src/ai_brain/router/execution_plan_compiler.py` — `ExecutionPlanCompiler`
-- `src/ai_brain/integration/masr_supervisor_bridge.py` — `MASRSupervisorBridge`, `SupervisorExecutor`, `ResourcePool`
-- `src/ai_brain/integration/execution_plan_topology.py` — `ExecutionPlanTopologyExecutor`
-- `src/api/services/supervisor_coordination_service.py` and `src/api/services/real_supervisor_executor.py` — the supervisor path
-- `src/api/services/agent_execution_service.py` — direct agent calls
-- `docker-compose.yml` and `docker/nginx/nginx.conf` — the process topology
+- `src/api/main.py`: application construction, lifespan, middleware order and router mounts
+- `src/api/services/direct_execution_service.py`: the plan path (admission, execution, durable transitions, status and cancellation)
+- `src/api/services/research_kernel.py`: kernel composition and the adapter the routes call
+- `src/api/services/component_catalog.py`: `build_application_component_registry` and the registered workflow callables
+- `src/core/kernel/`: `TypedRegistry`, `RegistryKey`, component key sets, `ResearchKernel`, `BoundedTaskRunner`
+- `src/core/contracts/`: frozen contract records shared by the runtime and the database layer
+- `src/ai_brain/router/execution_plan_compiler.py`: `ExecutionPlanCompiler`
+- `src/ai_brain/integration/masr_supervisor_bridge.py`: `MASRSupervisorBridge`, `SupervisorExecutor`, `ResourcePool`
+- `src/ai_brain/integration/execution_plan_topology.py`: `ExecutionPlanTopologyExecutor`
+- `src/api/services/supervisor_coordination_service.py` and `src/api/services/real_supervisor_executor.py`: the supervisor path
+- `src/api/services/agent_execution_service.py`: direct agent calls
+- `docker-compose.yml` and `docker/nginx/nginx.conf`: the process topology

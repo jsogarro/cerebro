@@ -1,6 +1,6 @@
 # Performance tuning
 
-This guide lists the limits the code applies to request rate, concurrency, database connections and model calls, where each is set, and how to observe the effect. It lists only values that code reads; there are no measured baselines or targets here.
+This guide lists the limits the code applies to request rate, concurrency, database connections and model calls, where each is set and how to observe the effect. It covers only values that code reads; it has no measured baselines or targets.
 
 ## Request handling
 
