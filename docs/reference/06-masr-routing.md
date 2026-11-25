@@ -7,7 +7,7 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 | Feature | Status | Entry point | Source |
 |---|---|---|---|
 | Query analysis and complexity scoring | Active | `MASRouter.route` | `src/ai_brain/router/query_analyzer.py` (`QueryComplexityAnalyzer`) |
-| Multi-domain decomposition | Active | `QueryComplexityAnalyzer.analyze` | `src/ai_brain/router/query_decomposer.py` (`QueryDecomposer`) |
+| Multi-domain decomposition | Active (analysis only) | `QueryComplexityAnalyzer.analyze` | `src/ai_brain/router/query_decomposer.py` (`QueryDecomposer`) |
 | `MASR_COMPLEXITY_WEIGHTS`, `MASR_COMPLEXITY_THRESHOLDS` | Not wired | `settings_to_router_config` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) |
 | Collaboration mode selection and fast path | Active | `MASRouter.route` | `src/ai_brain/router/masr.py` (`MASRouter._determine_collaboration_mode`) |
 | Routing strategies | Active | `MASRouter.route`, `POST /api/v1/masr/route` | `src/ai_brain/router/routing_types.py` (`RoutingStrategy`) |
@@ -48,7 +48,7 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 
 | Mode | Plan compilation | Notes |
 |---|---|---|
-| `fast_path` | Implemented | One model call, no workers |
+| `fast_path` | Implemented | One worker, executed exactly like `direct` |
 | `direct` | Implemented | One worker |
 | `parallel` | Implemented | Workers run side by side |
 | `hierarchical` | Implemented | Supervisor-style layout |

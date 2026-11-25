@@ -97,16 +97,7 @@ The workflow tags images with the Git tag (or commit SHA for staging) but contai
 
 ## Health and readiness
 
-The router in `src/api/routes/health.py` is mounted without a prefix:
-
-| Path | Behaviour | Authentication |
-|---|---|---|
-| `GET /health` | Returns `{"status": "healthy", "service": "research-platform-api"}` without checking dependencies | none |
-| `GET /live` | Returns `{"status": "alive"}` | none |
-| `GET /ready` | Runs `SELECT 1` against Postgres and a Redis `PING`, each with a 2-second timeout. Returns 200 with `"status": "ready"` when both succeed, otherwise 503 with `"status": "not_ready"` and a `checks` object of `ok` or `unavailable` per dependency | none |
-| `GET /ws/health` | WebSocket service probe | none |
-
-These four paths are the only unauthenticated routes besides the six authentication bootstrap routes in `PUBLIC_ROUTE_ALLOWLIST` in `src/middleware/auth_middleware.py`. The Dockerfile healthcheck and both compose files call `/health`; the Kubernetes deployment uses `/health` for liveness and `/ready` for readiness. The rate limiter skips `/health`, `/ready`, `/live`, `/metrics`, `/docs` and `/openapi.json`. For the authentication model, see [authentication and tenancy](reference/04-authentication-and-tenancy.md); for the metrics and audit surfaces, see [security, audit and observability](reference/12-security-audit-observability.md).
+The probes `GET /health`, `GET /live`, `GET /ready` and `GET /ws/health` are unauthenticated; their bodies and the public-route allowlist are in [HTTP API](reference/03-http-api.md#health-and-metrics), and what `/ready` checks is in [security, audit and observability](reference/12-security-audit-observability.md#health-probes). The Dockerfile healthcheck and both compose files call `/health`; the Kubernetes deployment uses `/health` for liveness and `/ready` for readiness. `/health` checks no dependency, so use `/ready` to confirm Postgres and Redis. The rate limiter skips these paths.
 
 ## Monitoring
 
@@ -116,7 +107,7 @@ The series exported are the `llm_*` metrics defined in `src/core/observability.p
 
 The production compose file runs Prometheus and Grafana containers. Their configuration files are not in the repository (see [Docker Compose](#docker-compose-production-file)), so scrape targets, dashboards and data sources are yours to provide.
 
-Logs go to standard output through structlog; `LOG_LEVEL` sets verbosity. Read them with `docker compose logs -f api` (or `make logs-api` for the development stack) and `kubectl -n research-platform logs -f deployment/research-api`.
+Logs go to standard output through structlog; `LOG_LEVEL` does not change their verbosity ([configuration](reference/02-configuration.md)). Read them with `docker compose logs -f api` (or `make logs-api` for the development stack) and `kubectl -n research-platform logs -f deployment/research-api`.
 
 ## Legacy standalone MASR service
 

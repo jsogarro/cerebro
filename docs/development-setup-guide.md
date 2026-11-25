@@ -1,6 +1,6 @@
 # Development setup
 
-How to install the dependencies, configure the environment, run the stack, authenticate against it, and check code quality locally. For the test suites see the [testing guide](testing-guide.md); for settings see [configuration](reference/02-configuration.md).
+How to install the dependencies, configure the environment, run the stack, authenticate against it, and check code quality locally. For the test suites see the [testing guide](testing-guide.md); for settings see [configuration](reference/02-configuration.md); for failures see [troubleshooting](troubleshooting.md).
 
 ## Prerequisites
 
@@ -89,7 +89,7 @@ The Makefile describes `legacy-masr` as the "non-authoritative standalone MASR d
 
 ## Get an access token
 
-Every route except the ones in `PUBLIC_ROUTE_ALLOWLIST` (`src/middleware/auth_middleware.py`) needs a bearer token. The allowlist holds `GET /health`, `GET /live`, `GET /ready`, `GET /ws/health`, and the auth routes `POST /api/v1/auth/login`, `register`, `refresh`, `forgot-password`, `reset-password`, and `GET /api/v1/auth/verify-email`.
+Every route except the ones in `PUBLIC_ROUTE_ALLOWLIST` (`src/middleware/auth_middleware.py`) needs a bearer token. The ten entries are listed in [HTTP API](reference/03-http-api.md#authentication-requirement).
 
 Register (`RegisterRequest` in `src/auth/models.py`):
 
@@ -121,6 +121,10 @@ curl -s http://localhost:8000/api/v1/research/projects -H "Authorization: Bearer
 
 Organization claim: tenant-scoped routes resolve their caller through `get_tenant_context` or `get_tenant_identity` (`src/middleware/tenant_context.py`), which call `require_organization_id` and answer 403 `Tenant organization claim is required` when the token has no `organization_id`. A local user always gets one: `register` creates the user with a fresh `uuid4()` organization, and `login` assigns one through `provisioned_organization_id` when the user has none, then puts it in the token (`src/api/auth/auth_router.py`). See [authentication and tenancy](reference/04-authentication-and-tenancy.md).
 
+## Execution authority
+
+A fresh install has no route, CLI command or script that creates an execution authority. Until a deployment supplies one, query routes return `422` with `EXECUTION_AUTHORITY_REQUIRED` for a request without an `authority_reference` and `EXECUTION_AUTHORITY_UNAVAILABLE` for a reference that no stored authority matches, and `POST /api/v1/research/projects` creates a project that stays `pending`. The model-backed requests in this guide, including the query in the [README](../README.md#submit-a-routed-query), therefore cannot run end to end on a fresh install. [Research execution](reference/05-research-execution.md#execution-authority) describes the mechanism: stored snapshot rows are loaded at startup, or a resolver is placed on `app.state`. A plan-backed route must also name the `deepseek`, `llama` or `openrouter` provider, because the `gemini` provider rejects every request ([LLM providers](reference/10-llm-providers.md)).
+
 ## Use the CLI
 
 The `research-cli` entry point is declared in `pyproject.toml` (`src.cli.main:cli`).
@@ -136,6 +140,8 @@ research-cli projects list                        # authenticated
 
 ## API documentation pages
 
+With `DEBUG` false the API serves no interactive documentation pages, and the nginx `/docs` location is a separate static root that returns 404, so it is not FastAPI's `/docs`.
+
 `FastAPI(...)` in `src/api/main.py` sets `docs_url` and `redoc_url` to `/docs` and `/redoc` only when `DEBUG` is true, and leaves `openapi_url` at FastAPI's default `/openapi.json`. `AuthMiddleware` applies to all three paths, so a browser request without an `Authorization` header receives 401 (`tests/security/test_route_authentication_boundary.py` asserts this for `/docs`, `/redoc`, and `/openapi.json`). Fetch the schema with a token:
 
 ```bash
@@ -144,11 +150,13 @@ curl -s http://localhost:8000/openapi.json -H "Authorization: Bearer $TOKEN"
 
 ## Smoke tests
 
+Both smoke scripts currently fail their last check. They send the final `POST /api/v1/query/research` without a token and expect 200, so the route's `401` is reported as `FAIL` and the script exits 1 even when every earlier check passes.
+
 `./scripts/smoke_test.sh` boots the API in a tmux session named `cerebro-smoke` on port 8099 with `DATABASE_URL=sqlite+aiosqlite:///./cerebro_smoke_test.db`. It generates an RSA key pair in `/tmp/cerebro_smoke_keys` with `.venv/bin/python3`, mints an access token itself (subject `00000000-0000-0000-0000-00000000beef`, organization `00000000-0000-0000-0000-00000000cafe`), so it does not call `register` or `login`. It then checks `GET /health`; `POST`, `GET`, `GET .../progress`, list, `GET .../results` (expects 404), a missing project (expects 404), and `POST .../cancel` (expects 204) under `/api/v1/research/projects`; and finally `POST /api/v1/query/research`. Each check prints `PASS` or `FAIL` with the status code; the script prints `SMOKE TEST PASSED` and exits 0, or `SMOKE TEST FAILED` and exits 1. It removes the tmux session, database file, and keys on exit. It requires `.venv`, `tmux`, and an `httpx` importable from `python3`.
 
-`./scripts/smoke_test_postgres.sh` targets an already running Compose stack on `http://localhost:8000`. It registers a unique user through `/api/v1/auth/register`, logs in through `/api/v1/auth/login`, and runs the same project checks and the same final query check with the login token. The same pass and fail output and exit codes apply. Its start-up check is `docker compose ps | grep -q research-api`; the dev compose file sets no `container_name`, so the check matches only when the Compose project name makes the container name contain `research-api` (for example `COMPOSE_PROJECT_NAME=research`).
+`./scripts/smoke_test_postgres.sh` targets an already running Compose stack on `http://localhost:8000`. It registers a unique user through `/api/v1/auth/register`, logs in through `/api/v1/auth/login`, and runs the same project checks with the login token, then the same final query check, which sends no token. The same pass and fail output and exit codes apply. Its start-up check is `docker compose ps | grep -q research-api`; the dev compose file sets no `container_name`, so the check matches only when the Compose project name makes the container name contain `research-api` (for example `COMPOSE_PROJECT_NAME=research`).
 
-Both scripts send the final `POST /api/v1/query/research` without an `Authorization` header and expect 200. That route is not in `PUBLIC_ROUTE_ALLOWLIST`, and `query_api.router` declares `Depends(get_current_token)`, so an unauthenticated request receives 401 and that check reports `FAIL`.
+That route is not in `PUBLIC_ROUTE_ALLOWLIST`, and `query_api.router` declares `Depends(get_current_token)`, which is why the unauthenticated request receives 401.
 
 ## Code quality
 

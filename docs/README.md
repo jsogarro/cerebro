@@ -7,7 +7,7 @@ These documents describe the implemented system: the FastAPI application, the ex
 | Page | Covers |
 |---|---|
 | [Architecture overview](reference/01-architecture-overview.md) | Processes, application assembly, middleware order, mounted routers, execution paths, the component registry and the contracts package |
-| [Configuration](reference/02-configuration.md) | The settings production code reads, the 100 declared settings that have no effect, and components that read their own variables |
+| [Configuration](reference/02-configuration.md) | The settings production code reads, the 102 declared settings that have no effect, and components that read their own variables |
 | [HTTP API](reference/03-http-api.md) | Conventions, the public-route allowlist, every mounted route group, error envelope and fixed responses |
 | [Authentication and tenancy](reference/04-authentication-and-tenancy.md) | RS256 JWTs, `AuthMiddleware`, WebSocket tokens, organization claims and tenant isolation |
 | [Research execution](reference/05-research-execution.md) | Execution authority, routing proposal, plan compilation, admission, topology execution, status, cancellation and checkpoints |
@@ -32,13 +32,18 @@ These documents describe the implemented system: the FastAPI application, the ex
 | [Backup and recovery](backup-recovery.md) | Back up and restore each store that holds state |
 | [Performance tuning](performance-tuning.md) | Find the rate, concurrency, connection and model-call limits and where each is set |
 | [Troubleshooting](troubleshooting.md) | Diagnose common failures |
-| [Nightly live-eval workflow template](ci/nightly-live-eval.yml.example) | Start from a scheduled workflow that runs the live evaluations |
+
+The workflow template [`ci/nightly-live-eval.yml.example`](ci/nightly-live-eval.yml.example) is a starting point for a scheduled workflow that runs the live evaluations.
+
+New here: read [development setup](development-setup-guide.md), then [architecture overview](reference/01-architecture-overview.md) and [research execution](reference/05-research-execution.md). When something fails, use [troubleshooting](troubleshooting.md).
 
 ## Status labels
 
 - **Active**: a production caller reaches the feature on the default configuration.
 - **Off by default**: a production caller reaches the feature only when a setting whose default disables it is changed.
 - **Not wired**: the code is present and no production caller reaches it. [Code that is not wired](reference/15-not-wired.md) collects these.
+
+A label can carry a condition in parentheses, such as **Active (optional profile)**, **Active (PostgreSQL only)** or **Active (analysis only)**. The feature is Active when the condition holds, and the page says what the condition leaves out.
 
 ## Documentation rules
 

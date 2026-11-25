@@ -12,9 +12,9 @@ This guide lists the limits the code applies to request rate, concurrency, datab
 | Uvicorn worker processes | `--workers` in the image `CMD` | 4 | API processes per container | `Dockerfile` (`production` stage) |
 | nginx request limits | `limit_req_zone` in the nginx file | 10 requests per second on `/api/`, 5 per second on `/ws`, per client address | Traffic through the reverse proxy | `docker/nginx/nginx.conf` |
 
-`RateLimitMiddleware` counts requests per authenticated user (`rate_limit:user:<id>`) or, for unauthenticated callers, per client address (`rate_limit:ip:<address>`), using Redis with an in-memory fallback when Redis is unreachable. A request over the limit receives 429 with `RATE_LIMIT_EXCEEDED` and `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` headers. `/health`, `/ready`, `/live`, `/metrics`, `/docs` and `/openapi.json` are excluded. The in-memory fallback is per process, so with several Uvicorn workers or replicas a Redis outage multiplies the effective limit by the process count.
+`RateLimitMiddleware` counts requests in Redis with an in-memory fallback; the keys, response headers and exempt paths are in [HTTP API](reference/03-http-api.md#rate-limiting). The in-memory fallback is per process, so with several Uvicorn workers or replicas a Redis outage multiplies the effective limit by the process count.
 
-The image runs Uvicorn with `--workers 4`. Each worker is a separate process with its own database pool, its own in-memory execution registry and its own routing cache. Docker Compose does not override the command in the production file; `GUNICORN_*` variables in that file are not read by anything.
+The image runs Uvicorn with `--workers 4`. Each worker is a separate process with its own database pool, its own in-memory execution registry and its own routing cache. Docker Compose does not override the command in the production file, and the `GUNICORN_*` variables it sets are not read ([configuration](reference/02-configuration.md)).
 
 ## Execution concurrency
 
@@ -26,7 +26,7 @@ The image runs Uvicorn with `--workers 4`. Each worker is a separate process wit
 | `MixtureOfAgentsRequest.max_parallel` | Request body field of `POST /api/v1/agents/mixture` | 3 (allowed 1 to 5) | Agents run in parallel for one mixture request | `src/models/agent_api_models.py`, `src/api/services/agent_execution_service.py` |
 | `MAX_PARALLEL_WORKERS` | Setting / environment variable | 5 | Upper bound on parallel workers the router allocates to a query | `src/core/config.py`, `src/ai_brain/router/factory.py` (`settings_to_router_config`) |
 | `AGENTS_MAX_WORKERS_PER_SUPERVISOR` | Setting / environment variable | 10 | Upper bound on agents per query in the router (`max_agents`) | `src/core/config.py`, `src/ai_brain/router/factory.py` |
-| `COST_MAX_PER_REQUEST` | Setting / environment variable | 0.10 (USD) | Cost threshold the router reads as `max_cost` | `src/core/config.py`, `src/ai_brain/router/factory.py` |
+| `COST_MAX_PER_REQUEST` | Setting / environment variable | 0.10 (USD) | Copied to the router's `cost_threshold`, which nothing reads, so it limits nothing (see [MASR routing](reference/06-masr-routing.md)) | `src/core/config.py`, `src/ai_brain/router/factory.py` |
 
 Both service counters are per process and live in memory. Running 4 Uvicorn workers admits up to 200 concurrent executions across the container, and each Kubernetes replica adds its own. For how runs are admitted and stored, see [durable runs and events](reference/08-durable-runs-and-events.md); for routing allocation, see [MASR routing](reference/06-masr-routing.md).
 
@@ -67,6 +67,6 @@ The environment variables `GEMINI_RATE_LIMIT`, `GEMINI_RATE_PERIOD`, `GEMINI_MAX
 
 ## Measuring
 
-The `llm_*` Prometheus series on `/metrics` (`llm_call_duration_seconds`, `llm_tokens_total`, `llm_cost_usd_total`, `llm_request_cost_drift_ratio`, `llm_cost_drift_events_total`) show model latency, token use and cost. `/metrics` requires a bearer token; see [security, audit and observability](reference/12-security-audit-observability.md) and [deployment and monitoring](deployment-monitoring-guide.md).
+The `llm_*` Prometheus series on `/metrics` (`llm_call_duration_seconds`, `llm_tokens_total`, `llm_cost_usd_total`, `llm_request_cost_drift_ratio`, `llm_cost_drift_events_total`) show model latency, token use and cost for calls made through the provider package; `GeminiService` calls, the default client, are not recorded. `/metrics` requires a bearer token; see [security, audit and observability](reference/12-security-audit-observability.md) and [deployment and monitoring](deployment-monitoring-guide.md).
 
-`make load-test` starts Locust with `tests/load/locustfile.py` against `http://localhost:8000`. The file requests `/api/v1/projects...`, `/api/v1/admin/*` and `/ws/ping`, none of which the API mounts (research projects live under `/api/v1/research/projects`), so those requests return 404 or 401. Register, login, `/api/v1/auth/me` and `/health` do exist. Treat Locust output as meaningful only after the paths are corrected; see the [testing guide](testing-guide.md) for the test layers.
+`make load-test` starts Locust with `tests/load/locustfile.py` against `http://localhost:8000`. Several of its requests do not match the mounted API, so its output is not meaningful until they are corrected; the [testing guide](testing-guide.md#load-tests) lists each mismatch.

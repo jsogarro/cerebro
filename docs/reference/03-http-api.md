@@ -28,9 +28,9 @@ The FastAPI application in `src/api/main.py` serves the HTTP and WebSocket API u
 
 **Base path.** Domain routes live under `/api/v1`. Request and response bodies are JSON, except the report download (a file stream) and the run event stream (`text/event-stream`).
 
-**Middleware order.** Starlette runs the last-registered middleware outermost. A request meets them in this order, outermost first (`src/api/main.py` registers them in the reverse order): CORS (`CORSMiddleware`, origins from `CORS_ORIGINS`), security headers (`SecurityHeadersMiddleware`), rejected-request logging (`log_rejected_requests`), authentication (`AuthMiddleware`), `LLMCostDriftMiddleware`, rate limiting (`RateLimitMiddleware`), audit trail (`AuditTrailMiddleware`), idempotency (`IdempotencyMiddleware`). Authentication runs outside rate limiting and idempotency, so both read the caller identity that authentication sets on the request.
+**Middleware order.** The order is in the [architecture overview](01-architecture-overview.md#request-path). Authentication runs outside rate limiting and idempotency, so both read the caller identity that authentication sets on the request.
 
-**Authority reference.** Request bodies that start execution accept an optional `authority_reference` object with `authority_id` and `authority_version`. It is an opaque handle that a trusted resolver turns into the execution authority for the caller's organization; see [research execution](05-research-execution.md).
+**Authority reference.** Request bodies that start execution accept an `authority_reference` object with `authority_id` and `authority_version`. The schema marks it optional, but a request without it is refused with `EXECUTION_AUTHORITY_REQUIRED` and never starts. It is an opaque handle that a trusted resolver turns into the execution authority for the caller's organization; see [research execution](05-research-execution.md).
 
 **Idempotency-Key.** `IdempotencyMiddleware` acts only on `POST` requests that carry an `Idempotency-Key` header and whose path starts with `/api/v1/query` (the default `path_prefixes`, which `src/api/main.py` does not override).
 
@@ -408,7 +408,7 @@ These routes return values that do not come from live computation.
 
 - `GET /api/v1/query/routing/recommend` chooses one of three constant recommendations by query length (under 100 characters `simple`, under 500 `moderate`, otherwise `complex`) and returns a constant `confidence` of 0.85. Costs, times and agent lists are literals in the handler.
 - `GET /api/v1/query/routing/strategies` returns a literal description of five strategies (`speed_first`, `cost_efficient`, `quality_focused`, `balanced`, `adaptive`) and `default_strategy` `balanced`.
-- `GET /ws/health` returns `websocket_manager.get_stats()` plus a `timestamp` that is the constant string `2024-01-01T00:00:00Z`.
+- `GET /ws/health` returns `websocket_manager.get_stats()` plus a fixed `timestamp` (see [durable runs and events](08-durable-runs-and-events.md#project-progress-websockets)).
 - `POST /api/v1/research/projects/{project_id}/refine` always returns `501`.
 - `POST /api/v1/masr/feedback` acknowledges a known routing id with `status: accepted`, `learning_updated: false`, `recorded: false` and `eligible: false`; the feedback values are discarded. An unknown routing id returns `400` `INVALID_FEEDBACK`.
 

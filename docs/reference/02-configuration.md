@@ -87,8 +87,6 @@ A field is listed here when a production module outside `src/core/config.py` rea
 | `MASR_CACHE_EVICTION_BATCH_SIZE` | `100` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) | entries evicted per eviction pass |
 | `MASR_ENABLE_ADAPTIVE` | `true` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) | older history-based strategy heuristic (`adaptive_strategy_enabled`); it applies once the metrics collector holds more than 100 history entries and never enables the Thompson-sampling allocator |
 | `MASR_FAST_PATH_ENABLED` | `true` | `src/ai_brain/router/masr.py` (`MASRouter._should_use_fast_path`) | allows simple single-domain queries to bypass orchestration |
-| `MASR_COMPLEXITY_WEIGHTS` | `linguistic` 0.15, `reasoning` 0.25, `domain` 0.20, `data` 0.15, `output` 0.15, `time` 0.05, `quality` 0.05 | `src/ai_brain/router/factory.py` (`settings_to_router_config`) | weights of the complexity analyzer; a JSON object |
-| `MASR_COMPLEXITY_THRESHOLDS` | `simple` 0.3, `moderate` 0.7, `complex` 1.0 | `src/ai_brain/router/factory.py` (`settings_to_router_config`) | level boundaries of the complexity analyzer; a JSON object |
 | `AGENTS_MAX_WORKERS_PER_SUPERVISOR` | `10` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) | `max_agents`, the upper bound on agents per query |
 | `COST_MAX_PER_REQUEST` | `0.1` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) | copied to `MASRouter.cost_threshold`; no other code reads that attribute, so the value limits nothing |
 
@@ -187,7 +185,7 @@ See [LLM providers](10-llm-providers.md) for how workers choose a provider.
 
 > **Not wired.** These fields are declared on `Settings`, and some are copied into `get_ai_brain_config()`. No production code reads them (the only caller of `get_ai_brain_config` reads just its `providers` entries), so setting them changes nothing.
 
-The table lists all 100 fields. Together with the 63 rows above they account for all 163 fields of `Settings`.
+The table lists all 102 fields. Together with the 61 rows above they account for all 163 fields of `Settings`.
 
 | Setting | Default | Family |
 |---|---|---|
@@ -291,10 +289,13 @@ The table lists all 100 fields. Together with the 63 rows above they account for
 | `DEV_ENABLE_ROUTING_DEBUG` | `false` | Development switches |
 | `DEV_MOCK_PROVIDERS` | `false` | Development switches |
 | `DEV_MOCK_MEMORY` | `false` | Development switches |
+| `MASR_COMPLEXITY_WEIGHTS` | `linguistic` 0.15, `reasoning` 0.25, `domain` 0.20, `data` 0.15, `output` 0.15, `time` 0.05, `quality` 0.05 | MASR |
+| `MASR_COMPLEXITY_THRESHOLDS` | `simple` 0.3, `moderate` 0.7, `complex` 1.0 | MASR |
 
 Notes on specific rows:
 
-- `SECRET_KEY` is never used for signing or encryption. Its validator still runs: it rejects the placeholder default and any value shorter than 32 characters in every environment, so the application cannot import `src.core.config` without a `SECRET_KEY` of at least 32 characters.
+- `MASR_COMPLEXITY_WEIGHTS` and `MASR_COMPLEXITY_THRESHOLDS` are mapped into `complexity_analyzer` keys that the analyzer does not read, so they change nothing. The real weights and cutoffs (0.12 and 0.22) are described in [MASR routing](06-masr-routing.md#query-analysis).
+- `SECRET_KEY` is never used for signing or encryption. Its validator still runs: it rejects any value shorter than 32 characters in every environment, which includes the placeholder default (in production the placeholder also gets its own error message), so the application cannot import `src.core.config` without a `SECRET_KEY` of at least 32 characters.
 - `JWT_ALGORITHM` is not read; `JWTService` fixes the algorithm at RS256.
 - `LOG_LEVEL` is not read by the API process. The legacy MASR service reads the environment variable directly (see [Environment variables read outside Settings](#environment-variables-read-outside-settings)).
 - `DEEPSEEK_ENABLED`, `LLAMA_ENABLED`, `GEMINI_ENABLED` and `OPENROUTER_ENABLED` are emitted into the provider configuration, but `_build_plan_route` overwrites `enabled` with true, and no other path reads them. `MODEL_PROVIDERS_ENABLED` is emitted as `providers["enabled"]`, which no code reads.

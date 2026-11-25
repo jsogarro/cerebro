@@ -1,6 +1,6 @@
 # Troubleshooting
 
-This guide helps you diagnose common problems with Cerebro. Commands use the development stack from `docker-compose.yml`; for the production stack add `-f docker-compose.production.yml`.
+Commands use the development stack from `docker-compose.yml`; for the production stack add `-f docker-compose.production.yml`.
 
 > **Naming.** The deployment artifacts carry the name `research-platform`: the FastAPI app is titled "Research Platform API", the Postgres database is `research_db`, the CLI entry point is `research-cli`, and the Kubernetes objects are `research-api` and friends.
 
@@ -73,7 +73,7 @@ The WebSocket routes are `/ws`, `/ws/projects/{project_id}`, `/ws/cli/{project_i
 
 ## Authentication errors
 
-Authentication is enforced by `AuthMiddleware`. Every route except the ten entries in `PUBLIC_ROUTE_ALLOWLIST` (`src/middleware/auth_middleware.py`) needs `Authorization: Bearer <access-token>`. The public routes are `GET /health`, `/live`, `/ready` and `/ws/health`, and the auth bootstrap routes `POST /api/v1/auth/login`, `register`, `refresh`, `forgot-password`, `reset-password` and `GET /api/v1/auth/verify-email`. `/metrics`, `/docs`, `/redoc` and `/openapi.json` are not public. Access tokens last 15 minutes and refresh tokens 7 days (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`, `JWT_REFRESH_TOKEN_EXPIRE_DAYS`).
+Authentication is enforced by `AuthMiddleware`. Every route except the ten entries in `PUBLIC_ROUTE_ALLOWLIST` needs `Authorization: Bearer <access-token>`; the list is in [HTTP API](reference/03-http-api.md#authentication-requirement). Access tokens last 15 minutes and refresh tokens 7 days (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`, `JWT_REFRESH_TOKEN_EXPIRE_DAYS`).
 
 ### 401, 403 and 404
 
@@ -152,7 +152,7 @@ Symptom: `ResourceExhausted: 429 Quota exceeded`.
 
 1. Confirm the key is set without printing it: `docker compose exec api sh -c 'test -n "$GEMINI_API_KEY" && echo set'`.
 2. Two limiters apply: the HTTP rate limiter (`MAX_REQUESTS_PER_MINUTE`, default 100, on requests to the API) and the Gemini token bucket (10 calls per 60 seconds and 2 concurrent per service instance by default). See [performance tuning](performance-tuning.md). Reduce request volume or wait for the provider quota to reset.
-3. Watch model volume and cost with the `llm_*` series (the token is required):
+3. Watch model volume and cost with the `llm_*` series (the token is required). These series cover only the provider package; calls made through `GeminiService`, the default client, are not counted ([LLM providers](reference/10-llm-providers.md)):
    ```bash
    curl -s -H "Authorization: Bearer <access-token>" http://localhost:8000/metrics | grep -E "llm_call_duration_seconds|llm_tokens_total|llm_cost_usd_total"
    ```
@@ -174,7 +174,7 @@ An execution that belongs to another organization is reported as not found. See 
 
 1. Poll the status endpoint and read the progress fields.
 2. Search the logs for the id: `docker compose logs api | grep "<execution-id>"`.
-3. If the API restarted mid-run, `POST /api/v1/query/execution/<project-id>/resume` resumes from the last checkpoint.
+3. If the API restarted mid-run, `POST /api/v1/query/execution/<project-id>/resume` rebuilds the execution record from the latest recoverable checkpoint and registers it so its status can be read. It does not start any work ([research execution](reference/05-research-execution.md)).
 
 ### "Maximum concurrent executions reached"
 
@@ -221,13 +221,7 @@ The `masr-router` container (port 9100, profile `legacy-masr-service`) is not on
 
 ## Debug logging
 
-`DEBUG` (default `false`) is the single debug gate; it also enables `/docs` and `/redoc`, which still require a token. `LOG_LEVEL` (default `INFO`) sets verbosity, and logs go to standard output through structlog.
-
-```bash
-# .env
-DEBUG=true
-LOG_LEVEL=DEBUG
-```
+`DEBUG` (default `false`) only enables `/docs` and `/redoc`, which still require a token (nginx serves its own `/docs`, so these pages are reachable only on the API port). `LOG_LEVEL` is not read by the API process, so setting it does not change verbosity ([configuration](reference/02-configuration.md)). Logs go to standard output through structlog.
 
 `DEV_ENABLE_AI_BRAIN_DEBUG`, `DEV_ENABLE_MEMORY_DEBUG` and `DEV_ENABLE_ROUTING_DEBUG` are declared in `src/core/config.py` and read nowhere else, so setting them has no effect.
 
@@ -238,14 +232,7 @@ docker compose logs api | grep ERROR
 
 ## Health checks
 
-| Endpoint | Meaning |
-|---|---|
-| `GET /health` | The process answers; no dependency check |
-| `GET /live` | The process is alive |
-| `GET /ready` | 200 when Postgres and Redis both answer within 2 seconds, otherwise 503 with the failing check marked `unavailable` |
-| `GET /ws/health` | The WebSocket service answers |
-| `GET /api/v1/agents/{agent_type}/health`, `GET /api/v1/agents/health/summary` | Per-agent health (token required) |
-| `GET /metrics` | Prometheus series (token required) |
+`/health` checks nothing but the process; `/ready` returns 503 with the failing check marked `unavailable` when Postgres or Redis does not answer within 2 seconds. The routes and their bodies are in [HTTP API](reference/03-http-api.md#health-and-metrics), and the per-agent health routes need a token.
 
 ```bash
 curl http://localhost:8000/ready

@@ -25,7 +25,7 @@ Cerebro is a FastAPI application that accepts research queries, routes each one 
 | Prometheus metrics | Active | `/metrics` | `src/api/main.py` (`make_asgi_app`) |
 | Langfuse tracing | Off by default | `LANGFUSE_ENABLED=true` | `src/core/config.py` (`Settings.LANGFUSE_ENABLED`), `src/core/tracing.py` |
 | CLI | Active | `research-cli` | `src/cli/main.py` (`cli`), `pyproject.toml` (`[project.scripts]`) |
-| Web workbench | Active | `web` compose service | `cerebro/web`, `docker-compose.yml` |
+| Web workbench | Active (partly backed; see [CLI and web clients](13-cli-and-web-clients.md)) | `web` compose service | `cerebro/web`, `docker-compose.yml` |
 | Persistence | Active | `init_db` during `lifespan` | `src/models/db/session.py` (`init_db`, `get_session_factory`) |
 | Legacy standalone MASR service | Active (optional profile) | `docker compose --profile legacy-masr-service up masr-router` | `docker-compose.yml` (`masr-router`), `docker/Dockerfile.masr` |
 | Code that is not wired | Not wired | none | see [not wired](15-not-wired.md) |

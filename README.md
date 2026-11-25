@@ -23,7 +23,7 @@ Each reference page marks features as Active, Off by default or Not wired; the
 | Multi-agent execution | Plan-based. MASR proposes a routing, a stored execution authority binds it, and workers run per the compiled plan ([research execution](docs/reference/05-research-execution.md)) |
 | Verification | The verification gate runs in supervisor execution (the supervisor API and the TalkHier and coordination services), not on the query path ([agents and supervisors](docs/reference/07-agents-and-supervisors.md)) |
 | Multi-domain queries | Execution accepts single-domain plans only; a multi-domain query is rejected before any work starts |
-| Provider routing | Gemini is the default client; the OpenRouter route is off by default ([LLM providers](docs/reference/10-llm-providers.md)) |
+| Provider routing | `GeminiService` is the default client for calls outside a compiled plan. A plan-backed route must name the `deepseek`, `llama` or `openrouter` provider, because the `gemini` provider rejects every request. The multi-provider OpenRouter route is off by default ([LLM providers](docs/reference/10-llm-providers.md)) |
 | API and CLI | Mounted under `/api/v1`; every route except an explicit public allowlist requires a bearer token ([HTTP API](docs/reference/03-http-api.md)) |
 | Evidence model | Claim-support records are written for each final report, each recorded as unsupported with reason `not_attempted`; search evidence and source snapshots are off by default ([tool boundary and evidence](docs/reference/09-tool-boundary-and-evidence.md)) |
 | Durable runs | Each execution is a database run with an append-only event log, replayable over SSE and WebSocket ([durable runs and events](docs/reference/08-durable-runs-and-events.md)) |
@@ -51,7 +51,8 @@ implementations.
 - **MASR routing** analyzes a query and selects a domain, collaboration mode,
   routing strategy, and execution path.
 - **Domain supervisors** for Research, Content, Analytics, and Finance
-  coordinate workers behind the supervisor API and TalkHier sessions.
+  coordinate workers. The supervisor API serves Research, Content, Analytics,
+  Service, and General, not Finance.
 - **Verification** applies a PASS/REVISE quality gate to supervisor results.
 - **Plan execution** keeps the primary path in process:
   `API -> DirectExecutionService -> MASR proposal -> ExecutionPlan -> workers`.
@@ -92,6 +93,7 @@ math operations; LLM workers provide narrative analysis.
 ```bash
 git clone https://github.com/jsogarro/cerebro.git
 cd cerebro
+uv venv && . .venv/bin/activate
 uv pip install -e ".[dev]"
 ```
 
@@ -115,10 +117,11 @@ an already-exported process variable, then `~/.env`, then the repository
 Dotenv files are parsed as data and are not shell-sourced. Keep them
 uncommitted and restrict secret-bearing files (for example, `chmod 600 ~/.env`).
 
-`GEMINI_API_KEY` enables live model-backed execution and can be exported,
-stored in `~/.env`, or stored in the project `.env`. Provider keys are optional
-for API startup; calls that need an unavailable provider use the documented
-fallback behavior.
+`GEMINI_API_KEY` enables live calls through the default `GeminiService` client
+and can be exported, stored in `~/.env`, or stored in the project `.env`. A
+plan-backed route needs the key of the provider it names. Provider keys are
+optional for API startup; calls that need an unavailable provider use the
+documented fallback behavior.
 
 ### Run
 
@@ -138,27 +141,9 @@ port-9100 diagnostics service is legacy-only:
 ./scripts/compose.sh --profile legacy-masr-service up -d masr-router
 ```
 
-Adaptive Thompson routing remains off by default. Operators can
-generate a non-activating, machine-readable promotion report from explicitly
-versioned criteria and a chronological evaluator corpus:
-
-```bash
-python scripts/evaluate_adaptive_routing_promotion.py \
-  --criteria config/adaptive_routing_promotion_criteria.example.json \
-  --corpus /path/to/versioned-evaluator-corpus.json \
-  --output /absolute/private/path/adaptive-routing-promotion.json
-```
-
-The checked-in criteria file is intentionally **unapproved**, so it always
-returns `insufficient_evidence`. Reports require an explicit output outside the
-repository; the output must not already exist. Criteria bind the replay to a
-versioned diagnostic policy snapshot and required collaboration modes/arms.
-Reports include the snapshot and its SHA-256 digest. The gate currently marks
-exact deployed-policy replay as unsupported, so every report remains
-`insufficient_evidence` and never changes `ADAPTIVE_ROUTING_ENABLED`. A complete
-runtime-policy replay, real neutral product evaluator, evaluator-qualified
-corpus, durable outcome outbox, approved thresholds, and separate operator
-decision are still required before activation.
+Adaptive Thompson routing is off by default. The scripts that evaluate it and
+produce a promotion report are described in the
+[testing guide](docs/testing-guide.md#adaptive-routing-evaluation).
 
 Or run the API directly:
 
@@ -177,6 +162,11 @@ Run the repository smoke test:
 ```bash
 ./scripts/smoke_test.sh
 ```
+
+The script currently fails its last check. It sends `POST /api/v1/query/research`
+without a token and expects 200, but the route requires a bearer token and
+answers 401, so the script reports `FAIL` and exits 1 even when every earlier
+check passes ([development setup](docs/development-setup-guide.md#smoke-tests)).
 
 ### Submit a Routed Query
 
@@ -201,12 +191,15 @@ curl -X POST "http://localhost:8000/api/v1/query/research" \
 ```
 
 The token needs an organization claim, and `authority_reference` must name an
-execution authority stored for that organization; see the
-[development setup guide](docs/development-setup-guide.md) for obtaining a
-token and [research execution](docs/reference/05-research-execution.md) for the
-authority. The endpoint starts execution asynchronously and returns execution
-metadata; several response fields are fixed or `null` on this path and are
-listed in the same page.
+execution authority stored for that organization. A fresh install has no route,
+CLI command or script that creates an execution authority, so until a
+deployment supplies one this request returns `EXECUTION_AUTHORITY_REQUIRED` or
+`EXECUTION_AUTHORITY_UNAVAILABLE` ([research
+execution](docs/reference/05-research-execution.md#execution-authority)). The
+[development setup guide](docs/development-setup-guide.md#get-an-access-token)
+covers obtaining a token. With an authority in place, the endpoint starts
+execution asynchronously and returns execution metadata; several response
+fields are fixed or `null` on this path and are listed in the same page.
 
 ## Architecture
 
@@ -234,9 +227,10 @@ flowchart TD
   artifact; see [tool boundary and evidence](docs/reference/09-tool-boundary-and-evidence.md).
 - **Claim support**: one record per material claim of a report; see the same page.
 
-See:
+Related pages:
 
-- [Documentation index](docs/README.md)
+- [Documentation index](docs/README.md), which links all fifteen reference pages
+- [Troubleshooting](docs/troubleshooting.md)
 - [Architecture overview](docs/reference/01-architecture-overview.md)
 - [Configuration](docs/reference/02-configuration.md)
 - [HTTP API](docs/reference/03-http-api.md)
