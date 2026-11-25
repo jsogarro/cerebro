@@ -538,11 +538,9 @@ async def get_system_stats(
     """
     try:
         service = _resolved_agent_operations(execution_service)
-        stats = await service.get_service_stats(
+        return await service.get_service_stats(
             organization_id=tenant_context.organization_id
         )
-
-        return stats
 
     except Exception as e:
         logger.error(f"Failed to get system stats: {e}")
