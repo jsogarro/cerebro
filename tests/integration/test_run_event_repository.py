@@ -251,3 +251,18 @@ async def test_concurrent_appends_allocate_gap_free_monotonic_sequences(
     assert errors == []
     sequences = [result for result in results if isinstance(result, int)]
     assert sorted(sequences) == list(range(1, concurrency + 1))
+
+
+@pytest.mark.asyncio
+async def test_append_event_persists_a_nested_payload(
+    repo: RunEventRepository, seeded_run: None, db_session: AsyncSession
+) -> None:
+    payload = {"error": "boom", "usage": {"tokens_used": 3, "cost_usd": "0.01"}}
+
+    await repo.append_event(**_event_kwargs(payload=payload))
+    await db_session.flush()
+
+    [event] = await repo.read_events_after(
+        "run-1", after_sequence=0, organization_id=ORG_ID
+    )
+    assert event.payload == payload
