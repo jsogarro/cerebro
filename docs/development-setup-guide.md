@@ -1,899 +1,276 @@
-# Development Setup and Contribution Guide
+# Development setup
 
-## Overview
-
-This guide covers setting up a development environment, understanding the
-codebase structure, and contributing to **Cerebro**, a general
-research-workflow workbench backed by a multi-agent LLM runtime. Cerebro routes
-natural-language queries through a Multi-Agent System Router (MASR) to
-hierarchical domain supervisors, which coordinate specialist LLM workers.
-Execution is in process through `DirectExecutionService`.
-
-> **Naming note:** the product is **Cerebro**, but the pre-rebrand infra identity **"research-platform"** is still used verbatim in deployment artifacts — the FastAPI title (`Research Platform API`), the k8s namespace and image names (`research-platform-api`), the default database (`research_db`), and the CLI entrypoints (`research-platform`, `research-cli`). Keep those infra names as-is; use "Cerebro" for the product.
-
-The platform uses modern async Python: `async`/`await` throughout, dependency injection via FastAPI, and an async SQLAlchemy repository layer.
+How to install the dependencies, configure the environment, run the stack, authenticate against it and check code quality locally. For the test suites see the [testing guide](testing-guide.md); for settings see [configuration](reference/02-configuration.md); for failures see [troubleshooting](troubleshooting.md).
 
 ## Prerequisites
 
-### System Requirements
+| Tool | Version | Source |
+|---|---|---|
+| Python | 3.11 or newer | `pyproject.toml` (`requires-python = ">=3.11"`); `.python-version` pins `3.11`; the CI test job runs 3.11, 3.12 and 3.13; the `Dockerfile` and `docker/Dockerfile.masr` use Python 3.13 |
+| uv | any recent release | `make install` runs `uv pip install`; CI installs uv 0.13.7 (`UV_VERSION` in `ci.yml`) and runs `uv pip install --system` |
+| Docker with Compose v2 | `docker compose` | `scripts/compose.sh` calls `docker compose`; a few Make targets call the legacy `docker-compose` binary (see [Make targets](#make-targets)) |
+| Node.js | 20 | `NODE_VERSION: "20"` in `.github/workflows/ci.yml` and `FROM node:20-alpine` in `cerebro/web/Dockerfile`; `cerebro/web/package.json` declares no `engines` field |
+| make | any | `Makefile` |
+| tmux | any | `scripts/smoke_test.sh` boots the API in a tmux session |
 
-- **Python**: 3.11 or higher
-- **Docker**: 20.10+ with Docker Compose v2
-- **Git**: 2.30+
-- **Memory**: 8GB RAM minimum, 16GB recommended
-- **Storage**: 20GB free space
-- **OS**: macOS, Linux, or Windows with WSL2
-
-### Required Tools
+## Install
 
 ```bash
-# Install uv (Python package manager)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install Docker and Docker Compose
-# Follow platform-specific instructions at https://docs.docker.com/
-
-# Install development tools
-brew install git pre-commit redis postgresql  # macOS
-sudo apt-get install git pre-commit redis postgresql  # Ubuntu
+uv venv && . .venv/bin/activate   # uv pip install refuses to run without a virtual environment
+make install            # uv pip install -e ".[dev]"
+pre-commit install
 ```
 
-## Quick Start
+`make install-pip` is the alternative that does not need uv: it runs `scripts/setup-python-env.sh`, which creates `.venv` with `python3.11` (or `python3.12`, or the interpreter named in `PYTHON`), installs `requirements-dev.txt`, then runs `pip install -e .`. Activate it with `. .venv/bin/activate`.
 
-### 1. Clone Repository
+The `dev` extra in `pyproject.toml` contains pytest and its plugins, `ruff`, `black`, `mypy`, `pre-commit`, `testcontainers`, `locust`, `playwright`, `factory-boy`, `faker`, `aiosqlite` and the `mcp` and `stats` extras (`fastmcp`, `scipy`) that some tests import.
 
-```bash
-git clone https://github.com/your-org/cerebro.git
-cd cerebro
-```
-
-### 2. Environment Setup
+## Configure
 
 ```bash
-# Copy environment templates
 cp .env.example .env
-cp .env.cli.example .env.cli
-
-# Install dependencies with uv
-uv pip install -e ".[dev]"
-
-# Install pre-commit hooks
-pre-commit install
 ```
 
-### 3. Configure Environment
+How the environment is read:
 
-Edit `.env` with non-secret project configuration, or put shared local secrets
-in `~/.env`. Existing exported variables win over `~/.env`, which wins over the
-repository `.env`, which wins over defaults. Explicit empty exports are kept.
-Cerebro runs **Gemini-only by default**; the OpenRouter multi-provider tier is
-flag-gated off (see [LLM Providers](#llm-providers)). Provider keys are optional
-for startup.
+- `Settings` in `src/core/config.py` sets no `env_file`. Dotenv files are loaded into the process environment by `load_environment` in `src/core/environment.py`, which runs when `src/core/config.py` is imported.
+- Precedence is the existing process environment first, then `~/.env`, then the project `.env`. Setting `CEREBRO_DISABLE_DOTENV` to `1`, `true`, `yes` or `on` skips both files.
+- `scripts/compose.sh` passes the project `.env` and `~/.env` to Compose as `--env-file`, so they feed Compose variable substitution (`${GEMINI_API_KEY:-}`, `${API_HOST_PORT:-8000}`, and so on).
+
+Values that matter for local work:
+
+| Setting | Behavior |
+|---|---|
+| `SECRET_KEY` | `Settings.validate_secret_key` rejects any value shorter than 32 characters. In production it also rejects the placeholder `MUST_SET_IN_ENV`. The value in `.env.example` is 36 characters. |
+| `DEBUG` | Defaults to `false`. `.env.example` sets `true`. Controls the `/docs` and `/redoc` pages ([API documentation pages](#api-documentation-pages)). |
+| `ENABLE_RATE_LIMITING` | Defaults to `true` in `Settings`. `.env.example` sets `false`. |
+| `GEMINI_API_KEY` | Optional. When it is unset, the lifespan in `src/api/main.py` logs `GEMINI_API_KEY not set` as a warning and creates no `GeminiService`. See [LLM providers](reference/10-llm-providers.md). |
+| `JWT_PRIVATE_KEY_PATH`, `JWT_PUBLIC_KEY_PATH` | Default to `/secrets/jwt_private.pem` and `/secrets/jwt_public.pem`. See below. |
+
+JWT keys (`src/auth/jwt_service.py`, `JWTService`):
+
+- When the configured private key file exists, it is loaded.
+- When it does not exist and `ENVIRONMENT` is not `production`, the service generates an RSA key pair and tries to write it to the configured paths. If the directory is not writable, it logs `jwt_private_key_path_not_writable_using_ephemeral` and keeps an in-memory key that does not survive a restart.
+- When `ENVIRONMENT` is `production`, a missing or unreadable key file raises `RuntimeError`.
+
+The compose file mounts no volume at `/secrets`. The settings are described in [configuration](reference/02-configuration.md).
+
+## Run the stack
 
 ```bash
-# API Configuration
-GEMINI_API_KEY=your-gemini-api-key-here
-DATABASE_URL=postgresql+asyncpg://research:research123@localhost:5432/research_db
-REDIS_URL=redis://localhost:6379/0
-
-# Development Settings
-ENVIRONMENT=development
-DEBUG=true            # enables /docs and /redoc (both OFF in production)
-LOG_LEVEL=INFO
-DEV_ALLOW_ANONYMOUS_WEBSOCKETS=false  # explicit local-only opt-in
-
-# Security (JWT is RS256 with PEM key files — see the Auth section)
-JWT_PRIVATE_KEY_PATH=/secrets/jwt_private.pem
-JWT_PUBLIC_KEY_PATH=/secrets/jwt_public.pem
-JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
-JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
-
-# Optional: enable OpenRouter multi-provider routing (both required)
-# MULTI_PROVIDER_ROUTING_ENABLED=true
-# OPENROUTER_API_KEY=your-openrouter-key
+make dev          # ./scripts/compose.sh up -d
+make dev-build    # ./scripts/compose.sh up -d --build
+make dev-logs     # ./scripts/compose.sh logs -f
+make dev-stop     # ./scripts/compose.sh down
 ```
 
-### 4. Start Services
+`scripts/compose.sh` runs `docker compose` with `--project-directory` set to the repository root and the two `--env-file` arguments described above.
+
+Services in `docker-compose.yml` and their host ports:
+
+| Service | Host port | Notes |
+|---|---|---|
+| `api` | `${API_HOST_PORT:-8000}` | Built from the `development` stage of `Dockerfile`; runs `uvicorn src.api.main:app` on container port 8000; healthcheck `curl http://localhost:8000/health` |
+| `mcp-server` | none published | Runs `MCPServer` from `src/mcp/server.py` over HTTP on container port 9000; `entrypoint: []`, so it does not run migrations |
+| `postgres` | `${POSTGRES_HOST_PORT:-5432}` | `postgres:16-alpine`, database `research_db`, user `research` |
+| `redis` | `${REDIS_HOST_PORT:-6379}` | `redis:7-alpine` with append-only persistence |
+| `web` | `${WEB_HOST_PORT:-3000}` | Static build of `cerebro/web`, served by an unprivileged nginx on container port 8080. It has no `/api` proxy. |
+| `nginx` | `${NGINX_HTTP_HOST_PORT:-80}` and `${NGINX_HTTPS_HOST_PORT:-443}` | Reverse proxy from `docker/nginx/nginx.conf`: `/api/` and `/ws` go to `api:8000`; `/health` is answered by nginx itself and never reaches the API; `/docs` is served from nginx's own static root and returns 404 (FastAPI's `/docs` is not reachable through the proxy); everything else goes to `web:8080` |
+| `pgadmin` | 5050 | Profile `dev-tools` |
+| `redis-commander` | 8081 | Profile `dev-tools` |
+| `masr-router` | 9100 | Profile `legacy-masr-service` |
+
+Migrations: the `api` service uses `/entrypoint.sh` (`docker/entrypoint.sh`), which runs `alembic upgrade head`, exits with the migration's status if it fails and otherwise `exec`s the command. `make db-init` runs the same upgrade inside a running `api` container.
+
+Web workbench: the web client calls the relative base URL `/api/v1` (`cerebro/web/src/api/client.ts`), so it needs a same-origin proxy. Through Compose, open `http://localhost` (the `nginx` service, `NGINX_HTTP_HOST_PORT`). For a local dev server, run `npm install` and `npm run dev` in `cerebro/web`; `cerebro/web/vite.config.ts` proxies `/api` and `/ws` to `VITE_API_URL`, or to `http://localhost:8000` when it is unset. The Playwright config starts that dev server on port 5173 (`PLAYWRIGHT_PORT`).
+
+Optional profiles:
 
 ```bash
-# Start the default services with home/project dotenv support
-./scripts/compose.sh up -d
-
-# Or start with development tools (pgAdmin, Redis Commander)
-./scripts/compose.sh --profile dev-tools up -d
-
-# Verify services are running
-./scripts/compose.sh ps
-
-# Optional legacy standalone MASR diagnostics service (not the query path)
-./scripts/compose.sh --profile legacy-masr-service up -d masr-router
+./scripts/compose.sh --profile dev-tools up -d     # pgAdmin and Redis Commander
+make legacy-masr                                   # the standalone MASR (Multi-Agent System Router) diagnostics service on port 9100
 ```
 
-The wrapper parses neither file itself. It passes absolute project-then-home
-`--env-file` arguments to Compose, and shell exports remain highest priority.
-Plain `docker compose` does not load `~/.env` automatically.
+The Makefile describes `legacy-masr` as the "non-authoritative standalone MASR diagnostics service". The API routes through the in-process router (see [MASR routing](reference/06-masr-routing.md)).
 
-### 5. Initialize Database
+## Get an access token
+
+Every route except the ones in `PUBLIC_ROUTE_ALLOWLIST` (`src/middleware/auth_middleware.py`) needs a bearer token. The ten entries are listed in [HTTP API](reference/03-http-api.md#authentication-requirement).
+
+Register (`RegisterRequest` in `src/auth/models.py`):
 
 ```bash
-# Run database migrations
-alembic upgrade head
+curl -s -X POST http://localhost:8000/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "email": "dev@example.com",
+    "username": "dev-user",
+    "password": "Str0ng!Passphrase#1",
+    "confirm_password": "Str0ng!Passphrase#1",
+    "accept_terms": true
+  }'
 ```
 
-### 6. Verify Installation
+Field rules: `username` is 3 to 50 characters from letters, digits, `_` and `-`, and is lowercased; `password` is at least 12 characters with an uppercase letter, a lowercase letter, a digit and one of `!@#$%^&*()_+-=[]{}|;:,.<>?`; `confirm_password` must equal `password`; `accept_terms` must be `true`. `full_name` and `organization` are optional. `register` also rejects, with 400, a password that is one of `123456`, `password`, `qwerty`, `abc123`, `111111`, `123123`, `admin` or `letmein`, contains the username or the email local part, has three ascending or descending sequential characters or three repeated characters, or has an entropy below 40. It rejects, with 400, a password found in the HaveIBeenPwned breach list. A duplicate email returns 409.
+
+The 201 response is an `AuthResponse`: a `user` object and a `tokens` object with `access_token`, `refresh_token`, `token_type` and `expires_in`. Log in later with `POST /api/v1/auth/login` and `{"email": ..., "password": ...}`, which applies the same password rules and returns the same shape.
 
 ```bash
-# Run health checks
-research-cli health
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email": "dev@example.com", "password": "Str0ng!Passphrase#1"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["tokens"]["access_token"])')
 
-# Run basic tests (health-endpoint tests live in tests/test_api.py)
-pytest tests/test_api.py::TestHealthEndpoints -v
-
-# Start API server
-uvicorn src.api.main:app --reload --port 8000
+curl -s http://localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN"
+curl -s http://localhost:8000/api/v1/research/projects -H "Authorization: Bearer $TOKEN"
 ```
 
-When `DEBUG=true`, interactive API docs are served at `http://localhost:8000/docs` (Swagger) and `/redoc`. Both are disabled when `DEBUG=false` (the production default).
+Organization claim: tenant-scoped routes resolve their caller through `get_tenant_context` or `get_tenant_identity` (`src/middleware/tenant_context.py`). Both call `require_organization_id` and answer 403 `Tenant organization claim is required` when the token has no `organization_id`.
 
-## Development Environment
+A local user always gets one: `register` creates the user with a fresh `uuid4()` organization, and `login` assigns one through `provisioned_organization_id` when the user has none, then puts it in the token (`src/api/auth/auth_router.py`). See [authentication and tenancy](reference/04-authentication-and-tenancy.md).
 
-### Directory Structure
+## Execution authority
 
-```
-cerebro/
-├── .github/                    # GitHub workflows and templates
-├── docs/                       # Documentation
-├── scripts/                    # Development and ops scripts
-├── src/                        # Main source code
-│   ├── agents/                 # Agent implementations + 17-type registry
-│   │   ├── base.py            # BaseAgent abstract class
-│   │   ├── factory.py         # AgentFactory (catalog for the bypass API)
-│   │   ├── llm_worker_base.py # LLMWorkerAgentBase — shared worker scaffold
-│   │   ├── models.py          # Agent data models
-│   │   ├── literature_review_agent.py     # Research (5)
-│   │   ├── comparative_analysis_agent.py
-│   │   ├── methodology_agent.py
-│   │   ├── synthesis_agent.py
-│   │   ├── citation_agent.py
-│   │   ├── content_agents.py              # Content (4)
-│   │   ├── analytics_agents.py            # Analytics (3)
-│   │   ├── finance_agents.py              # Finance (3)
-│   │   ├── financial_calculator_agent.py  # deterministic tool agent
-│   │   ├── verification_agent.py          # cross-cutting QA gate
-│   │   ├── schemas/           # Structured Pydantic schemas (research)
-│   │   ├── supervisors/       # Domain supervisors (Research/Content/Analytics/Finance)
-│   │   ├── tools/             # finance_math.py + deterministic tool registry
-│   │   └── integrations/      # External integrations
-│   ├── ai_brain/               # Routing and intelligence
-│   │   ├── router/            # MASRouter (masr.py), query_analyzer,
-│   │   │                      #   query_decomposer, cost_optimizer
-│   │   ├── compaction/        # Context compaction
-│   │   ├── config/            # Model/provider configuration
-│   │   ├── experimentation/   # A/B experimentation (routers unmounted)
-│   │   ├── integration/       # Integration glue
-│   │   ├── learning/          # Adaptive/episodic routing (flag-gated OFF)
-│   │   ├── memory/            # Memory-informed routing hooks
-│   │   └── providers/         # LLM provider clients
-│   ├── api/                    # FastAPI application
-│   │   ├── main.py            # App entry point, router mounting, middleware
-│   │   ├── routes/            # API endpoints (only some are mounted)
-│   │   ├── services/          # direct_execution_service.py + supervisor/talkhier services
-│   │   ├── middleware/        # Rate limiting, cost-drift, idempotency
-│   │   └── websocket/         # WebSocket handlers + auth
-│   ├── cli/                    # Command-line interface (research-cli)
-│   │   ├── main.py            # CLI entry point (click)
-│   │   ├── commands/          # CLI command groups
-│   │   ├── formatters.py      # table/json/yaml/csv output
-│   │   └── websocket_client.py
-│   ├── core/                   # config.py, observability.py, tracing.py, telemetry.py, pii_redactor.py
-│   ├── auth/                    # JWT service + auth helpers
-│   ├── middleware/             # Auth (no-op), rate limiting, cost-drift, idempotency
-│   ├── models/                 # API/Pydantic models + db/ (SQLAlchemy models)
-│   ├── repositories/           # Async SQLAlchemy repository layer
-│   ├── memory/                 # Multi-tier memory system
-│   ├── mcp/                    # MCP tool servers/clients
-│   ├── services/               # Cross-cutting services (e.g. report generation)
-│   ├── prompts/                # PromptManager + YAML templates
-│   ├── templates/             # Prompt/report templates
-│   ├── costs/                  # Cost accounting/optimization
-│   ├── improvement/           # Self-improvement / adaptive-eval harness
-│   ├── benchmarks/            # Benchmark harnesses
-│   ├── research_platform/     # Pre-rebrand research-platform modules
-│   ├── qa/                     # MAST failure labeler (mast.py is the only wired piece)
-│   ├── reliability/            # Circuit breaker, retry, service registry
-│   ├── security/               # ContentSanitizer (only wired export)
-│   └── utils/                  # Utility functions
-├── tests/                      # Test suite
-├── docker/                     # Docker configs (Dockerfile.masr, entrypoint.sh, init.sql, nginx/)
-├── alembic/                    # Database migrations
-├── pyproject.toml             # Project configuration + [project.scripts]
-├── docker-compose.yml         # Service definitions
-└── README.md
-```
+A fresh install has no route, CLI command or script that creates an execution authority. Until a deployment supplies one, query routes return `422` with `EXECUTION_AUTHORITY_REQUIRED` for a request without an `authority_reference` and `EXECUTION_AUTHORITY_UNAVAILABLE` for a reference that no stored authority matches, and `POST /api/v1/research/projects` creates a project that stays `pending`. The model-backed requests in this guide, including the query in the [README](../README.md#submit-a-routed-query), therefore cannot run end to end on a fresh install. [Research execution](reference/05-research-execution.md#execution-authority) describes the mechanism: stored snapshot rows are loaded at startup, or a resolver is placed on `app.state`. A plan-backed route must also name the `deepseek`, `llama` or `openrouter` provider, because the `gemini` provider rejects every request ([LLM providers](reference/10-llm-providers.md)).
 
-> There is no `src/temporal/` package and no top-level `src/orchestration/` subsystem. Cerebro's execution engine is the in-process `DirectExecutionService`; the earlier Temporal-based orchestrator was removed. LangGraph still exists, but **only inside domain supervisors** (each builds an internal `StateGraph`), not as a top-level orchestrator.
+## Use the CLI
 
-### Key Architectural Patterns
-
-#### Request Flow
-
-```
-Client -> FastAPI -> DirectExecutionService (asyncio background task)
-       -> MASRouter -> MASRSupervisorBridge
-       -> domain supervisors -> workers -> verification QA gate
-```
-
-`POST /api/v1/query/research` hands off to `DirectExecutionService`, which spawns an asyncio background task and returns immediately. The immediate HTTP response contains **hardcoded placeholders** (`selected_agents=[]`, `estimated_cost=0.015`, `estimated_quality=0.85`, `confidence=0.85`, `routing_time_ms=50.0`) — real routing data is only available afterward via the execution status/results endpoints (see [Execution Status](#execution-status-endpoints)).
-
-- **MASRouter** (`src/ai_brain/router/masr.py`) — the FastAPI lifespan owns one settings-backed in-process router shared by direct execution, the mounted MASR API, and active TalkHier sessions. The standalone port-9100 container is legacy-only, requires the `legacy-masr-service` profile, and is not on the query path.
-- **MASRSupervisorBridge** maps MASR routing decisions to supervisors.
-- **Domain supervisors** — Research, Content, Analytics, Finance. Each runs an internal LangGraph `StateGraph`.
-
-#### Repository Pattern
-
-Data access is abstracted through async SQLAlchemy repositories over the DB models in `src/models/db/`:
-
-```python
-# src/repositories/base.py
-class BaseRepository(Generic[ModelType]):
-    """Base repository with generic CRUD operations."""
-
-    def __init__(self, model: type[ModelType], session: AsyncSession):
-        self.model = model
-        self.session = session
-
-    async def create(self, **kwargs) -> ModelType:
-        entity = self.model(**kwargs)
-        self.session.add(entity)
-        # Note: create() flushes and refreshes — it does NOT commit;
-        # the caller (or the request session) owns the transaction.
-        await self.session.flush()
-        await self.session.refresh(entity)
-        return entity
-
-    async def get(self, id: str | UUID) -> ModelType | None:
-        query = select(self.model).where(self.model.id == id)
-        result = await self.session.execute(query)
-        return result.scalar_one_or_none()
-```
-
-Concrete repositories include `ResearchRepository`, `ReportRepository`, `UserRepository`, `CheckpointRepository` (`WorkflowCheckpoint`), and `ResultRepository` (`ResearchResult`).
-
-#### Dependency Injection
-
-Services and repositories are injected through FastAPI's dependency system:
-
-```python
-async def get_database_session():
-    async with AsyncSessionLocal() as session:
-        yield session
-
-async def get_research_repository(session: AsyncSession = Depends(get_database_session)):
-    return ResearchRepository(session)
-
-@router.post("/projects")
-async def create_project(
-    request: CreateProjectRequest,
-    repo: ResearchRepository = Depends(get_research_repository),
-):
-    return await repo.create(**request.dict())
-```
-
-#### Agent Scaffold
-
-All domain workers subclass **`LLMWorkerAgentBase`** (`src/agents/llm_worker_base.py`). Agents are **LLM-reasoning (prompt-driven)**, not coded decision engines. Note that reported confidence scores are hardcoded heuristics (`0.85` on success, `0.3` on empty output, `0.8` on the fast path) — not real quality signals.
-
-```python
-class LiteratureReviewAgent(LLMWorkerAgentBase):
-    agent_type = "literature_review"
-
-    def _build_prompt(self, task: AgentTask) -> str:
-        ...
-```
-
-### Configuration Management
-
-Configuration is a single Pydantic `Settings(BaseSettings)` in `src/core/config.py`, loaded from `.env` (`case_sensitive=True`, `extra='ignore'`), exposed as the module singleton `settings` and via `get_settings()`.
-
-```python
-# src/core/config.py (abridged — see docs/configuration-reference.md for the full list)
-class Settings(BaseSettings):
-    """Application settings from environment variables."""
-
-    DEBUG: bool = False  # /docs and /redoc served only when True
-
-    DATABASE_URL: str = "postgresql+asyncpg://research:research123@localhost:5432/research_db"
-    REDIS_URL: str = "redis://localhost:6379/0"
-    GEMINI_API_KEY: str | None = None
-    GEMINI_DEFAULT_MODEL: str = "gemini-pro"
-
-    # Multi-provider routing (OpenRouter) — OFF by default
-    MULTI_PROVIDER_ROUTING_ENABLED: bool = False
-    OPENROUTER_API_KEY: str | None = None
-
-    # Auth — RS256 with PEM key files
-    JWT_ALGORITHM: str = "RS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
-    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-
-    model_config = SettingsConfigDict(case_sensitive=True, extra="ignore")
-
-settings = Settings()
-```
-
-Before `settings` is constructed, `src/core/environment.py` parses the
-repository `.env` and then `~/.env` without executing them. It never replaces a
-key that was already present in the process.
-
-#### Multiple Environment Support
+The `research-cli` entry point is declared in `pyproject.toml` (`src.cli.main:cli`).
 
 ```bash
-# Development
-ENVIRONMENT=development
-DEBUG=true
-DATABASE_URL=postgresql+asyncpg://research:research123@localhost:5432/research_db
-
-# Testing
-ENVIRONMENT=testing
-DEBUG=true
-DATABASE_URL=postgresql+asyncpg://test:test123@localhost:5432/research_test_db
-
-# Production
-ENVIRONMENT=production
-DEBUG=false
-DATABASE_URL=postgresql+asyncpg://prod_user:secure_pass@db.example.com:5432/research_prod_db
+export RESEARCH_API_URL=http://localhost:8000     # default when unset
+export RESEARCH_AUTH_TOKEN="$TOKEN"               # sent as "Authorization: Bearer ..."
+research-cli health                               # GET /health and GET /ready, no token needed
+research-cli projects list                        # authenticated
 ```
 
-In production, `config.py` validators enforce `SECRET_KEY` length (≥32 chars) and reject default DB credentials.
+`CLIConfig.from_env` (`src/cli/config.py`) reads `~/.research-cli.env` when it exists and `.env.cli` in the current directory otherwise; `.env.cli.example` lists the variables. When `RESEARCH_AUTH_TOKEN` is unset and `RESEARCH_API_KEY` is set, the client sends `X-API-Key` instead (`src/cli/client.py`). Without either, authenticated commands receive 401. See [CLI and web clients](reference/13-cli-and-web-clients.md).
 
-### LLM Providers
+## API documentation pages
 
-- **Default runtime is Gemini only** (`GEMINI_ENABLED=True`, `GEMINI_DEFAULT_MODEL='gemini-pro'`).
-- **OpenRouter multi-provider routing** (DeepSeek for the `simple` tier / Claude Sonnet for the `complex` tier) is **flag-gated OFF**. It activates only when **both** `MULTI_PROVIDER_ROUTING_ENABLED=True` **and** `OPENROUTER_API_KEY` are set.
-- `DEEPSEEK_ENABLED`, `LLAMA_ENABLED`, and `OPENROUTER_ENABLED` all default to `False`. Do not assume DeepSeek or Llama are active out of the box.
+With `DEBUG` false the API serves no interactive documentation pages, and the nginx `/docs` location is a separate static root that returns 404, so it is not FastAPI's `/docs`.
 
-## Development Workflow
-
-### Code Quality Standards
-
-Formatting and linting are handled by **Ruff**; type checking by **mypy**. CI runs `ruff check`, `ruff format --check`, and `mypy`.
-
-#### 1. Code Formatting
+`FastAPI(...)` in `src/api/main.py` sets `docs_url` and `redoc_url` to `/docs` and `/redoc` only when `DEBUG` is true, and leaves `openapi_url` at FastAPI's default `/openapi.json`. `AuthMiddleware` applies to all three paths, so a browser request without an `Authorization` header receives 401 (`tests/security/test_route_authentication_boundary.py` asserts this for `/docs`, `/redoc` and `/openapi.json`). Fetch the schema with a token:
 
 ```bash
-# Format code (ruff format also sorts imports — no separate isort step)
-ruff format src tests
+curl -s http://localhost:8000/openapi.json -H "Authorization: Bearer $TOKEN"
 ```
 
-#### 2. Linting
+## Smoke tests
+
+Both smoke scripts currently fail their last check. They send the final `POST /api/v1/query/research` without a token and expect 200, so the route's `401` is reported as `FAIL` and the script exits 1 even when every earlier check passes.
+
+`./scripts/smoke_test.sh` boots the API in a tmux session named `cerebro-smoke` on port 8099 with `DATABASE_URL=sqlite+aiosqlite:///./cerebro_smoke_test.db`. It generates an RSA key pair in `/tmp/cerebro_smoke_keys` with `.venv/bin/python3` and mints an access token itself (subject `00000000-0000-0000-0000-00000000beef`, organization `00000000-0000-0000-0000-00000000cafe`), so it does not call `register` or `login`. It then runs these checks:
+
+- `GET /health`.
+- Under `/api/v1/research/projects`: `POST`, `GET`, `GET .../progress`, list, `GET .../results` (expects 404), a missing project (expects 404) and `POST .../cancel` (expects 204).
+- `POST /api/v1/query/research`.
+
+Each check prints `PASS` or `FAIL` with the status code. The script prints `SMOKE TEST PASSED` and exits 0, or `SMOKE TEST FAILED` and exits 1, and on exit it removes the tmux session, the database file and the keys. It requires `.venv`, `tmux` and an `httpx` importable from `python3`.
+
+`./scripts/smoke_test_postgres.sh` targets an already running Compose stack on `http://localhost:8000`. It registers a unique user through `/api/v1/auth/register`, logs in through `/api/v1/auth/login` and runs the same project checks with the login token, then the same final query check, which sends no token. The same pass and fail output and exit codes apply. Its start-up check is `docker compose ps | grep -q research-api`; the dev compose file sets no `container_name`, so the check matches only when the Compose project name makes the container name contain `research-api` (for example `COMPOSE_PROJECT_NAME=research`).
+
+That route is not in `PUBLIC_ROUTE_ALLOWLIST`, and `query_api.router` declares `Depends(get_current_token)`, which is why the unauthenticated request receives 401.
+
+## Code quality
 
 ```bash
-# Lint with Ruff
-ruff check src tests
-
-# Fix auto-fixable issues
-ruff check --fix src tests
+ruff format --check src tests     # what CI runs; use "ruff format src tests" to rewrite
+ruff check src tests              # what CI runs
+mypy src                          # strict mode, from [tool.mypy]
+make quality                      # make format lint type-check
 ```
 
-#### 3. Type Checking
+- `make format` runs `black src tests` (rewrites files); `make lint` runs `ruff check src tests`; `make type-check` runs `mypy src`; `make quality-fix` runs `format` and `lint-fix`. CI and pre-commit format with `ruff format`, not `black`.
+- `[tool.ruff]` sets `fix = true`, so `ruff check` rewrites fixable findings in place. Add `--no-fix` to only report.
+- Pre-commit hooks (`.pre-commit-config.yaml`): `ruff` with `--fix --exit-non-zero-on-fix`, `ruff-format`, `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `check-added-large-files` (`--maxkb=500`), `check-merge-conflict` and `detect-private-key`.
+- Pre-commit pins ruff `v0.8.0`, while the `dev` extra declares `ruff>=0.8.0` and CI installs it unpinned, so CI uses the newest release. To reproduce CI findings run `uvx ruff@latest check src tests`.
+- Web: `cd cerebro/web && npm run lint && npm run build` (`build` is `tsc -b && vite build`).
 
-```bash
-# Type check with mypy
-mypy src
-```
+## Make targets
 
-### Testing Strategy
+Targets whose recipes reference only files and services that exist:
 
-#### Test Structure
+| Target | Runs |
+|---|---|
+| `install` | `uv pip install -e ".[dev]"` |
+| `install-pip` | `./scripts/setup-python-env.sh` |
+| `dev`, `dev-build`, `dev-logs`, `dev-stop` | `./scripts/compose.sh up -d`, `up -d --build`, `logs -f`, `down` |
+| `dev-clean` | `./scripts/compose.sh down -v --remove-orphans`, then `docker system prune -f` |
+| `legacy-masr` | `./scripts/compose.sh --profile legacy-masr-service up -d masr-router` |
+| `prod-build`, `prod-up`, `prod-down`, `prod-logs` | `./scripts/compose.sh -f docker-compose.production.yml` with `build`, `up -d`, `down`, `logs -f` |
+| `db-init` | `./scripts/compose.sh exec api alembic upgrade head` |
+| `db-migrate` | prompts for a message, then `alembic revision --autogenerate -m` inside `api` |
+| `db-reset` | stops `postgres`, runs `docker volume rm cerebro_postgres_data` (the volume is named `<compose project>_postgres_data`, so the command works only when the checkout directory is named `cerebro`), starts `postgres`, sleeps 10 seconds, runs `make db-init` |
+| `db-backup` | `pg_dump -U research research_db` inside `postgres` into `backups/backup_<timestamp>.sql` |
+| `db-shell` | `psql -U research -d research_db` inside `postgres` |
+| `test`, `test-unit`, `test-integration`, `test-e2e`, `test-coverage` | `pytest`, `pytest tests/unit -v`, `pytest tests/integration -v`, `pytest tests/e2e -v`, `pytest --cov=src --cov-report=html --cov-report=term` |
+| `test-docker` | `docker-compose -f tests/integration/docker-compose.test.yml up --build --abort-on-container-exit`; the file defines only `postgres` and `redis`, so no tests run |
+| `lint`, `lint-fix`, `format`, `format-check`, `type-check`, `quality`, `quality-fix` | see [Code quality](#code-quality); `format-check` runs `black --check src tests` |
+| `cli-health`, `cli-projects`, `cli-test` | `research-cli health`, `research-cli projects list`, `research-cli projects create --title "Test Project" --query "Test query" --domains "test"` |
+| `masr-health` | `python -c` that constructs `MASRouter()` from `src/ai_brain/router/masr.py` and prints `health_check()` |
+| `load-test` | `locust -f tests/load/locustfile.py --host=http://localhost:8000` (see the [testing guide](testing-guide.md#load-tests)) |
+| `k8s-namespace`, `k8s-config`, `k8s-deploy`, `k8s-status`, `k8s-logs`, `k8s-clean` | `kubectl` against `k8s/namespace.yaml`, `k8s/configmap.yaml`, `k8s/` (kustomize, which does not build, so `k8s-deploy` and `k8s-clean` fail) and namespace `cerebro` |
+| `logs-api`, `logs-masr`, `logs-all` | `./scripts/compose.sh logs -f` for `api`, `masr-router` (with the `legacy-masr-service` profile) and all services |
+| `clean`, `clean-docker` | delete `__pycache__`, `*.pyc` and tool caches; `docker system prune -f`, `docker volume prune -f`, `docker network prune -f` |
+| `dev-workflow`, `ci-workflow`, `quick-test`, `quick-format` | `make format lint type-check test`; `make quality test test-docker`; `pytest tests/unit -x -v`; `black src tests && ruff check --fix src tests` |
+| `docker-login`, `docker-push-dev`, `docker-push-prod` | `docker login` with `DOCKER_REGISTRY_TOKEN` and `DOCKER_REGISTRY`; `docker-compose build` and `push` for the dev and production files |
+| `version` | prints Python, Docker, `docker-compose` and `kubectl` versions |
+| `backup-all` | `make db-backup`, `docker-compose exec redis redis-cli --rdb ...` and `cp -r src` into `backups/<date>/` |
 
-```
-tests/
-├── conftest.py              # Shared test configuration
-├── unit/                    # Unit tests
-├── integration/             # Integration tests (postgres + redis)
-├── e2e/                     # End-to-end tests
-├── security/                # Security tests
-├── regression/             # Golden-dataset regression
-└── fixtures/                # Test data
-```
+The targets `test-docker`, `docker-push-*`, `backup-all`, `version`, `metrics` and `status` call the legacy `docker-compose` binary instead of `docker compose`.
 
-#### Running Tests
+### Targets that reference missing files
 
-```bash
-# Run all tests
-pytest
+| Target | What is missing |
+|---|---|
+| `masr-test` | `examples/masr_supervisor_integration_test.py`; `examples/` holds three Markdown files |
+| `hierarchical-test` | `examples/hierarchical_agent_example.py` |
+| `perf-test` | the `tests/performance/` directory |
+| `benchmark` | `tests/benchmarks/run_benchmarks.py`; there is no `tests/benchmarks/` directory |
+| `k8s-secrets` | `k8s/secrets.yaml`; `k8s/` holds `external-secrets.yaml` and no `secrets.yaml` |
+| `logs-worker` | a `worker` service; `docker-compose.yml` defines none |
+| `metrics` | a `prometheus` service in `docker-compose.yml`; only `docker-compose.production.yml` defines one |
+| `setup`, `env-help` | a Temporal service. They print `Temporal UI: http://localhost:8080` and `TEMPORAL_HOST=localhost:7233`; `docker-compose.yml` defines no Temporal service |
+| `status` | a published MCP port. It curls `http://localhost:9000/health`; the `mcp-server` service publishes no host port |
 
-# Run with coverage
-pytest --cov=src --cov-report=html
-
-# Run a specific test file
-pytest tests/test_literature_review_agent.py -v
-
-# Run a specific test
-pytest tests/test_literature_review_agent.py::TestLiteratureReviewAgent::test_execute_literature_review -v
-
-# Run tests matching a pattern
-pytest -k "test_agent" -v
-
-# Run tests with specific markers
-pytest -m "integration" -v
-```
-
-> **CI coverage gate:** CI enforces `coverage report --fail-under=25`. Do not assume a higher enforced floor — 25% is the actual gate.
-
-#### Test Configuration
-
-```python
-# conftest.py
-import pytest
-import asyncio
-from httpx import AsyncClient
-from src.api.main import app
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-@pytest.fixture
-async def async_client():
-    async with AsyncClient(app=app, base_url="http://test") as client:
-        yield client
-
-@pytest.fixture
-def sample_research_project():
-    """Provide a sample research project for testing."""
-    return {
-        "id": "550e8400-e29b-41d4-a716-446655440000",
-        "title": "AGI and Society Research",
-        "user_id": "test-user-123",
-        "status": "pending",
-        "query": {
-            "text": "What are the implications of artificial general intelligence on society?",
-            "domains": ["AI", "Ethics", "Sociology"],
-            "depth_level": "comprehensive",
-        },
-    }
-```
-
-#### Example Tests
-
-```python
-# tests/test_literature_review_agent.py
-@pytest.mark.asyncio
-async def test_literature_review_agent():
-    """Test literature review agent execution."""
-    config = AgentConfig(gemini_config=mock_gemini_config)
-    agent = LiteratureReviewAgent(config)
-
-    task = AgentTask(
-        id=uuid4(),
-        agent_type="literature_review",
-        task_type="research",
-        research_query="US equity risk factors",
-        input_data={},
-    )
-
-    with patch.object(agent.gemini_service, "generate_content") as mock_gemini:
-        mock_gemini.return_value = {"content": "Mocked response"}
-        result = await agent.execute(task)
-
-        assert result.agent_type == "literature_review"
-        assert result.status == "completed"
-        assert result.confidence_score > 0.0
-
-# tests/integration/test_api_integration.py
-@pytest.mark.asyncio
-async def test_create_research_project(async_client, sample_research_project):
-    """Test research project creation API."""
-    response = await async_client.post("/api/v1/research/projects", json=sample_research_project)
-
-    assert response.status_code == 201
-    data = response.json()
-    assert data["title"] == sample_research_project["title"]
-    assert data["status"] == "pending"
-    assert "id" in data
-```
-
-### Mocking External Services
-
-External LLM calls should be mocked in unit tests. Cerebro's runtime provider is Gemini, so mock the Gemini service:
-
-```python
-# Define mocks inline per test module (conftest.py also provides a `mock_gemini_client` fixture)
-class MockGeminiService:
-    """Mock Gemini service for testing."""
-
-    async def generate_content(self, prompt: str, **kwargs) -> dict:
-        return {
-            "content": f"Mocked response for: {prompt[:50]}...",
-            "confidence": 0.95,
-            "metadata": {"tokens_used": 100},
-        }
-```
-
-### Pre-commit Hooks
-
-Pre-commit hooks run **Ruff** (lint + format) plus the standard hygiene hooks (do not add `black` or `isort` — `ruff format` supersedes both). **mypy is not a pre-commit hook** — it runs only in CI (`.github/workflows/ci.yml`), so run `mypy src` yourself before pushing:
-
-```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.0
-    hooks:
-      - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
-      - id: ruff-format
-
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
-    hooks:
-      - id: trailing-whitespace
-      - id: end-of-file-fixer
-      - id: check-yaml
-      - id: check-added-large-files
-        args: [--maxkb=500]
-      - id: check-merge-conflict
-      - id: detect-private-key
-```
-
-### Git Workflow
-
-#### Branch Naming Convention
-
-```bash
-feature/agent-improvements
-bugfix/timeout-handling
-docs/setup-guide
-refactor/repository-pattern
-```
-
-#### Commit Message Format
+## Repository layout
 
 ```
-type(scope): short description
-
-Longer description if needed
-
-- Details about changes
-- Breaking changes noted
-- Issue references (#123)
+alembic/            Alembic environment and the revision scripts used by "alembic upgrade head"
+cerebro/web/        React and TypeScript web workbench (Vite, Playwright specs in tests/e2e)
+config/             Per-environment Python config modules and the example promotion criteria JSON
+configs/models/     YAML model configuration (base, development, production)
+docker/             API entrypoint, MASR service Dockerfile, init.sql, nginx reverse-proxy config
+docs/               This documentation
+evals/live/         Live-provider evaluation suite
+examples/           Sample research papers and report (Markdown)
+k8s/                Kubernetes manifests and kustomization
+landing_page/       Static landing page
+migrations/         Three revision scripts outside alembic's configured script location
+scripts/            compose wrapper, smoke tests, test runners, evaluation entry points
+src/
+  agents/           Worker agents, supervisors, agent factory, communication and tool helpers
+  ai_brain/         MASR router, LLM providers, memory tiers, experimentation, compaction, config
+  api/              FastAPI app (main.py), routes/, auth/, middleware/, services/, websocket/
+  auth/             JWT service, password service, auth request and response models
+  benchmarks/       Benchmark dataset, replication, and evaluator classes
+  cli/              research-cli (click commands, API client, formatters)
+  core/             Settings, environment loading, kernel, contracts, capabilities, claims, tools
+  costs/            Cost tracker, budget manager, forecaster, and optimizer classes
+  improvement/      Feedback, reward-model, and prompt-optimizer classes
+  mcp/              MCP server, client, registry, and tools
+  memory/           Working, episodic, semantic, and procedural memory service classes
+  middleware/       Authentication middleware and tenant-context dependencies
+  models/           API models; db/ holds the SQLAlchemy models
+  prompts/          Prompt manager, versioning, YAML prompt templates
+  qa/               MAST labels and legacy annotation helpers
+  reliability/      Retry strategies and service registry
+  repositories/     Database repositories
+  research_platform/ Entry point named by the research-platform script
+  security/         Audit logger and middleware, security headers, content sanitizer, login throttle
+  services/         Gemini service, report generation, exporters, hallucination detector
+  templates/        Jinja report templates
+  utils/            Async, serialization, and type-coercion helpers
+tests/              Test suite (see the testing guide)
 ```
-
-Examples:
-
-```bash
-feat(agents): add valuation agent precompute for DCF
-
-Wire the deterministic finance-math tool into ValuationAgent so exact
-DCF figures are injected into the LLM prompt.
-
-Closes #123
-
-fix(query): stop returning placeholder routing metrics as live data
-
-Document that the immediate /research response fields are placeholders;
-surface real routing via the execution status endpoint.
-
-Fixes #456
-```
-
-## Testing Infrastructure
-
-### Test Database Setup
-
-```bash
-# Create test database
-createdb research_test_db
-
-# Set test environment
-export DATABASE_URL=postgresql+asyncpg://test:test123@localhost:5432/research_test_db
-
-# Run migrations on the test database
-alembic upgrade head
-```
-
-### Performance Testing
-
-```python
-# Illustrative pytest perf test — the repo's load tests live in tests/load/locustfile.py (Locust)
-@pytest.mark.performance
-async def test_agent_execution_performance():
-    """Test agent execution performance under load."""
-    agent = LiteratureReviewAgent(test_config)
-    tasks = [create_test_task() for _ in range(10)]
-
-    start_time = time.time()
-    results = await asyncio.gather(*[agent.execute(task) for task in tasks])
-    execution_time = time.time() - start_time
-
-    assert execution_time < 30.0
-    assert all(result.status == "completed" for result in results)
-    assert len(results) == 10
-```
-
-## Contributing Guidelines
-
-### Getting Started
-
-1. **Fork the repository** on GitHub
-2. **Clone your fork** locally
-3. **Create a feature branch** from `main`
-4. **Make your changes** following coding standards
-5. **Add tests** for new functionality
-6. **Run the test suite** to ensure nothing breaks
-7. **Update documentation** as needed
-8. **Submit a pull request**
-
-### Development Process
-
-```bash
-# Fork and clone
-git clone https://github.com/your-username/cerebro.git
-cd cerebro
-
-# Add upstream remote
-git remote add upstream https://github.com/original-org/cerebro.git
-
-# Create feature branch
-git checkout -b feature/your-feature-name
-
-# Install development dependencies
-uv pip install -e ".[dev]"
-pre-commit install
-
-# Make changes, then run quality checks
-ruff format src tests
-ruff check src tests
-mypy src
-pytest
-
-# Commit and push
-git add .
-git commit -m "feat(component): add new feature"
-git push origin feature/your-feature-name
-```
-
-### Code Review Process
-
-#### Pull Request Requirements
-
-1. **Clear description** of changes and motivation
-2. **All tests passing** in CI/CD pipeline (lint, mypy, test matrix, `--fail-under=25` coverage gate)
-3. **Documentation updated** for new features
-4. **No merge conflicts** with main branch
-5. **Approved by a maintainer** or core contributor
-
-#### Review Checklist
-
-- [ ] Code follows project style guidelines (ruff format + ruff check + mypy)
-- [ ] Tests are comprehensive and meaningful
-- [ ] Documentation is clear and complete
-- [ ] Breaking changes are clearly marked
-- [ ] Performance impact is considered
-- [ ] Security implications are addressed
-
-## Debugging and Troubleshooting
-
-### Common Issues
-
-#### 1. Database Connection Issues
-
-```bash
-# Check database status
-pg_ctl status
-
-# Restart PostgreSQL
-brew services restart postgresql  # macOS
-sudo systemctl restart postgresql  # Linux
-
-# Test connection
-psql -h localhost -U research -d research_db
-```
-
-#### 2. Redis Connection Issues
-
-```bash
-# Check Redis status
-redis-cli ping
-
-# Restart Redis
-brew services restart redis  # macOS
-sudo systemctl restart redis  # Linux
-```
-
-#### 3. Execution Appears Stuck
-
-Because `DirectExecutionService` runs the pipeline as an asyncio background task, the immediate `/research` response is not the result. Poll the execution status endpoint to see real progress and routing:
-
-```bash
-curl "http://localhost:8000/api/v1/query/execution/{execution_id}/status"
-```
-
-If executions never leave `pending`, check that the Gemini API key is set and that Postgres/Redis are reachable — the background task fails silently to the caller and records its error in the execution status.
-
-### Debugging Tools
-
-#### 1. Logging Configuration
-
-Cerebro uses **structlog** directly — there is no central `configure_logging()` function or `src/core/logging.py` module. Modules obtain a logger via `structlog.get_logger()` and log with bound key/value context:
-
-```python
-import structlog
-
-logger = structlog.get_logger(__name__)
-logger.info("Processing request", project_id="123", user_id="user456")
-```
-
-#### 2. Debug Mode
-
-```bash
-# Enable debug mode (also serves /docs and /redoc)
-export DEBUG=true
-export LOG_LEVEL=DEBUG
-
-# Run with verbose logging
-uvicorn src.api.main:app --reload --log-level debug
-
-# CLI debug mode
-research-cli --verbose projects list
-```
-
-#### 3. Database Debugging
-
-```python
-import logging
-logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
-
-from sqlalchemy import text
-result = await session.execute(text("SELECT version()"))
-print(result.scalar())
-```
-
-### Observability
-
-- **Prometheus metrics** are exposed at `/metrics` (`src/core/observability.py`): `llm_call_duration_seconds`, `llm_tokens_total`, `llm_cost_usd_total`, `llm_request_cost_drift_ratio`, `llm_cost_drift_events_total`.
-- **Structured logging** via structlog throughout.
-- **Langfuse tracing** is opt-in (`LANGFUSE_ENABLED`, default `False`). There is no OpenTelemetry backbone and no Grafana/Loki/Jaeger/Sentry wiring.
-
-## Execution Status Endpoints
-
-Because query execution is asynchronous, use these endpoints to observe and control a run:
-
-```bash
-# Real routing/result status (poll this after POST /research)
-curl "http://localhost:8000/api/v1/query/execution/{execution_id}/status"
-
-# Final results
-curl "http://localhost:8000/api/v1/query/execution/{execution_id}/results"
-
-# Resume a checkpointed execution — the path param is the PROJECT id, not the execution_id.
-# The route (POST /execution/{project_id}/resume) parses this as a project UUID and loads
-# that project's latest recoverable checkpoint; passing an execution_id here returns
-# 404 "No recoverable checkpoint found".
-curl -X POST "http://localhost:8000/api/v1/query/execution/{project_id}/resume"
-```
-
-## Documentation Standards
-
-### Code Documentation
-
-```python
-async def create_research_project(
-    title: str,
-    query: ResearchQuery,
-    user_id: str,
-    scope: ResearchScope | None = None,
-) -> ResearchProject:
-    """
-    Create a new research project and start its asynchronous execution.
-
-    Args:
-        title: Project title (max 200 characters).
-        query: Research query with domains and parameters.
-        user_id: ID of the user creating the project.
-        scope: Optional research scope parameters.
-
-    Returns:
-        Created research project with assigned ID and initial status.
-
-    Raises:
-        ValidationError: If project parameters are invalid.
-
-    Example:
-        >>> query = ResearchQuery(
-        ...     text="DCF valuation for a large-cap software company",
-        ...     domains=["finance"],
-        ... )
-        >>> project = await create_research_project(
-        ...     title="Equity Valuation Study",
-        ...     query=query,
-        ...     user_id="researcher-001",
-        ... )
-        >>> print(project.id)
-        'proj-550e8400-e29b-41d4-a716-446655440000'
-    """
-```
-
-### API Documentation
-
-Endpoints are auto-documented via FastAPI's OpenAPI schema, served at `/docs` and `/redoc` **only when `DEBUG=True`**:
-
-```python
-@router.post(
-    "/projects",
-    response_model=ResearchProject,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create research project",
-    description="Create a new research project and start its execution.",
-    responses={
-        201: {"description": "Project created successfully"},
-        400: {"description": "Invalid project parameters"},
-        500: {"description": "Internal server error"},
-    },
-)
-async def create_research_project(
-    request: CreateResearchProjectRequest,
-) -> ResearchProject:
-    """Create a new research project."""
-```
-
-## Security Considerations
-
-### Environment Variables
-
-```bash
-# Never commit sensitive data. Use .env files (added to .gitignore).
-GEMINI_API_KEY=your-secret-key
-DATABASE_PASSWORD=secure-password
-```
-
-### Input Validation
-
-```python
-from pydantic import BaseModel, field_validator, Field
-
-class CreateProjectRequest(BaseModel):
-    """Request model with validation."""
-
-    title: str = Field(..., min_length=1, max_length=200)
-    query: str = Field(..., min_length=10, max_length=1000)
-    domains: list[str] = Field(..., min_length=1, max_length=10)
-
-    @field_validator("domains")
-    @classmethod
-    def validate_domains(cls, v):
-        allowed = {"research", "content", "analytics", "finance"}
-        for domain in v:
-            if domain not in allowed:
-                raise ValueError(f"Invalid domain: {domain}")
-        return v
-```
-
-### Authentication
-
-Cerebro uses **JWT with RS256** (asymmetric), backed by PEM key files — not a shared HMAC secret. Access tokens expire in **15 minutes**, refresh tokens in **7 days**. Passwords are hashed with bcrypt (12 rounds) and must be at least 12 characters.
-
-```python
-from fastapi import Depends, HTTPException
-
-async def get_current_token(token: str = Depends(bearer_scheme)):
-    """Validate a JWT using the RS256 public key."""
-    payload = jwt_service.validate_token(token.credentials)  # RS256, /secrets/jwt_public.pem
-    user_id = payload.get("sub")
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return payload
-```
-
-> **Auth reality check:** the request-level `AuthMiddleware` is a no-op — it sets `request.state.user = None` and validates nothing. Real authentication is enforced per-endpoint via `Depends(...)`. As a consequence, `/api/v1/query/*`, `/api/v1/agents/*`, and `/api/v1/masr/*` are effectively unauthenticated in the current build. Do not describe the whole API as JWT-gated. The middleware stack order is: CORS → Idempotency → RateLimit → LLMCostDriftMiddleware → Auth (no-op).
-
-### Rate Limiting
-
-A single global rate limiter is applied (`MAX_REQUESTS_PER_MINUTE=100`, `ENABLE_RATE_LIMITING=True`). There are no per-tier, per-endpoint, or burst configurations.
-
----
-
-This guide provides what you need to develop against **Cerebro** — from initial setup through debugging, observability, and security. For the exhaustive settings list, see `docs/configuration-reference.md`; for the agent domains and registry, see `docs/agent-domains.md`.
