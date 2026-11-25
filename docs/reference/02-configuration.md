@@ -14,7 +14,7 @@ Cerebro reads configuration from process environment variables, optional dotenv 
 | Adaptive routing settings | Off by default | `get_settings()` | `src/core/config.py` (`Settings`) |
 | Memory-informed routing settings | Not wired | `get_settings()` | `src/core/config.py` (`Settings`) |
 | Providers settings | Active | `get_settings()` | `src/core/config.py` (`Settings`) |
-| MCP tool path settings | Off by default | `get_settings()` | `src/core/config.py` (`Settings`) |
+| MCP tool path settings | Active | `get_settings()` | `src/core/config.py` (`Settings`) |
 | Constraint pinning settings | Off by default | `get_settings()` | `src/core/config.py` (`Settings`) |
 | Tracing and telemetry settings | Off by default | `get_settings()` | `src/core/config.py` (`Settings`) |
 | WebSocket development bypass settings | Off by default | `get_settings()` | `src/core/config.py` (`Settings`) |
@@ -137,11 +137,11 @@ A field is listed here when a production module outside `src/core/config.py` rea
 
 ### MCP tool path
 
-> **Off by default.** With `MCP_TOOL_PATH_ENABLED=true`, plan workers receive the mediated tool path (capability grants, audit store, source snapshots). The bridge needs an explicit audit store or a session factory, otherwise `MASRSupervisorBridge` raises `RuntimeError`.
+> **On by default.** Plan workers receive the mediated tool path (capability grants, audit store, source snapshots) unless `MCP_TOOL_PATH_ENABLED=false`. The bridge needs an explicit audit store or a session factory, otherwise `MASRSupervisorBridge._execute_plan_worker` raises `RuntimeError`; the API supplies its session factory only when the database initialized at startup.
 
 | Setting | Default | Read by | Effect |
 |---|---|---|---|
-| `MCP_TOOL_PATH_ENABLED` | `false` | `src/ai_brain/integration/masr_supervisor_bridge.py` (`_mcp_tool_path_enabled`, `_execute_plan_worker`) | when true, plan workers are configured with an `MCPIntegration` (capability grants, audit store, evidence recorder); when false, the bridge adds no such configuration |
+| `MCP_TOOL_PATH_ENABLED` | `true` | `src/ai_brain/integration/masr_supervisor_bridge.py` (`_mcp_tool_path_enabled`, `_execute_plan_worker`) | when true (the default), plan workers are configured with an `MCPIntegration` (capability grants, audit store, evidence recorder); when false, the bridge adds no such configuration |
 | `SOURCE_SNAPSHOT_DIR` | `data/source_snapshots` | `src/ai_brain/integration/masr_supervisor_bridge.py` (`_execute_plan_worker`) | root of the filesystem snapshot store for cited sources; the validator resolves a relative path against the working directory at startup |
 
 ### Constraint pinning

@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Detection of citation-shaped prose that the citation renderer did not emit (#133).
 - Deterministic citation validation dimensions, with a fixture corpus (#239).
 - Academic search results persisted as run-owned evidence, and claim spans bound to citations from sourced metadata (#224, #223).
+- Literature-review results persisted as evidence by default: `MCP_TOOL_PATH_ENABLED` now defaults to `true`, the literature agent searches through the tool path before analysis, and a failed search returns no sources with `data_source` `no_evidence` (#249).
 - A required reason code on abstained evaluation results (#131).
 
 ### Changed

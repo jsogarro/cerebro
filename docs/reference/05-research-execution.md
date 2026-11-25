@@ -99,7 +99,7 @@ See [durable runs and events](08-durable-runs-and-events.md) for the tables and 
 
 `FAST_PATH` is executed exactly like `DIRECT`: one worker, no separate call. A `HIERARCHICAL` plan's supervisor node is the root of the worker graph only; no supervisor object runs.
 
-`execute` runs workers in waves. In each wave every worker whose dependencies have completed runs under `asyncio.gather`, bounded by a semaphore of `budget.max_parallel_tasks`. Dependencies come from edges between workers. Each worker runs through `MASRSupervisorBridge._execute_plan_worker`, which builds the agent class from the registry with a config holding the worker's `permission_scopes` and `tool_allowlist` and gives the worker task a timeout of `budget.task_timeout_seconds`. When `MCP_TOOL_PATH_ENABLED` is true the worker also receives an `MCPIntegration` built from the run's capability grants (default `false`).
+`execute` runs workers in waves. In each wave every worker whose dependencies have completed runs under `asyncio.gather`, bounded by a semaphore of `budget.max_parallel_tasks`. Dependencies come from edges between workers. Each worker runs through `MASRSupervisorBridge._execute_plan_worker`, which builds the agent class from the registry with a config holding the worker's `permission_scopes` and `tool_allowlist` and gives the worker task a timeout of `budget.task_timeout_seconds`. When `MCP_TOOL_PATH_ENABLED` is true the worker also receives an `MCPIntegration` built from the run's capability grants (default `true`).
 
 The result maps each stable `worker_id` to that worker's output, and `workers_used` is the number of workers that ran. A `PlanProviderUnavailableError` from a worker records an observability event and propagates.
 

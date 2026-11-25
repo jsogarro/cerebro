@@ -15,9 +15,9 @@ Cerebro is a FastAPI application that accepts research queries, routes each one 
 | Durable runs and events | Active | run admission in `DirectExecutionService._admit_run` | `src/models/db/run_lifecycle.py`, `src/models/db/run_event.py`, `src/api/services/outbox_relay.py` (`OutboxRelay`) |
 | Realtime delivery | Active | `/ws`, `/ws/projects/{project_id}`, `/ws/cli/{project_id}`, `/ws/runs/{run_id}`, `GET /api/v1/runs/{run_id}/events` | `src/api/routes/websocket.py`, `src/api/routes/run_stream.py` |
 | Tool boundary: in-process tools | Active | `ToolRegistry` used by `LLMWorkerAgentBase` | `src/agents/tools/registry.py` (`ToolRegistry`), `src/core/tools/boundary.py` (`ToolBoundary`) |
-| Tool boundary: MCP tool path | Off by default | `MCP_TOOL_PATH_ENABLED=true` | `src/ai_brain/integration/masr_supervisor_bridge.py` (`MASRSupervisorBridge._execute_plan_worker`), `src/core/config.py` (`Settings.MCP_TOOL_PATH_ENABLED`) |
+| Tool boundary: MCP tool path | Active | `MCP_TOOL_PATH_ENABLED` (default `true`) | `src/ai_brain/integration/masr_supervisor_bridge.py` (`MASRSupervisorBridge._execute_plan_worker`), `src/core/config.py` (`Settings.MCP_TOOL_PATH_ENABLED`) |
 | Claim-support records for final reports | Active | written with the run's succeeded transition | `src/api/services/direct_execution_service.py` (`DirectExecutionService._commit_transition`), `src/core/claims/resolution.py` (`ClaimSupportResolver`) |
-| Search evidence recording | Off by default | `MCP_TOOL_PATH_ENABLED=true` | `src/ai_brain/integration/masr_supervisor_bridge.py` (`SearchEvidenceRecorder` wiring) |
+| Search evidence recording | Active | `MCP_TOOL_PATH_ENABLED` (default `true`) | `src/ai_brain/integration/masr_supervisor_bridge.py` (`SearchEvidenceRecorder` wiring) |
 | LLM provider: Gemini | Active | `GeminiService` when `GEMINI_API_KEY` is set | `src/api/main.py` (`lifespan`), `src/services/gemini_service.py` |
 | LLM providers: multi-provider routing | Off by default | `MULTI_PROVIDER_ROUTING_ENABLED=true` with `OPENROUTER_API_KEY` | `src/agents/llm_worker_base.py` (`_generate_with_routing`), `src/core/config.py` (`Settings.MULTI_PROVIDER_ROUTING_ENABLED`) |
 | Reports | Active | `/api/v1/reports` | `src/api/routes/reports.py` |

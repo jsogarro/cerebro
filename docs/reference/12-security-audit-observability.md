@@ -12,7 +12,7 @@ The API records an audit trail of requests, sets browser security headers on eve
 | Rejected-request log line | Active | every request | `src/security/audit_middleware.py` (`log_rejected_requests`) |
 | Security response headers | Active | every response except CORS preflights answered by `CORSMiddleware` | `src/security/headers.py` (`SecurityHeadersMiddleware`), `src/security/security_headers.py` |
 | Delimiter escaping of worker output | Active | research supervisor prompts | `src/security/content_sanitizer.py` (`escape_for_delimited_prompt`) |
-| Prompt-injection sanitizer | Off by default | MCP tool path, constraint pinning | `src/security/content_sanitizer.py` (`ContentSanitizer`) |
+| Prompt-injection sanitizer | Active | MCP tool path (default on), constraint pinning (`ENABLE_CONSTRAINT_PINNING=true`) | `src/security/content_sanitizer.py` (`ContentSanitizer`) |
 | PII redaction for logs and traces | Active | log call sites, Langfuse trace input | `src/core/pii_redactor.py` (`redact_pii`) |
 | Memory encryption | Not wired | none | `src/core/memory_encryption.py` (`MemoryEncryption`) |
 | Client address resolution | Active | audit, rate limiting, auth, login | `src/api/client_ip.py` (`client_ip`) |
@@ -99,7 +99,7 @@ The middleware also deletes `Server`, `X-Powered-By`, `X-AspNet-Version` and `X-
 
 **Delimiter escaping.** `escape_for_delimited_prompt` replaces `&`, `<` and `>` with entities so worker output cannot close the XML-style block it is placed in. `ResearchSupervisor` applies it to literature findings and methodology text before building a prompt.
 
-> **Off by default.** `ContentSanitizer.sanitize` neutralizes instruction-like text in external content: goal-hijacking phrases, delimiter and fake system-tag escapes, long runs of capitals and encoded payloads, replaced by markers such as `[INSTRUCTION_NEUTRALIZED]`. It runs only when `MCP_TOOL_PATH_ENABLED=true` builds `MCPIntegration` for supervisor workers, or when `ENABLE_CONSTRAINT_PINNING=true` makes `BaseSupervisor` build a `ConstraintRegistry` that sanitizes each pinned constraint. Both settings default to `false`.
+> **On by default.** `ContentSanitizer.sanitize` neutralizes instruction-like text in external content: goal-hijacking phrases, delimiter and fake system-tag escapes, long runs of capitals and encoded payloads, replaced by markers such as `[INSTRUCTION_NEUTRALIZED]`. It runs when `MCPIntegration` is built for supervisor workers, which `MCP_TOOL_PATH_ENABLED` (default `true`) controls, and when `ENABLE_CONSTRAINT_PINNING=true` makes `BaseSupervisor` build a `ConstraintRegistry` that sanitizes each pinned constraint (default `false`).
 
 `MCPIntegration` applies the sanitizer to the results of its tool specs in `src/agents/integrations/mcp_tool_specs.py`. `src/security/__init__.py` exports `ContentSanitizer`.
 

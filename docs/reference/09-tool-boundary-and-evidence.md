@@ -15,9 +15,9 @@ Every tool call made by an agent goes through one mediator, `ToolBoundary`, whic
 | Local tools `datetime_info` and `unit_conversion` | Not wired | none | `src/agents/tools/registry.py` (`create_default_registry`) |
 | `finance_math` called directly by finance agents | Active | `FinancialAnalysisAgent`, `ValuationAgent`, `FinancialCalculatorAgent` | `src/agents/tools/finance_math.py` |
 | Prompt identity verification | Not wired | none | `src/core/tools/prompts.py` (`PromptIdentityVerifier`) |
-| Durable tool audit (`agent_tool_invocations`) | Off by default | `SessionToolAuditStore` | `src/agents/tools/durable_audit.py` |
-| MCP tool path for plan workers | Off by default | `MCP_TOOL_PATH_ENABLED` | `src/ai_brain/integration/masr_supervisor_bridge.py` (`_execute_plan_worker`) |
-| Search evidence and source snapshots | Off by default | `SearchEvidenceRecorder` | `src/core/acquisition/search_evidence.py` |
+| Durable tool audit (`agent_tool_invocations`) | Active | `SessionToolAuditStore` | `src/agents/tools/durable_audit.py` |
+| MCP tool path for plan workers | Active | `MCP_TOOL_PATH_ENABLED` (default `true`) | `src/ai_brain/integration/masr_supervisor_bridge.py` (`_execute_plan_worker`) |
+| Search evidence and source snapshots | Active | `SearchEvidenceRecorder` | `src/core/acquisition/search_evidence.py` |
 | Source fetch tool, `acquire`, PDF text extraction | Not wired | none | `src/core/acquisition/fetch_tool.py`, `service.py`, `pdf_text.py` |
 | Final-report artifact and claim records | Active | `_persist_transition` on `succeeded` | `src/core/claims/resolution.py`, `recording.py` |
 | Citation validators | Not wired | none | `src/core/claims/citation_binding.py` |
@@ -89,7 +89,7 @@ A `CapabilityGrant` (`src/core/contracts/capabilities.py`) authorizes one tool f
 
 ## Durable tool audit
 
-> **Off by default.** Tool invocations are written to `agent_tool_invocations` and `agent_run_events` only on the MCP tool path (`MCP_TOOL_PATH_ENABLED=true`), through `SessionToolAuditStore`. Registries and integrations built without an explicit store keep records in `InMemoryToolAuditStore`, which lives for the process and is not durable.
+> **On by default.** Tool invocations are written to `agent_tool_invocations` and `agent_run_events` on the MCP tool path (`MCP_TOOL_PATH_ENABLED`, default `true`), through `SessionToolAuditStore`. Registries and integrations built without an explicit store keep records in `InMemoryToolAuditStore`, which lives for the process and is not durable.
 
 `agent_tool_invocations` columns of note:
 
@@ -106,9 +106,9 @@ Idempotency is enforced by the partial unique index `uq_agent_tool_invocation_id
 
 ## MCP tool path
 
-> **Off by default.** With `MCP_TOOL_PATH_ENABLED=true` (default `false`), plan workers receive an `MCPIntegration` whose four tools run through the boundary with durable audit. The bridge needs an explicit audit store or a session factory, and raises `RuntimeError` when enabled without either.
+> **On by default.** With `MCP_TOOL_PATH_ENABLED` at its default of `true`, plan workers receive an `MCPIntegration` whose four tools run through the boundary with durable audit. Set `MCP_TOOL_PATH_ENABLED=false` to disable it. The bridge needs an explicit audit store or a session factory, and `_execute_plan_worker` raises `RuntimeError` when the path is enabled without either; `DirectExecutionService` passes its `session_factory`, which the API lifespan sets only when the database initialized.
 
-When enabled, `MASRSupervisorBridge._execute_plan_worker` builds, per plan worker, an `MCPIntegration` with `enable_fallback=False`, the worker's grants filtered to its `tool_allowlist`, the task's identity and the run's budget ledger. The audit store is the configured one or `SessionToolAuditStore(session_factory)`.
+When enabled (the default), `MASRSupervisorBridge._execute_plan_worker` builds, per plan worker, an `MCPIntegration` with `enable_fallback=False`, the worker's grants filtered to its `tool_allowlist`, the task's identity and the run's budget ledger. The audit store is the configured one or `SessionToolAuditStore(session_factory)`.
 
 `MCPIntegration` registers four tools, each version `1.0.0`, `read_only`, with a 45-second default deadline (`tool_timeout_seconds` in its config):
 
@@ -127,7 +127,7 @@ Bridge construction: `DirectExecutionService` creates its bridge with its `sessi
 
 ## Source acquisition and snapshots
 
-> **Off by default.** With `MCP_TOOL_PATH_ENABLED=true` and a durable audit store, every successful `mcp.academic_search` call records each result that has an abstract and a valid source URL or DOI as evidence. Snapshots are written under `SOURCE_SNAPSHOT_DIR` (default `data/source_snapshots`, resolved to an absolute path at startup; the `api` compose service mounts the `source_snapshots` volume at `/var/lib/cerebro/source_snapshots`).
+> **On by default.** With the MCP tool path enabled (the default) and a durable audit store, every successful `mcp.academic_search` call records each result that has an abstract and a valid source URL or DOI as evidence. Snapshots are written under `SOURCE_SNAPSHOT_DIR` (default `data/source_snapshots`, resolved to an absolute path at startup; the `api` compose service mounts the `source_snapshots` volume at `/var/lib/cerebro/source_snapshots`).
 
 Flow for one search result (`SearchEvidenceRecorder` to `SourceAcquisitionService.record_retrieved_source`):
 
