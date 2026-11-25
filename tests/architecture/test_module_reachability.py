@@ -7,7 +7,8 @@ MASR router all shipped "covered" while nothing executed them.
 
 This is a static import graph (``ast``, including function-local imports) from
 the processes the repository actually starts: the API (``uvicorn
-src.api.main:app``), the ``research-cli`` script, and the MCP server container.
+src.api.main:app``), the ``research-cli`` script, the MCP server container, and
+the live agent cost pilot.
 
 It is a **ratchet**. ``KNOWN_UNREACHABLE`` lists today's unreachable modules and
 may only shrink: a new unreachable module fails, and so does a baseline entry
@@ -23,7 +24,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "src"
 
-ENTRY_POINTS = ("src.api.main", "src.cli.main", "src.mcp.server")
+# The last entry is the agent cost pilot, run by evals/live/test_cost_pilot.py.
+ENTRY_POINTS = (
+    "src.api.main",
+    "src.cli.main",
+    "src.mcp.server",
+    "src.evals.pilot_runner",
+)
 
 KNOWN_UNREACHABLE: frozenset[str] = frozenset(
     {
