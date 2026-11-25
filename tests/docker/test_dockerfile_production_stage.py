@@ -51,3 +51,17 @@ def test_production_stage_copies_alembic_config() -> None:
     stage = _production_stage()
     assert "COPY alembic/ ./alembic/" in stage
     assert "COPY alembic.ini ." in stage
+
+
+def test_site_packages_path_matches_base_image_python() -> None:
+    base_versions = set(
+        re.findall(r"^FROM python:(\d+\.\d+)-slim", DOCKERFILE, flags=re.M)
+    )
+    assert len(base_versions) == 1, f"stages disagree on python: {base_versions}"
+    copied = set(
+        re.findall(r"/usr/local/lib/python(\d+\.\d+)/site-packages", DOCKERFILE)
+    )
+    assert copied, "no site-packages COPY found"
+    assert copied == base_versions, (
+        f"site-packages path python{sorted(copied)} != base image python{sorted(base_versions)}"
+    )

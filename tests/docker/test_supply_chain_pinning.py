@@ -35,7 +35,7 @@ HARDENED = os.environ.get("CEREBRO_DOCKER_HARDENED", "1") != "0"
 # Update process: bump a digest here AND in the corresponding Dockerfile in the
 # same commit. CI will fail if the two diverge, surfacing accidental drift.
 EXPECTED_DIGESTS = {
-    "python:3.11-slim": "sha256:6d85378d88a19cd4d76079817532d62232be95757cb45945a99fec8e8084b9c2",
+    "python:3.13-slim": "sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50",
     "node:20-alpine": "sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293",
     "nginx:alpine": "sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de",
     "ghcr.io/astral-sh/uv:latest": "sha256:3b7b60a81d3c57ef471703e5c83fd4aaa33abcd403596fb22ab07db85ae91347",
@@ -91,7 +91,7 @@ class TestSupplyChainBaseline:
                 base = ref.split("@")[0]
                 all_refs.add(base)
         expected = {
-            "python:3.11-slim",
+            "python:3.13-slim",
             "node:20-alpine",
             "nginx:alpine",
             "ghcr.io/astral-sh/uv:latest",

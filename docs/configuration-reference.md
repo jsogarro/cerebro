@@ -674,8 +674,8 @@ database migrations before starting the server.
 ```dockerfile
 # Dockerfile (abridged — real file is multi-stage)
 
-# Stage 1: base — digest-pinned python:3.11-slim + uv
-FROM python:3.11-slim@sha256:<digest> as base
+# Stage 1: base — digest-pinned python:3.13-slim + uv
+FROM python:3.13-slim@sha256:<digest> as base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 UV_SYSTEM_PYTHON=1
 COPY --from=ghcr.io/astral-sh/uv:latest@sha256:<digest> /uv /usr/local/bin/uv
 WORKDIR /app
@@ -694,9 +694,9 @@ RUN uv pip install -e .
 COPY src/ ./src/
 
 # Stage 4: production — non-root user, health check, 4 workers
-FROM python:3.11-slim@sha256:<digest> as production
+FROM python:3.13-slim@sha256:<digest> as production
 RUN groupadd -r app && useradd -r -g app app
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 COPY --from=builder /app/src ./src
 USER app
 EXPOSE 8000

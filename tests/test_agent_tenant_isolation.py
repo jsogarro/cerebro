@@ -16,12 +16,9 @@ from src.api.services.agent_execution_service import (
 )
 from src.auth.models import TokenPayload
 from src.middleware.auth_middleware import get_jwt_service
-from src.middleware.tenant_context import (
-    TenantContext,
-    get_tenant_context,
-    get_tenant_identity,
-)
+from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.agent_api_models import AgentExecutionRequest, AgentType
+from src.models.db.session import get_session
 
 ORG_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 ORG_B = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
@@ -29,13 +26,26 @@ AGENT = AgentType.LITERATURE_REVIEW
 OTHER_AGENT = AgentType.METHODOLOGY
 
 
+STATS_PATHS = [
+    f"/api/v1/agents/{AGENT.value}/metrics",
+    "/api/v1/agents/system/stats",
+    "/api/v1/agents/executions/active",
+    "/api/v1/agents/performance/comparison",
+]
+
+
 class _JWT:
+    """Issues tokens for whichever organization the test is acting as."""
+
+    def __init__(self, current_org: dict[str, str | None]) -> None:
+        self.current_org = current_org
+
     async def validate_token(self, token: str) -> TokenPayload:
         now = datetime.now(UTC)
         return TokenPayload(
             sub="u",
             email="u@example.com",
-            organization_id=token,
+            organization_id=self.current_org["org"],
             jti="j",
             iat=now,
             exp=now + timedelta(minutes=5),
@@ -70,14 +80,14 @@ async def env() -> AsyncIterator[tuple[AgentExecutionService, httpx.AsyncClient,
         return _GatedAgent(gate)
 
     service._get_agent_instance = get_agent  # type: ignore[method-assign]
-    current_org: dict[str, str] = {"org": ORG_A}
+    current_org: dict[str, str | None] = {"org": ORG_A}
+
+    def no_session() -> None:
+        raise AssertionError("stats route opened a DB session")
 
     app.dependency_overrides[get_application_agent_execution_service] = lambda: service
-    app.dependency_overrides[get_jwt_service] = _JWT
-    for dep in (get_tenant_context, get_tenant_identity):
-        app.dependency_overrides[dep] = lambda: TenantContext(
-            user_id="u", organization_id=current_org["org"]
-        )
+    app.dependency_overrides[get_jwt_service] = lambda: _JWT(current_org)
+    app.dependency_overrides[get_session] = no_session
     transport = httpx.ASGITransport(app=app)
     try:
         async with httpx.AsyncClient(
@@ -91,8 +101,8 @@ async def env() -> AsyncIterator[tuple[AgentExecutionService, httpx.AsyncClient,
         for dep in (
             get_application_agent_execution_service,
             get_jwt_service,
+            get_session,
             get_tenant_context,
-            get_tenant_identity,
         ):
             app.dependency_overrides.pop(dep, None)
 
@@ -154,6 +164,13 @@ async def test_client_cannot_spoof_organization_in_body(
     monkeypatch.setattr(
         agent_api, "_require_agent_execution_authority", lambda *a, **k: None
     )
+    from src.api.main import app
+
+    # /execute resolves authority from the database, so it keeps the
+    # DB-backed tenant dependency; stand it in for this test only.
+    app.dependency_overrides[get_tenant_context] = lambda: TenantContext(
+        user_id="u", organization_id=ORG_A
+    )
     service, client, (gate, current_org) = env
     current_org["org"] = ORG_A
     post = asyncio.create_task(
@@ -206,3 +223,29 @@ async def test_agent_list_execution_total_scoped_to_caller_org(env: Any) -> None
     assert (await client.get("/api/v1/agents")).json()["total_system_executions"] == 0
     current_org["org"] = ORG_B
     assert (await client.get("/api/v1/agents")).json()["total_system_executions"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", STATS_PATHS)
+async def test_stats_routes_resolve_tenant_without_db(env: Any, path: str) -> None:
+    _service, client, _ = env
+    response = await client.get(path)
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", STATS_PATHS)
+async def test_stats_routes_require_org_claim(env: Any, path: str) -> None:
+    _service, client, (_gate, current_org) = env
+    current_org["org"] = None
+    response = await client.get(path)
+    assert response.status_code == 403, response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", STATS_PATHS)
+async def test_stats_routes_require_token(env: Any, path: str) -> None:
+    _service, client, _ = env
+    del client.headers["Authorization"]
+    response = await client.get(path)
+    assert response.status_code == 401, response.text
