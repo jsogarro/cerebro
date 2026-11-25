@@ -105,6 +105,7 @@ class RunEventRepository:
             payload=dict(payload),
         )
 
+        envelope = event.model_dump(mode="json")
         row = AgentRunEvent(
             event_id=event.event_id,
             run_id=event.run_id,
@@ -119,11 +120,10 @@ class RunEventRepository:
             deduplication_key=event.deduplication_key,
             correlation_id=event.correlation_id,
             causation_event_id=event.causation_event_id,
-            payload=dict(event.payload),
+            payload=envelope["payload"],
         )
         self.session.add(row)
 
-        envelope = event.model_dump(mode="json")
         for destination in destinations:
             outbox_row = AgentRunEventOutbox(
                 event_id=event.event_id,

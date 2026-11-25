@@ -1,10 +1,14 @@
 name: Nightly Live Eval
 
-# Run at 06:00 UTC daily (02:00 EST / 23:00 PST previous day)
+# Run at 06:00 UTC daily (01:00 EST / 22:00 PST the previous day)
 on:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:  # Allow manual triggers
+
+permissions:
+  contents: read
+  issues: write
 
 jobs:
   live-eval:
@@ -13,10 +17,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -38,22 +42,21 @@ jobs:
 
       - name: Upload live eval report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: live-eval-report-${{ github.run_number }}
           path: evals/out/live_eval_report.*
           retention-days: 30
 
-      - name: Comment on failure
+      - name: Open an issue on failure
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
-            const issue_number = context.issue.number;
             const message = `🚨 Nightly live eval failed on run ${context.runNumber}. Check the [workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) for details.`;
 
-            // Create an issue or comment on the tracking issue
-            github.rest.issues.create({
+            // Open a new issue for this failed run
+            await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `Live eval failure - ${new Date().toISOString().split('T')[0]}`,
