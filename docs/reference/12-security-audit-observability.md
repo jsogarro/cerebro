@@ -10,7 +10,7 @@ The API records an audit trail of requests, sets browser security headers on eve
 | Audit logger (buffer, flush, alerts) | Active | started in the application `lifespan` | `src/security/audit_logger.py` (`AuditLogger`) |
 | Audit query and compliance report | Not wired | none | `src/security/audit_logger.py` (`AuditLogger.query_logs`, `AuditLogger.generate_compliance_report`) |
 | Rejected-request log line | Active | every request | `src/security/audit_middleware.py` (`log_rejected_requests`) |
-| Security response headers | Active | every response | `src/security/headers.py` (`SecurityHeadersMiddleware`), `src/security/security_headers.py` |
+| Security response headers | Active | every response except CORS preflights answered by `CORSMiddleware` | `src/security/headers.py` (`SecurityHeadersMiddleware`), `src/security/security_headers.py` |
 | Delimiter escaping of worker output | Active | research supervisor prompts | `src/security/content_sanitizer.py` (`escape_for_delimited_prompt`) |
 | Prompt-injection sanitizer | Off by default | MCP tool path, constraint pinning | `src/security/content_sanitizer.py` (`ContentSanitizer`) |
 | PII redaction for logs and traces | Active | log call sites, Langfuse trace input | `src/core/pii_redactor.py` (`redact_pii`) |

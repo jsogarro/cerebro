@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stopped supervisor execute from fabricating completed results and quality scores, and removed randomised values from supervisor API responses (#175, #229).
 - Enforced worker `tool_allowlist` on model-initiated tool calls (#189).
 - Counted only in-flight executions against the admission cap (#176).
-- Reported unenforced cost and token ceilings as declared rather than as limits in execution status (#178).
+- Execution status now labels cost and token ceilings the system does not enforce as declared values, not limits (#178).
 - Returned null for query estimates the route does not have (#206).
 - Derived chain and mixture status from member results (#204).
 - Filtered research projects by the statuses the API returns and rejected unknown values with 422 (#188).

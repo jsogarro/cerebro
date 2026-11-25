@@ -71,7 +71,16 @@ docker compose exec redis redis-cli LASTSAVE
 docker compose cp redis:/data/dump.rdb ./backups/dump.rdb
 ```
 
-Run `LASTSAVE` until its timestamp changes to confirm the save finished. The production Redis requires a password: add `-a "$REDIS_PASSWORD" --no-auth-warning` to each `redis-cli` call. The development service runs with `--appendonly yes`, so its volume also keeps an append-only file. To restore, stop Redis, place `dump.rdb` in `/data` of the volume and start it; where append-only persistence is on, Redis loads the append-only files in preference to `dump.rdb`, so remove them from `/data` first. With an empty Redis, the effects in the table above apply.
+Run `LASTSAVE` until its timestamp changes to confirm the save finished. The production Redis requires a password: add `-a "$REDIS_PASSWORD" --no-auth-warning` to each `redis-cli` call. The development service runs with `--appendonly yes`, so its volume also keeps an append-only file.
+
+To restore:
+
+1. Stop Redis.
+2. If append-only persistence is on, remove the append-only files from `/data` of the volume, because Redis loads them in preference to `dump.rdb`.
+3. Place `dump.rdb` in `/data`.
+4. Start Redis.
+
+With an empty Redis, the effects in the table above apply.
 
 ## Files
 

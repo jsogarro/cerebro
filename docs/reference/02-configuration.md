@@ -113,7 +113,7 @@ A field is listed here when a production module outside `src/core/config.py` rea
 
 | Setting | Default | Read by | Effect |
 |---|---|---|---|
-| `MEMORY_INFORMED_ROUTING_ENABLED` | `false` | `src/ai_brain/router/factory.py` (`settings_to_router_config`), `src/agents/llm_worker_base.py` (`_get_procedural_context`) | passed to the router and checked by workers; `MASRouter.episodic_memory` and `LLMWorkerAgentBase.procedural_memory` are never assigned, so enabling it changes nothing |
+| `MEMORY_INFORMED_ROUTING_ENABLED` | `false` | `src/ai_brain/router/factory.py` (`settings_to_router_config`), `src/agents/llm_worker_base.py` (`_get_procedural_context`) | passed to the router and checked by workers; inert, see the note above |
 | `MEMORY_ROUTING_MAX_WORKER_ADJUST` | `2` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) | copied into router configuration; consumed only by the memory path above |
 | `MEMORY_ROUTING_FRESHNESS_DAYS` | `30` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) | copied into router configuration; consumed only by the memory path above |
 | `MEMORY_PROMPT_MAX_PROCEDURES` | `3` | `src/ai_brain/router/factory.py` (`settings_to_router_config`), `src/agents/llm_worker_base.py` (`_get_procedural_context`) | limit on procedure lines in the prompt; reached only when a procedural memory exists |

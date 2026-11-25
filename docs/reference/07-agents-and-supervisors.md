@@ -131,7 +131,7 @@ Every worker call in a supervisor phase goes through `_send_worker_verified`, wh
 
 ### Where supervisors run
 
-Supervisors run when a request reaches `/api/v1/supervisors/{supervisor_type}/execute`, a TalkHier session or `SupervisorCoordinationService`. The `/query` execution path compiles an `ExecutionPlan` and runs it with `MASRSupervisorBridge.execute_execution_plan`, which executes the plan "without translating it to a supervisor graph". See [architecture overview](01-architecture-overview.md).
+Supervisors run when a request reaches `/api/v1/supervisors/{supervisor_type}/execute`, a TalkHier session or `SupervisorCoordinationService`. The `/query` path does not use supervisors; see the opening paragraph and the [architecture overview](01-architecture-overview.md).
 
 ## Direct agent API
 
