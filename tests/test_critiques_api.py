@@ -181,7 +181,10 @@ async def make_document(
     text: str = TEXT,
 ) -> uuid.UUID:
     extracted = ExtractedText(
-        text, (PageSpan(1, 0, len(PAGE1)), PageSpan(2, len(PAGE1) + 2, len(text))), "a" * 64, "b" * 64
+        text,
+        (PageSpan(1, 0, len(PAGE1)), PageSpan(2, len(PAGE1) + 2, len(text))),
+        "a" * 64,
+        "b" * 64,
     )
     async with factory() as session:
         row = await UploadedDocumentRepository(session, document_cipher()).create(
@@ -407,7 +410,10 @@ async def test_the_request_reserves_its_units_in_the_ledger(
     await run_to_end(client, await make_document(factory))
     async with factory() as session:
         ledger = (await session.execute(select(UsageLedger))).scalar_one()
-    assert (ledger.kind, ledger.units) == ("critique", service.reserved_units(len(TEXT)))
+    assert (ledger.kind, ledger.units) == (
+        "critique",
+        service.reserved_units(len(TEXT)),
+    )
     assert (ledger.organization_id, ledger.user_id) == (ORG_A, USER_A)
 
 
@@ -442,7 +448,9 @@ async def test_every_role_succeeding_is_succeeded_with_grounded_findings(
     model.handler = lambda prompt: reply(
         [issue(Q2, category=role_named(role_of(prompt)).categories[0])]
     )
-    critique = await read(client, await run_to_end(client, await make_document(factory)))
+    critique = await read(
+        client, await run_to_end(client, await make_document(factory))
+    )
     assert critique["status"] == "succeeded" and critique["status_reason"] is None
     assert critique["completed_at"] and critique["started_at"]
     assert len(critique["findings"]) == 5
@@ -467,7 +475,9 @@ async def test_two_roles_failing_is_partial(
         return reply([issue(Q1)])
 
     model.handler = handler
-    critique = await read(client, await run_to_end(client, await make_document(factory)))
+    critique = await read(
+        client, await run_to_end(client, await make_document(factory))
+    )
     assert critique["status"] == "partial"
     assert critique["role_outcomes"]["methods"]["status"] == "failed"
     assert critique["role_outcomes"]["citations"]["status"] == "succeeded"
@@ -479,8 +489,13 @@ async def test_every_role_failing_is_failed_with_a_reason(
     model: GatedModel,
 ) -> None:
     model.handler = lambda prompt: RuntimeError("provider down")
-    critique = await read(client, await run_to_end(client, await make_document(factory)))
-    assert (critique["status"], critique["status_reason"]) == ("failed", "all_roles_failed")
+    critique = await read(
+        client, await run_to_end(client, await make_document(factory))
+    )
+    assert (critique["status"], critique["status_reason"]) == (
+        "failed",
+        "all_roles_failed",
+    )
     assert critique["findings"] == []
 
 
@@ -491,8 +506,13 @@ async def test_tracing_enabled_fails_the_run_without_calling_the_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LANGSMITH_TRACING", "true")
-    critique = await read(client, await run_to_end(client, await make_document(factory)))
-    assert (critique["status"], critique["status_reason"]) == ("failed", "tracing_enabled")
+    critique = await read(
+        client, await run_to_end(client, await make_document(factory))
+    )
+    assert (critique["status"], critique["status_reason"]) == (
+        "failed",
+        "tracing_enabled",
+    )
     assert model.completed == 0
 
 
@@ -510,7 +530,12 @@ async def test_the_report_is_plain_text_served_as_an_attachment(
         f'attachment; filename="critique-{critique_id}.txt"'
     )
     assert response.headers["x-content-type-options"] == "nosniff"
-    for needle in ("gemini-2.5-flash", "b" * 64, "Model-assisted and uncalibrated", *service.REPORT_FOOTER):
+    for needle in (
+        "gemini-2.5-flash",
+        "a" * 64,
+        "Model-assisted and uncalibrated",
+        *service.REPORT_FOOTER,
+    ):
         assert needle in response.text
     for pattern in FORBIDDEN:
         assert not re.search(pattern, response.text, re.I), pattern
@@ -529,7 +554,9 @@ async def test_the_report_is_409_until_the_run_finishes(
     assert reply_.json()["error"]["code"] == "not_finished"
     model.gate.set()
     await drain()
-    assert (await client.get(f"/api/v1/critiques/{critique_id}/report")).status_code == 200
+    assert (
+        await client.get(f"/api/v1/critiques/{critique_id}/report")
+    ).status_code == 200
 
 
 async def test_a_url_the_model_wrote_never_reaches_the_served_report(
@@ -591,7 +618,9 @@ async def test_a_stale_running_critique_reads_as_failed_deadline_exceeded(
         critique_id = row.id
     first = await read(client, str(critique_id))
     assert (first["status"], first["status_reason"]) == ("failed", "deadline_exceeded")
-    assert (await read(client, str(critique_id)))["completed_at"] == first["completed_at"]
+    assert (await read(client, str(critique_id)))["completed_at"] == first[
+        "completed_at"
+    ]
 
 
 async def test_the_nested_list_returns_the_documents_critiques_newest_first(
@@ -611,7 +640,9 @@ async def test_the_nested_list_returns_the_documents_critiques_newest_first(
 
 
 @pytest.mark.parametrize(
-    ("org", "user"), [(ORG_B, USER_B), (ORG_A, USER_B)], ids=["other-org", "same-org-other-user"]
+    ("org", "user"),
+    [(ORG_B, USER_B), (ORG_A, USER_B)],
+    ids=["other-org", "same-org-other-user"],
 )
 async def test_every_route_is_404_for_someone_elses_resources(
     client: httpx.AsyncClient,
@@ -623,9 +654,13 @@ async def test_every_route_is_404_for_someone_elses_resources(
     critique_id = await run_to_end(client, document_id)
     Caller.user, Caller.org = user, org
     assert (await client.get(f"/api/v1/critiques/{critique_id}")).status_code == 404
-    assert (await client.get(f"/api/v1/critiques/{critique_id}/report")).status_code == 404
+    assert (
+        await client.get(f"/api/v1/critiques/{critique_id}/report")
+    ).status_code == 404
     assert (await start(client, document_id)).status_code == 404
-    assert (await client.get(f"/api/v1/documents/{document_id}/critiques")).status_code == 404
+    assert (
+        await client.get(f"/api/v1/documents/{document_id}/critiques")
+    ).status_code == 404
     assert (await client.delete(f"/api/v1/critiques/{critique_id}")).status_code == 404
     Caller.user, Caller.org = USER_A, ORG_A
     assert (await client.get(f"/api/v1/critiques/{critique_id}")).status_code == 200
@@ -663,3 +698,56 @@ async def test_no_critique_route_accepts_text_in_its_body() -> None:
                 for name in ("model_id", "consent_text_version"):
                     assert properties[name]["maxLength"] <= 100
     assert bodies == 1
+
+
+# ---- lifespan -------------------------------------------------------------------------
+
+
+async def test_startup_refuses_the_critique_flag_without_an_encryption_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.api import main
+    from src.core.memory_encryption import DocumentEncryptionUnavailable
+
+    monkeypatch.setattr(settings, "DOCUMENT_UPLOADS_ENABLED", False)
+    monkeypatch.setattr(settings, "DOCUMENT_CRITIQUE_ENABLED", True)
+    monkeypatch.setattr(settings, "DOCUMENT_ENCRYPTION_KEY", "")
+    with pytest.raises(DocumentEncryptionUnavailable):
+        async with main.lifespan(app):
+            pass
+
+
+async def test_the_lifespan_cancels_scheduled_jobs_when_it_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from src.api import main
+    from src.api.services.event_publisher import event_publisher
+    from src.api.websocket.connection_manager import websocket_manager
+    from src.models.db import session as db_session
+
+    monkeypatch.setattr(settings, "DOCUMENT_CRITIQUE_ENABLED", False)
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", None)
+    monkeypatch.setattr(settings, "ADAPTIVE_ROUTING_ENABLED", False)
+    monkeypatch.setattr(settings, "LANGFUSE_ENABLED", False)
+    monkeypatch.setattr(db_session, "init_db", AsyncMock())
+    monkeypatch.setattr(db_session, "_async_session_factory", None)
+    monkeypatch.setattr(event_publisher, "initialize", AsyncMock())
+    monkeypatch.setattr(event_publisher, "shutdown", AsyncMock())
+    monkeypatch.setattr(websocket_manager, "shutdown", AsyncMock())
+    cancelled = asyncio.Event()
+
+    async def blocked() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    async with main.lifespan(app):
+        assert app.state.document_jobs == set()
+        task = asyncio.create_task(blocked())
+        app.state.document_jobs.add(task)
+        await asyncio.sleep(0)
+    assert cancelled.is_set() and task.cancelled()

@@ -22,7 +22,11 @@ from src.core.memory_encryption import (
     DocumentEncryptionUnavailable,
     MemoryEncryption,
 )
-from src.models.db.document_critique import CritiqueFinding, DocumentCritique
+from src.models.db.document_critique import (
+    DOCUMENT_CRITIQUES,
+    CritiqueFinding,
+    DocumentCritique,
+)
 from src.repositories.tenant_scope import normalize_organization_id, scope_to_owner
 from src.repositories.uploaded_document_repository import UndecryptableDocumentError
 from src.services.document_jobs import flip_if_stale, stale_cutoff
@@ -108,7 +112,12 @@ class CritiqueRepository:
             raise UndecryptableDocumentError(str(error)) from None
 
     def _owned(
-        self, query: _SelectT, column_org: Any, column_user: Any, org: uuid.UUID, user: uuid.UUID
+        self,
+        query: _SelectT,
+        column_org: Any,
+        column_user: Any,
+        org: uuid.UUID,
+        user: uuid.UUID,
     ) -> _SelectT:
         return scope_to_owner(
             query,
@@ -185,7 +194,9 @@ class CritiqueRepository:
                     page=issue.page,
                     match_kind=issue.match_kind,
                     second_quote_enc=(
-                        self._encrypt(issue.second_quote) if issue.second_quote else None
+                        self._encrypt(issue.second_quote)
+                        if issue.second_quote
+                        else None
                     ),
                     second_raw_start=issue.second_raw_start,
                     second_raw_end=issue.second_raw_end,
@@ -198,7 +209,7 @@ class CritiqueRepository:
 
     async def _fresh(self, row: DocumentCritique) -> DocumentCritique:
         if await flip_if_stale(
-            self._session, DocumentCritique.__table__, row, CRITIQUE_DEADLINE_S
+            self._session, DOCUMENT_CRITIQUES, row, CRITIQUE_DEADLINE_S
         ):
             await self._session.refresh(row)
         return row

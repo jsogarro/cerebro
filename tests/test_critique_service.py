@@ -17,7 +17,7 @@ from src.agents.critique.roles import ROLES
 from src.core.config import settings
 from src.core.memory_encryption import DocumentEncryptionUnavailable
 from src.models.db.base import Base
-from src.models.db.document_critique import CritiqueFinding
+from src.models.db.document_critique import DOCUMENT_CRITIQUES, CritiqueFinding
 from src.repositories.critique_repository import CritiqueRepository, CritiqueView
 from src.services import critique_service as service
 from tests.test_critique_panel import (
@@ -113,7 +113,10 @@ def test_critique_limits_are_the_documented_constants() -> None:
     [
         (("succeeded",) * 5, "succeeded"),
         (("succeeded",) * 4 + ("failed",), "partial"),
-        (("succeeded", "failed", "truncated", "refused", "skipped_no_inputs"), "partial"),
+        (
+            ("succeeded", "failed", "truncated", "refused", "skipped_no_inputs"),
+            "partial",
+        ),
         (("failed",) * 4 + ("skipped_no_inputs",), "failed"),
         (("truncated",) * 5, "failed"),
     ],
@@ -128,7 +131,9 @@ def test_status_is_by_how_many_roles_succeeded(
 
 
 @pytest_asyncio.fixture(name="factory")
-async def factory_fixture(tmp_path: Any) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+async def factory_fixture(
+    tmp_path: Any,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/c.db")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -265,12 +270,11 @@ async def rendered_view(
     )
     async with factory() as session:
         status, fields = await persist(session, service.CritiqueOutcome(panel))
-        from src.models.db.document_critique import DocumentCritique
         from src.services.document_jobs import transition
 
         await transition(
             session,
-            DocumentCritique.__table__,
+            DOCUMENT_CRITIQUES,
             critique_id,
             expected="queued",
             new=status,

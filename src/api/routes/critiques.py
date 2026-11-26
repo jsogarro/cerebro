@@ -24,7 +24,7 @@ from src.middleware.tenant_context import (
     get_tenant_identity,
     owner_ids,
 )
-from src.models.db.document_critique import DocumentCritique
+from src.models.db.document_critique import DOCUMENT_CRITIQUES
 from src.models.db.session import get_session, get_session_factory
 from src.repositories.critique_repository import (
     CritiqueRepository,
@@ -248,13 +248,14 @@ async def start_critique(
     state.document_jobs = jobs
     task = asyncio.create_task(
         run_job(
-            table=DocumentCritique.__table__,
+            table=DOCUMENT_CRITIQUES,
             job_id=critique_id,
             organization_id=ids.organization_id,
             created_at=created_at,
             deadline_s=service.CRITIQUE_DEADLINE_S,
             session_factory=session_factory,
-            semaphore=getattr(state, "critique_semaphore", None) or asyncio.Semaphore(1),
+            semaphore=getattr(state, "critique_semaphore", None)
+            or asyncio.Semaphore(1),
             work=service.make_work(
                 session_factory=session_factory,
                 document_id=document_id,

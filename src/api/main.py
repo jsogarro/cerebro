@@ -324,7 +324,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _start_document_purge(resources, app, durable_session_factory)
 
         app.state.document_jobs = set()
-        app.state.critique_semaphore = asyncio.Semaphore(CRITIQUE_PER_WORKER_CONCURRENCY)
+        app.state.critique_semaphore = asyncio.Semaphore(
+            CRITIQUE_PER_WORKER_CONCURRENCY
+        )
         resources.push_async_callback(cancel_all, app.state.document_jobs)
 
         audit_logger = AuditLogger(session_factory=durable_session_factory)
