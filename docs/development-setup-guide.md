@@ -144,7 +144,7 @@ research-cli health                               # GET /health and GET /ready, 
 research-cli projects list                        # authenticated
 ```
 
-`CLIConfig.from_env` (`src/cli/config.py`) reads `~/.research-cli.env` when it exists and `.env.cli` in the current directory otherwise; `.env.cli.example` lists the variables. When `RESEARCH_AUTH_TOKEN` is unset and `RESEARCH_API_KEY` is set, the client sends `X-API-Key` instead (`src/cli/client.py`). Without either, authenticated commands receive 401. See [CLI and web clients](reference/13-cli-and-web-clients.md).
+`CLIConfig.from_env` (`src/cli/config.py`) reads `~/.research-cli.env` when it exists and `.env.cli` in the current directory otherwise; `.env.cli.example` lists the variables. Without `RESEARCH_AUTH_TOKEN`, authenticated commands receive 401. See [CLI and web clients](reference/13-cli-and-web-clients.md).
 
 ## API documentation pages
 

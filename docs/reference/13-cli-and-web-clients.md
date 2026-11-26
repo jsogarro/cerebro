@@ -39,7 +39,6 @@ The `api` service publishes host port `${API_HOST_PORT:-8000}`, so a CLI install
 | `RESEARCH_VERBOSE` | `false` | `true`, `1` or `yes` enables verbose output. |
 | `RESEARCH_COLOR` | `true` | `true`, `1` or `yes` keeps colored output. |
 | `RESEARCH_MAX_RETRIES` | `3` | Attempts for a request that fails at the transport level. |
-| `RESEARCH_API_KEY` | none | Sent as the `X-API-Key` header. |
 | `RESEARCH_AUTH_TOKEN` | none | Sent as `Authorization: Bearer <token>`. |
 
 The `--format` option always has a value (its default is `table`) and is applied after the configuration loads, so it overrides `RESEARCH_OUTPUT_FORMAT` and a saved `output_format` on every run. Pass `--format` to choose another format.
@@ -56,7 +55,7 @@ The client retries only `httpx.TransportError` and `httpx.TimeoutException`, wit
 
 ### Authentication
 
-`RESEARCH_AUTH_TOKEN` is sent as `Authorization: Bearer`. When no token is set and `RESEARCH_API_KEY` is, the client sends `X-API-Key` instead. The API's authentication middleware reads only the `Authorization` bearer header, and no API code reads `X-API-Key`, so a request that carries only an API key receives `401` on every protected route.
+`RESEARCH_AUTH_TOKEN` is sent as `Authorization: Bearer`. The API reads only the bearer header; the CLI has no API-key option.
 
 Every command except `health` needs a token; `/health` and `/ready` are public. Obtain a token from the login route (see [authentication and tenancy](04-authentication-and-tenancy.md)) and export it as `RESEARCH_AUTH_TOKEN`.
 

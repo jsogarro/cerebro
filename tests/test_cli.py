@@ -319,6 +319,14 @@ class TestCLIConfig:
 class TestAPIClient:
     """Test API client."""
 
+    def test_client_sends_no_x_api_key(self, monkeypatch):
+        """The API reads bearer tokens only, so an API key must not be sent."""
+        monkeypatch.setenv("RESEARCH_API_KEY", "key")
+        monkeypatch.setenv("RESEARCH_AUTH_TOKEN", "")
+        with patch("src.cli.client.config", CLIConfig.from_env()):
+            client = ResearchAPIClient()
+        assert "X-API-Key" not in client.client.headers
+
     @pytest.mark.asyncio
     async def test_client_request_success(self):
         """Test successful API request."""

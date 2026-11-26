@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
+import httpx
 import websockets
 from rich.console import Console
 from rich.live import Live
@@ -160,9 +161,12 @@ class CLIWebSocketClient:
         project_id: UUID,
         formatter: OutputFormatter,
         message_handler: Callable[[WSMessage], None] | None = None,
+        _retries_used: int = 0,
     ) -> bool:
         """
         Stream real-time progress updates for a project.
+
+        A dropped connection is retried up to ``config.max_retries`` times.
 
         Args:
             project_id: Project ID to monitor
@@ -306,9 +310,16 @@ class CLIWebSocketClient:
                         self._log(f"Error processing message: {e}")
 
         except ConnectionClosed:
-            if not self._shutdown:
+            if not self._shutdown and _retries_used < config.max_retries:
                 print_warning("Connection lost. Reconnecting...")
-                # Could implement retry logic here
+                await asyncio.sleep(min(2**_retries_used, 10))
+                await self.disconnect()
+                self._shutdown = False
+                return await self.stream_progress(
+                    project_id, formatter, message_handler, _retries_used + 1
+                )
+            if not self._shutdown:
+                print_error("Connection lost and retries exhausted.")
 
         except KeyboardInterrupt:
             print_info("Stopped streaming")
@@ -387,33 +398,15 @@ class CLIWebSocketClient:
         return True
 
     async def test_connection(self) -> bool:
-        """Test WebSocket connection to the server."""
+        """Check the server's WebSocket service via its HTTP health route."""
+        http_url = self.base_url.replace("ws://", "http://").replace(
+            "wss://", "https://"
+        )
         try:
-            endpoint = "/ws/health"
-            ws_url = self._ws_url(endpoint)
-
-            async with websockets.connect(ws_url, ping_interval=None) as websocket:
-                # Send a test message
-                test_msg = {
-                    "type": "test",
-                    "timestamp": datetime.now(UTC).isoformat(),
-                }
-                await websocket.send(serialize_to_str(test_msg))
-
-                # Wait for response (with timeout)
-                try:
-                    raw_response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
-                    response = (
-                        raw_response
-                        if isinstance(raw_response, str)
-                        else raw_response.decode("utf-8")
-                    )
-                    self._log(f"Test response: {response}")
-                    return True
-                except TimeoutError:
-                    return False
-
-        except Exception as e:
+            async with httpx.AsyncClient(base_url=http_url, timeout=5.0) as http:
+                response = await http.get("/ws/health")
+            return response.status_code == 200
+        except httpx.HTTPError as e:
             if self.verbose:
                 print_error(f"Connection test failed: {e}")
             return False
