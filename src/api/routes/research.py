@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
@@ -244,7 +245,7 @@ async def get_research_project(
                 elif execution.status in ["running", "pending"]:
                     project.status = ResearchStatus.IN_PROGRESS
                 break
-    except Exception as e:
+    except SQLAlchemyError as e:
         logger.warning(f"Could not get execution status: {e}")
 
     return project
@@ -329,58 +330,46 @@ async def get_research_progress(
         )
 
     # Fetch progress from direct execution service
-    try:
-        execution_service = _resolved_execution_service(execution_service)
+    execution_service = _resolved_execution_service(execution_service)
 
-        # Find execution for this project
-        execution_status = None
-        for execution in execution_service.active_executions.values():
-            if execution.project_id == str(project_id):
-                execution_status = execution
-                break
+    # Find execution for this project
+    execution_status = None
+    for execution in execution_service.active_executions.values():
+        if execution.project_id == str(project_id):
+            execution_status = execution
+            break
 
-        if execution_status:
-            total_tasks = 4  # Typical research workflow phases
-            completed_tasks = int(
-                execution_status.progress_percentage / 25
-            )  # 25% per phase
-            in_progress = 1 if execution_status.status == "running" else 0
-            pending_tasks = max(0, total_tasks - completed_tasks - in_progress)
+    if execution_status:
+        total_tasks = 4  # Typical research workflow phases
+        completed_tasks = int(
+            execution_status.progress_percentage / 25
+        )  # 25% per phase
+        in_progress = 1 if execution_status.status == "running" else 0
+        pending_tasks = max(0, total_tasks - completed_tasks - in_progress)
 
-            progress = ResearchProgress(
-                project_id=project_id,
-                total_tasks=total_tasks,
-                completed_tasks=completed_tasks,
-                in_progress_tasks=in_progress,
-                pending_tasks=pending_tasks,
-                progress_percentage=execution_status.progress_percentage,
-                current_agent=execution_status.current_phase,
-            )
-        else:
-            # No active execution found - use DB status
-            is_completed = db_project.status == ProjectStatus.COMPLETED
-            progress = ResearchProgress(
-                project_id=project_id,
-                total_tasks=1,
-                completed_tasks=1 if is_completed else 0,
-                in_progress_tasks=0,
-                pending_tasks=0,
-                progress_percentage=100.0 if is_completed else 0.0,
-                current_agent="completed" if is_completed else "pending",
-            )
-
-        return progress
-
-    except Exception as e:
-        logger.error(f"Failed to get progress: {e}")
-        return ResearchProgress(
+        progress = ResearchProgress(
+            project_id=project_id,
+            total_tasks=total_tasks,
+            completed_tasks=completed_tasks,
+            in_progress_tasks=in_progress,
+            pending_tasks=pending_tasks,
+            progress_percentage=execution_status.progress_percentage,
+            current_agent=execution_status.current_phase,
+        )
+    else:
+        # No active execution found - use DB status
+        is_completed = db_project.status == ProjectStatus.COMPLETED
+        progress = ResearchProgress(
             project_id=project_id,
             total_tasks=1,
-            completed_tasks=0,
+            completed_tasks=1 if is_completed else 0,
             in_progress_tasks=0,
-            pending_tasks=1,
-            progress_percentage=0.0,
+            pending_tasks=0,
+            progress_percentage=100.0 if is_completed else 0.0,
+            current_agent="completed" if is_completed else "pending",
         )
+
+    return progress
 
 
 @router.post(
@@ -483,21 +472,15 @@ async def get_research_results(
         }
 
     # Fall back to in-memory execution results
-    try:
-        execution_service = _resolved_execution_service(execution_service)
-        for execution in execution_service.active_executions.values():
-            if (
-                execution.project_id == str(project_id)
-                and execution.status == "completed"
-            ):
-                return {
-                    "project_id": str(project_id),
-                    "results": execution.agent_results or execution.final_output or {},
-                    "quality_scores": execution.quality_scores,
-                    "execution_time_seconds": execution.execution_time_seconds,
-                }
-    except Exception as e:
-        logger.warning(f"Could not get execution results: {e}")
+    execution_service = _resolved_execution_service(execution_service)
+    for execution in execution_service.active_executions.values():
+        if execution.project_id == str(project_id) and execution.status == "completed":
+            return {
+                "project_id": str(project_id),
+                "results": execution.agent_results or execution.final_output or {},
+                "quality_scores": execution.quality_scores,
+                "execution_time_seconds": execution.execution_time_seconds,
+            }
 
     raise HTTPException(
         status_code=http_status.HTTP_404_NOT_FOUND,

@@ -10,7 +10,7 @@ import contextlib
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 from structlog import get_logger
 
 from src.models.websocket_messages import (
@@ -56,7 +56,7 @@ class WebSocketConnection:
                 await self.websocket.send_text(message.model_dump_json())
 
             return True
-        except Exception as e:
+        except (RuntimeError, OSError, WebSocketDisconnect) as e:
             logger.warning(
                 "Failed to send message to WebSocket",
                 client_id=self.client_id,

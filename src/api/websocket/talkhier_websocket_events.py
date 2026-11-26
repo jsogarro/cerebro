@@ -8,7 +8,7 @@ including live updates, interactive dialogue, and multi-session coordination.
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 from structlog import get_logger
 
 from src.models.talkhier_api_models import (
@@ -368,7 +368,7 @@ class TalkHierWebSocketHandler:
                                 "timestamp": datetime.now(UTC).isoformat(),
                             }
                         )
-                    except Exception as e:
+                    except (RuntimeError, OSError, WebSocketDisconnect) as e:
                         logger.error(f"Failed to send coordination update: {e!s}")
 
     # ================================
@@ -385,7 +385,7 @@ class TalkHierWebSocketHandler:
                     websocket = self.connections[connection_id]
                     try:
                         await websocket.send_json(event_data)
-                    except Exception as e:
+                    except (RuntimeError, OSError, WebSocketDisconnect) as e:
                         logger.error(f"Failed to send event to {connection_id}: {e!s}")
 
     async def _broadcast_to_interactive(
@@ -404,7 +404,7 @@ class TalkHierWebSocketHandler:
                     websocket = self.connections[connection_id]
                     try:
                         await websocket.send_json(data)
-                    except Exception as e:
+                    except (RuntimeError, OSError, WebSocketDisconnect) as e:
                         logger.error(
                             f"Failed to send to interactive participant {connection_id}: {e!s}"
                         )

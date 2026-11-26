@@ -26,7 +26,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, status
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from structlog import get_logger
 from tenacity import (
     retry,
@@ -556,27 +556,17 @@ class DirectExecutionService:
         if not telemetry_enabled():
             return 0
 
-        try:
-            token_count = count_tokens(output)
+        token_count = count_tokens(output)
 
-            logger.info(
-                "domain_output_token_measurement",
-                domain=domain,
-                label=label,
-                token_count=token_count,
-                content_length_chars=len(output),
-            )
+        logger.info(
+            "domain_output_token_measurement",
+            domain=domain,
+            label=label,
+            token_count=token_count,
+            content_length_chars=len(output),
+        )
 
-            return token_count
-
-        except Exception as e:
-            logger.debug(
-                "Failed to measure domain output tokens",
-                domain=domain,
-                label=label,
-                error=str(e),
-            )
-            return 0
+        return token_count
 
     async def _checkpoint(self, execution_status: ExecutionStatus, phase: str) -> None:
         """
@@ -628,7 +618,7 @@ class DirectExecutionService:
                     phase=phase,
                 )
 
-        except Exception as e:
+        except (SQLAlchemyError, OSError) as e:
             logger.warning(
                 "Failed to create checkpoint (degrading gracefully)",
                 execution_id=execution_status.execution_id,
@@ -1165,7 +1155,7 @@ class DirectExecutionService:
             attempt = execution_status._attempt
             if attempt is not None and attempt_target is not None:
                 attempt = attempt.transition_to(attempt_target, at=now, reason=reason)
-        except Exception as exc:
+        except ValueError as exc:
             # The durable record already moved past this transition (a
             # retried workflow re-entering a phase it left). Retrying cannot
             # help — the same write would be refused every time.
@@ -1247,7 +1237,7 @@ class DirectExecutionService:
                     occurred_at=datetime.now(UTC),
                 )
                 await session.commit()
-        except Exception as exc:
+        except (SQLAlchemyError, OSError) as exc:
             logger.warning(
                 "attempt_failure_event_not_recorded",
                 execution_id=execution_status.execution_id,
@@ -1736,7 +1726,7 @@ class DirectExecutionService:
                 error=str(exc),
             )
             return DurableWriteOutcome.REJECTED
-        except Exception as exc:
+        except (SQLAlchemyError, OSError) as exc:
             logger.warning(
                 "run_cancellation_persistence_failed",
                 execution_id=execution_status.execution_id,
@@ -1786,7 +1776,7 @@ class DirectExecutionService:
                     self.active_executions[execution_id] = execution_status
                     self._execution_ids_by_run_id[run_row.run_id] = execution_id
                     restored += 1
-        except Exception as exc:
+        except (SQLAlchemyError, OSError) as exc:
             logger.warning("active_execution_restore_failed", error=str(exc))
         return restored
 
@@ -2634,82 +2624,71 @@ class DirectExecutionService:
         if organization_id is None:
             return None
 
-        try:
-            async with self.session_factory() as session:
-                project = await ResearchRepository(session).get(
-                    project_id, organization_id=organization_id
-                )
-                if project is None or project.organization_id is None:
-                    logger.info(
-                        "Resume refused: project not in caller's organization",
-                        project_id=str(project_id),
-                    )
-                    return None
-
-                repository = CheckpointRepository(session)
-                checkpoint = await repository.get_recovery_point(project_id)
-
-                if not checkpoint:
-                    logger.info(
-                        "No recoverable checkpoint found",
-                        project_id=str(project_id),
-                    )
-                    return None
-
-                # Restore checkpoint data
-                restored_data = await repository.restore_from_checkpoint(checkpoint.id)
-
-                if not restored_data:
-                    logger.warning(
-                        "Failed to restore checkpoint data",
-                        checkpoint_id=str(checkpoint.id),
-                    )
-                    return None
-
-                # Rebuild ExecutionStatus from checkpoint
-                checkpoint_data = restored_data["checkpoint_data"]
-                execution_id: str = str(restored_data["workflow_id"])
-
-                execution_status = ExecutionStatus(
-                    execution_id=execution_id,
-                    project_id=str(project_id),
-                    organization_id=str(project.organization_id),
-                    status=checkpoint_data["status"],
-                    progress_percentage=checkpoint_data["progress_percentage"],
-                    current_phase=checkpoint_data["current_phase"],
-                    routing_decision=checkpoint_data.get("routing_decision"),
-                    sub_routing_decisions=checkpoint_data.get(
-                        "sub_routing_decisions", {}
-                    ),
-                    supervisor_type=checkpoint_data.get("supervisor_type"),
-                    agent_results=checkpoint_data.get("agent_results", {}),
-                    quality_scores=checkpoint_data.get("quality_scores", {}),
-                    final_output=checkpoint_data.get("final_output"),
-                    workers_used=checkpoint_data.get("workers_used", 0),
-                    errors=checkpoint_data.get("errors", []),
-                    warnings=checkpoint_data.get("warnings", []),
-                    retry_count=checkpoint_data.get("retry_count", 0),
-                )
-
-                # Register in active executions
-                self.active_executions[execution_id] = execution_status
-
-                logger.info(
-                    "Resumed execution from checkpoint",
-                    execution_id=execution_id,
-                    project_id=str(project_id),
-                    phase=restored_data["phase"],
-                )
-
-                return execution_id
-
-        except Exception as e:
-            logger.error(
-                "Failed to resume execution",
-                project_id=str(project_id),
-                error=str(e),
+        async with self.session_factory() as session:
+            project = await ResearchRepository(session).get(
+                project_id, organization_id=organization_id
             )
-            return None
+            if project is None or project.organization_id is None:
+                logger.info(
+                    "Resume refused: project not in caller's organization",
+                    project_id=str(project_id),
+                )
+                return None
+
+            repository = CheckpointRepository(session)
+            checkpoint = await repository.get_recovery_point(project_id)
+
+            if not checkpoint:
+                logger.info(
+                    "No recoverable checkpoint found",
+                    project_id=str(project_id),
+                )
+                return None
+
+            # Restore checkpoint data
+            restored_data = await repository.restore_from_checkpoint(checkpoint.id)
+
+            if not restored_data:
+                logger.warning(
+                    "Failed to restore checkpoint data",
+                    checkpoint_id=str(checkpoint.id),
+                )
+                return None
+
+            # Rebuild ExecutionStatus from checkpoint
+            checkpoint_data = restored_data["checkpoint_data"]
+            execution_id: str = str(restored_data["workflow_id"])
+
+            execution_status = ExecutionStatus(
+                execution_id=execution_id,
+                project_id=str(project_id),
+                organization_id=str(project.organization_id),
+                status=checkpoint_data["status"],
+                progress_percentage=checkpoint_data["progress_percentage"],
+                current_phase=checkpoint_data["current_phase"],
+                routing_decision=checkpoint_data.get("routing_decision"),
+                sub_routing_decisions=checkpoint_data.get("sub_routing_decisions", {}),
+                supervisor_type=checkpoint_data.get("supervisor_type"),
+                agent_results=checkpoint_data.get("agent_results", {}),
+                quality_scores=checkpoint_data.get("quality_scores", {}),
+                final_output=checkpoint_data.get("final_output"),
+                workers_used=checkpoint_data.get("workers_used", 0),
+                errors=checkpoint_data.get("errors", []),
+                warnings=checkpoint_data.get("warnings", []),
+                retry_count=checkpoint_data.get("retry_count", 0),
+            )
+
+            # Register in active executions
+            self.active_executions[execution_id] = execution_status
+
+            logger.info(
+                "Resumed execution from checkpoint",
+                execution_id=execution_id,
+                project_id=str(project_id),
+                phase=restored_data["phase"],
+            )
+
+            return execution_id
 
     async def cancel_execution(self, execution_id: str) -> bool:
         """Cancel active execution.
@@ -2810,17 +2789,13 @@ class DirectExecutionService:
             )
             return
 
-        try:
-            progress = ProgressUpdate(
-                progress_percentage=execution_status.progress_percentage,
-                current_phase=execution_status.current_phase,
-                current_agent=execution_status.supervisor_type,
-            )
+        progress = ProgressUpdate(
+            progress_percentage=execution_status.progress_percentage,
+            current_phase=execution_status.current_phase,
+            current_agent=execution_status.supervisor_type,
+        )
 
-            await self.event_publisher.publish_progress_update(project_uuid, progress)
-
-        except Exception as e:
-            logger.warning(f"Failed to publish progress update: {e}")
+        await self.event_publisher.publish_progress_update(project_uuid, progress)
 
     async def get_service_stats(self) -> dict[str, Any]:
         """Get service statistics."""

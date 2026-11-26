@@ -14,6 +14,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
@@ -828,7 +829,7 @@ async def _generate_report_task(
                     user_id=user_id,
                 )
                 await session.commit()
-            except Exception:
+            except SQLAlchemyError:
                 await session.rollback()
                 logger.error(
                     "Failed to persist report generation failure",

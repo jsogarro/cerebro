@@ -467,21 +467,10 @@ async def close_session(
 
         # Close WebSocket connections for all clients in this session
         if session_id in websocket_handler.session_connections:
-            disconnect_errors: list[str] = []
             for connection_id in list(
                 websocket_handler.session_connections[session_id]
             ):
-                try:
-                    await connection_manager.disconnect(connection_id)
-                except Exception as disconnect_err:
-                    disconnect_errors.append(f"{connection_id}: {disconnect_err}")
-            if disconnect_errors:
-                logger.warning(
-                    "talkhier_session_disconnect_failed",
-                    session_id=session_id,
-                    error_count=len(disconnect_errors),
-                    errors=disconnect_errors,
-                )
+                await connection_manager.disconnect(connection_id)
 
         await _log_session_analytics(
             "session_closed",
@@ -783,13 +772,6 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
             error=str(e),
         )
         await websocket.close(code=1008, reason="Session not found")
-    except Exception as e:
-        logger.error(
-            "talkhier_session_websocket_error",
-            session_id=session_id,
-            error=str(e),
-        )
-        await websocket.close(code=1011, reason=str(e))
     finally:
         try:
             if registered:
@@ -899,13 +881,6 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
             error=str(e),
         )
         await websocket.close(code=1008, reason="Session not found")
-    except Exception as e:
-        logger.error(
-            "talkhier_interactive_session_error",
-            session_id=session_id,
-            error=str(e),
-        )
-        await websocket.close(code=1011, reason=str(e))
     finally:
         try:
             if registered and session_id is not None:
@@ -1007,13 +982,6 @@ async def websocket_coordination_monitoring(websocket: WebSocket) -> None:
             error=str(e),
         )
         await websocket.close(code=1008, reason="Coordination not found")
-    except Exception as e:
-        logger.error(
-            "talkhier_coordination_monitoring_error",
-            coordination_id=coordination_id,
-            error=str(e),
-        )
-        await websocket.close(code=1011, reason=str(e))
     finally:
         try:
             if registered and coordination_id is not None:
@@ -1118,7 +1086,7 @@ async def _log_session_analytics(
                 tenant_context.organization_id if tenant_context else None
             ),
         )
-    except Exception as e:
+    except ValueError as e:
         logger.warning(
             "talkhier_session_analytics_log_failed",
             event_type=event_type,
@@ -1192,7 +1160,7 @@ async def talkhier_health_check(
             "session_manager": manager_status,
             "timestamp": datetime.now(UTC).isoformat(),
         }
-    except Exception as e:
+    except ValueError as e:
         return {
             "status": "unhealthy",
             "service": "TalkHier Protocol API",

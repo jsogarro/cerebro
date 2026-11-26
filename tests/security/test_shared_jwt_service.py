@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from src.api import main as main_module
 from src.api.main import app
 from src.auth import jwt_service as jwt_module
 from src.middleware import auth_middleware
@@ -43,7 +44,13 @@ def constructions(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         seen["redis"].append(client)
         return client
 
+    async def no_initialize() -> None:
+        # The fake from_url above is a coroutine function, which the event
+        # publisher's own sync client construction cannot use.
+        return None
+
     monkeypatch.setattr(jwt_module.JWTService, "__init__", counting_init)
+    monkeypatch.setattr(main_module.event_publisher, "initialize", no_initialize)
     monkeypatch.setattr(auth_middleware.redis, "from_url", fake_from_url)
     monkeypatch.setattr(auth_middleware, "_shared_jwt_service", None, raising=False)
     monkeypatch.setattr(auth_middleware.settings, "JWT_PRIVATE_KEY_PATH", None)

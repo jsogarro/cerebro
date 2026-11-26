@@ -156,6 +156,32 @@ class TestRunStreamWebSocketEndpoint:
         assert socket.closed == (1008, "Invalid resume cursor")
         assert socket.sent == []
 
+    @pytest.mark.asyncio
+    async def test_unexpected_stream_error_closes_1011_with_documented_reason(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class _ExplodingReader:
+            def __init__(self, **_kwargs: object) -> None:
+                pass
+
+            async def stream(self, *_args: object, **_kwargs: object):
+                raise ValueError("secret internal detail")
+                yield  # pragma: no cover
+
+        monkeypatch.setattr(websocket_routes, "get_session_factory", lambda: object())
+        monkeypatch.setattr(websocket_routes, "RunEventStreamReader", _ExplodingReader)
+        socket = _RecordingWebSocket()
+
+        await websocket_routes.run_event_stream_endpoint(
+            socket,  # type: ignore[arg-type]
+            "run-1",
+            token="token",
+            cursor=None,
+            jwt_service=_StubJWTService(_payload(str(ORG_ID))),  # type: ignore[arg-type]
+        )
+
+        assert socket.closed == (1011, "Run stream error")
+
 
 class TestExistingWebSocketContract:
     """The endpoints other clients already use are unchanged."""

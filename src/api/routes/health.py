@@ -9,7 +9,9 @@ from collections.abc import Awaitable, Callable
 import redis.asyncio as redis
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
+from redis.exceptions import RedisError
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.core.config import settings
 from src.models.db.session import get_session_factory
@@ -42,7 +44,7 @@ async def _check_redis() -> None:
 async def _probe(name: str, check: Callable[[], Awaitable[None]]) -> str:
     try:
         await asyncio.wait_for(check(), timeout=_PROBE_TIMEOUT_SECONDS)
-    except Exception:
+    except (SQLAlchemyError, RedisError, OSError, RuntimeError):
         logger.warning("Readiness check failed: %s", name, exc_info=True)
         return "unavailable"
     return "ok"

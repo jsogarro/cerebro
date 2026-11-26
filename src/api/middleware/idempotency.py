@@ -13,6 +13,7 @@ from typing import Any, Protocol, cast
 
 import redis.asyncio as redis
 import structlog
+from redis.exceptions import RedisError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -184,7 +185,7 @@ class ResilientIdempotencyStore:
     async def get(self, key: str) -> IdempotencyRecord | None:
         try:
             return await self._primary.get(key)
-        except Exception as exc:
+        except (RedisError, OSError, ValueError, KeyError) as exc:
             logger.warning("Idempotency primary store unavailable", error=str(exc))
             return await self._fallback.get(key)
 
@@ -196,14 +197,14 @@ class ResilientIdempotencyStore:
     ) -> None:
         try:
             await self._primary.set(key, record, ttl_seconds)
-        except Exception as exc:
+        except (RedisError, OSError) as exc:
             logger.warning("Idempotency primary store write failed", error=str(exc))
             await self._fallback.set(key, record, ttl_seconds)
 
     async def reserve(self, key: str, ttl_seconds: int) -> str | None:
         try:
             return await self._primary.reserve(key, ttl_seconds)
-        except Exception as exc:
+        except (RedisError, OSError) as exc:
             logger.warning("Idempotency primary store unavailable", error=str(exc))
             return await self._fallback.reserve(key, ttl_seconds)
 
@@ -212,7 +213,7 @@ class ResilientIdempotencyStore:
         for store in (self._primary, self._fallback):
             try:
                 await store.release(key, token)
-            except Exception as exc:
+            except (RedisError, OSError) as exc:
                 logger.warning("Idempotency release failed", error=str(exc))
 
 
