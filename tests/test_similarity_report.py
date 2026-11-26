@@ -293,3 +293,94 @@ def test_a_hostile_licence_identifier_cannot_forge_lines_or_links():
     text = render_report(check(match(source_excerpt=None, source_licence=hostile)), DOC)
     assert "evil.example" not in text and 'licence "unrecognised"' in text
     assert "\nhttp" not in text
+
+
+def _spanned(*spans: tuple[int, int], kind: str = "verbatim") -> list[MatchView]:
+    return [match(doc_start=a, doc_end=b, kind=kind, tokens=b - a) for a, b in spans]
+
+
+def test_covered_tokens_merge_overlapping_adjacent_nested_and_unsorted_spans():
+    text = " ".join(f"w{i}" for i in range(20))
+    starts = [m.start() for m in re.finditer(r"\S+", text)]
+    end = len(text)
+
+    def span(a: int, b: int) -> tuple[int, int]:
+        return starts[a], (starts[b] if b < 20 else end)
+
+    spans = (span(10, 20), span(0, 5), span(3, 4), span(5, 8))
+    matches = tuple(_spanned(*spans))
+    covered, total = report._covered_tokens(text, matches)
+    assert (covered, total) == (18, 20)
+
+
+def test_only_verbatim_kinds_count_toward_the_covered_tokens():
+    text = "alpha beta gamma delta"
+    both = tuple(
+        _spanned((0, 10), kind="normalized")
+        + _spanned((11, 22), kind="paraphrase_candidate")
+    )
+    assert report._covered_tokens(text, both) == (2, 4)
+
+
+def test_the_listed_matches_note_appears_only_when_the_list_is_cut():
+    shown = check(match())
+    assert "matches are listed" not in render_report(shown, DOC)
+    cut = CheckView(**{**vars(shown), "match_total": 5})
+    assert "1 of 5 matches are listed." in render_report(cut, DOC)
+
+
+def test_matches_sort_by_attribution_then_tokens_then_position():
+    first = match(attribution="unattributed", tokens=30, source_title="First")
+    second = match(
+        attribution="unattributed",
+        tokens=20,
+        source_title="Second",
+        doc_start=1,
+        doc_end=4,
+    )
+    third = match(attribution="quoted_uncited", tokens=90, source_title="Third")
+    fourth = match(attribution="cited_unquoted", tokens=99, source_title="Fourth")
+    text = render_report(check(fourth, third, second, first), DOC)
+    order = [text.index(t) for t in ("First", "Second", "Third", "Fourth")]
+    assert order == sorted(order)
+
+
+@pytest.mark.parametrize("size", [300, 301])
+def test_excerpts_are_cut_after_three_hundred_characters(size):
+    body = "x" * size
+    shown = render_report(
+        check(match(source_excerpt=body, doc_start=0, doc_end=1)), DOC
+    )
+    line = next(line for line in shown.splitlines() if "Source excerpt" in line)
+    assert (" ..." in line) is (size > 300)
+
+
+def test_the_source_line_names_the_year_and_the_header_states_status_and_policy():
+    text = render_report(
+        CheckView(**{**vars(check(match())), "status_reason": "deadline_exceeded"}), DOC
+    )
+    assert "Source: A Paper About Passages (2019), full_text" in text
+    assert "Status: partial (deadline_exceeded)" in text
+    assert "Completed: 2026-11-26T00:00:00+00:00" in text
+    assert "Minimum match length: 12 tokens" in text
+
+
+def test_origins_and_failure_reasons_are_listed_in_a_stable_order():
+    row = {
+        "candidates": 1,
+        "full_text": 1,
+        "abstract_only": 0,
+        "skipped_budget": 0,
+        "queries_sent": 1,
+    }
+    text = render_report(
+        check(
+            sources_searched={
+                "openalex": row | {"failures": {"timeout": 1, "http_429": 2}},
+                "comparison": row | {"failures": {}},
+            }
+        ),
+        DOC,
+    )
+    assert text.index("- comparison:") < text.index("- openalex:")
+    assert "failures: http_429 2, timeout 1" in text

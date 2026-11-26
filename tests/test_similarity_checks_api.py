@@ -677,3 +677,102 @@ async def test_deleting_a_check_that_never_started_gives_its_quota_back(
     finally:
         app.state.similarity_semaphore.release()
     assert await count(factory, UsageLedger) == 0
+
+
+async def test_responses_are_never_cached(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    document_id = await make_document(factory)
+    accepted = await start(client, document_id)
+    assert accepted.headers["cache-control"] == "no-store"
+    await drain()
+    check_id = accepted.json()["id"]
+    for url in (
+        f"/api/v1/similarity-checks/{check_id}",
+        f"/api/v1/similarity-checks/{check_id}/report",
+        checks_url(document_id),
+    ):
+        assert (await client.get(url)).headers["cache-control"] == "no-store", url
+
+
+async def test_duplicate_comparison_ids_count_once(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_id = await make_document(factory)
+    other = await make_document(factory, text=SHARED + " tail")
+    monkeypatch.setattr(service, "CANDIDATE_CHAR_BUDGET", len(SHARED + " tail"))
+    body = {"comparison_document_ids": [str(other), str(other)]}
+    check_id = await run_to_end(client, document_id, body)
+    row = (await client.get(f"/api/v1/similarity-checks/{check_id}")).json()
+    assert row["options"]["comparison_document_ids"] == [str(other)]
+
+
+async def test_the_comparison_budget_is_inclusive(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_id = await make_document(factory)
+    other = await make_document(factory, text=SHARED)
+    body = {"comparison_document_ids": [str(other)]}
+    monkeypatch.setattr(service, "CANDIDATE_CHAR_BUDGET", len(SHARED))
+    assert (await start(client, document_id, body)).status_code == 202
+    await drain()
+    monkeypatch.setattr(service, "CANDIDATE_CHAR_BUDGET", len(SHARED) - 1)
+    assert (await start(client, document_id, body)).status_code == 422
+
+
+async def test_the_report_lists_every_match_not_just_one_page(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    from src.core.memory_encryption import document_cipher
+    from src.repositories.similarity_repository import MatchRecord, SimilarityRepository
+
+    document_id = await make_document(factory)
+    check_id = uuid.UUID(await run_to_end(client, document_id))
+    records = [
+        MatchRecord(
+            kind="verbatim",
+            attribution="unattributed",
+            from_user_upload=False,
+            doc_start=0,
+            doc_end=5,
+            tokens=12,
+            source_origin="openalex",
+            source_document_id=None,
+            source_id=f"W{i}",
+            source_title=f"Source number {i}",
+            source_year=None,
+            source_licence={},
+            source_text_kind="full_text",
+            src_start=0,
+            src_end=5,
+            source_excerpt=None,
+        )
+        for i in range(250)
+    ]
+    async with factory() as session:
+        await SimilarityRepository(session, document_cipher()).add_matches(
+            check_id=check_id, organization_id=ORG_A, user_id=USER_A, matches=records
+        )
+        await session.commit()
+    report = await client.get(f"/api/v1/similarity-checks/{check_id}/report")
+    assert report.text.count("verbatim, 12 tokens") == 250
+
+
+async def test_a_report_for_an_expired_document_is_404(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    from src.models.db.uploaded_document import UploadedDocument
+
+    document_id = await make_document(factory)
+    check_id = await run_to_end(client, document_id)
+    async with factory() as session:
+        row = await session.get(UploadedDocument, document_id)
+        assert row is not None
+        row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        await session.commit()
+    report = await client.get(f"/api/v1/similarity-checks/{check_id}/report")
+    assert report.status_code == 404
