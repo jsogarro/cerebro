@@ -597,10 +597,8 @@ class OpenRouterProvider(BaseProvider):
 
         # Surface stale slugs in health status metadata for monitoring/alerting
         if self.stale_slugs:
-            # Degrade status if stale slugs detected
             if self.health_status.api_status == "operational":
                 self.health_status.api_status = "degraded"
-            # Add to metadata (health_status has a metadata dict for extra info)
             if not hasattr(self.health_status, "metadata"):
                 self.health_status.metadata = {}  # type: ignore[attr-defined]
             self.health_status.metadata["stale_slugs"] = self.stale_slugs  # type: ignore[attr-defined]
