@@ -329,7 +329,6 @@ class ReportFormatConfig:
                 "supports_interactive": False,
                 "supports_css": False,
                 "supports_images": True,
-                "compile_to_pdf": True,
             },
             ReportFormat.DOCX: {
                 "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

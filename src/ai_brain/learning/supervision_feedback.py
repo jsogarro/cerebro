@@ -13,10 +13,9 @@ Key Features:
 """
 
 import asyncio
-import pickle
 import statistics
 from collections import defaultdict, deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
@@ -808,46 +807,6 @@ class SupervisionFeedbackLearner:
             },
             "learning_confidence": self._calculate_learning_confidence(),
         }
-
-    async def save_learning_state(self, file_path: str) -> None:
-        """Save learning state to file."""
-
-        state = {
-            "feedback_events": [asdict(event) for event in self.feedback_events],
-            "strategy_metrics": {
-                k: asdict(v) for k, v in self.strategy_analyzer.strategy_metrics.items()
-            },
-            "cost_factors": self.cost_optimizer.cost_factors,
-            "cost_predictions": self.cost_optimizer.cost_predictions,
-            "supervisor_performance": {
-                k: asdict(v) for k, v in self.supervisor_performance.items()
-            },
-            "learning_stats": self.learning_stats,
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        with open(file_path, "wb") as f:
-            pickle.dump(state, f)
-
-        logger.info(f"Saved learning state to {file_path}")
-
-    async def load_learning_state(self, file_path: str) -> None:
-        """Load learning state from file."""
-
-        try:
-            with open(file_path, "rb") as f:
-                state = pickle.load(f)
-
-            # Restore state (simplified restoration)
-            self.learning_stats = state.get("learning_stats", self.learning_stats)
-            self.cost_optimizer.cost_factors = state.get(
-                "cost_factors", self.cost_optimizer.cost_factors
-            )
-
-            logger.info(f"Loaded learning state from {file_path}")
-
-        except Exception as e:
-            logger.error(f"Failed to load learning state: {e}")
 
 
 __all__ = [
