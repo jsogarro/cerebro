@@ -41,17 +41,37 @@ def test_latex_compile_path_is_gone() -> None:
     assert not hasattr(LaTeXExporter, "_compile_latex_to_pdf")
 
 
+BANNED = {"subprocess", "pickle"}
+
+
+def banned_references(source: str) -> set[str]:
+    """Imports of, or string names for, the banned modules (covers import_module)."""
+    found = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            found |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            found.add(node.module.split(".")[0])
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            found.add(node.value.split(".")[0])
+    return found & BANNED
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import subprocess",
+        "import pickle as p",
+        "from subprocess import run",
+        "importlib.import_module('subprocess')",
+        "__import__('pickle')",
+        "pkgutil.resolve_name('subprocess.run')",
+    ],
+)
+def test_scanner_flags_each_way_to_reach_the_banned_modules(source: str) -> None:
+    assert banned_references(source)
+
+
 @pytest.mark.parametrize("relpath", NO_EXEC_MODULES)
-def test_module_imports_neither_subprocess_nor_pickle(relpath: str) -> None:
-    tree = ast.parse((ROOT / relpath).read_text())
-    imported = {
-        alias.name.split(".")[0]
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    } | {
-        node.module.split(".")[0]
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module
-    }
-    assert not imported & {"subprocess", "pickle"}
+def test_module_references_neither_subprocess_nor_pickle(relpath: str) -> None:
+    assert not banned_references((ROOT / relpath).read_text())
