@@ -153,18 +153,13 @@ class MASRService:
                 try:
                     await self.redis_client.ping()
                     components_health["redis"] = "healthy"
-                except Exception:
+                except (redis.RedisError, OSError, TimeoutError):
                     components_health["redis"] = "unhealthy"
 
             # Test MASR router if available
             if self.masr_router:
-                try:
-                    masr_health = await self.masr_router.health_check()
-                    components_health["masr_router"] = masr_health.get(
-                        "status", "unknown"
-                    )
-                except Exception:
-                    components_health["masr_router"] = "unhealthy"
+                masr_health = await self.masr_router.health_check()
+                components_health["masr_router"] = masr_health.get("status", "unknown")
 
             overall_status = (
                 "healthy"

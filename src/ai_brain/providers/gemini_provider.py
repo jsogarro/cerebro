@@ -289,61 +289,49 @@ class GeminiProvider(BaseProvider):
         # Fall back to generating full response and yielding it
         model_name = model_name or self.default_model
 
-        try:
-            response = await self.generate(request, model_name)
+        response = await self.generate(request, model_name)
 
-            if response.success:
-                # Simulate streaming by yielding chunks
-                content = response.content
-                chunk_size = 20  # words per chunk
-                words = content.split()
+        if response.success:
+            # Simulate streaming by yielding chunks
+            content = response.content
+            chunk_size = 20  # words per chunk
+            words = content.split()
 
-                for i in range(0, len(words), chunk_size):
-                    chunk_words = words[i : i + chunk_size]
-                    chunk = " ".join(chunk_words)
-                    yield chunk + " "
+            for i in range(0, len(words), chunk_size):
+                chunk_words = words[i : i + chunk_size]
+                chunk = " ".join(chunk_words)
+                yield chunk + " "
 
-                    # Small delay to simulate streaming
-                    await asyncio.sleep(0.1)
-            else:
-                yield f"Error: {response.error_message}"
-
-        except Exception as e:
-            logger.error("Gemini streaming failed", error=str(e), exc_info=True)
-            yield f"Error: {e!s}"
+                # Small delay to simulate streaming
+                await asyncio.sleep(0.1)
+        else:
+            yield f"Error: {response.error_message}"
 
     async def health_check(self) -> ProviderHealthStatus:
         """Perform Gemini-specific health check."""
 
-        try:
-            # Test with a simple request
-            test_request = ModelRequest(
-                prompt="What is 1 + 1?", max_tokens=10, timeout_seconds=15
-            )
+        # Test with a simple request
+        test_request = ModelRequest(
+            prompt="What is 1 + 1?", max_tokens=10, timeout_seconds=15
+        )
 
-            start_time = datetime.now()
-            response = await self.generate(test_request)
-            latency = (datetime.now() - start_time).total_seconds() * 1000
+        start_time = datetime.now()
+        response = await self.generate(test_request)
+        latency = (datetime.now() - start_time).total_seconds() * 1000
 
-            self.health_status.healthy = response.success
-            self.health_status.last_check = datetime.now()
-            self.health_status.avg_latency_ms = latency
+        self.health_status.healthy = response.success
+        self.health_status.last_check = datetime.now()
+        self.health_status.avg_latency_ms = latency
 
-            # Gemini-specific health indicators
-            if response.success:
-                if "2" in response.content:
-                    self.health_status.api_status = "operational"
-                else:
-                    self.health_status.api_status = "degraded"
+        # Gemini-specific health indicators
+        if response.success:
+            if "2" in response.content:
+                self.health_status.api_status = "operational"
             else:
-                self.health_status.api_status = "error"
-                self.health_status.last_error = response.error_message
-
-        except Exception as e:
-            logger.error("Gemini health check failed", error=str(e), exc_info=True)
-            self.health_status.healthy = False
-            self.health_status.last_error = str(e)
+                self.health_status.api_status = "degraded"
+        else:
             self.health_status.api_status = "error"
+            self.health_status.last_error = response.error_message
 
         return self.health_status
 

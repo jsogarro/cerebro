@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from src.ai_brain.providers.base_provider import ModelRequest
@@ -277,7 +278,9 @@ class TestGeneration:
         request = ModelRequest(prompt="Test", max_tokens=100)
 
         with patch.object(openrouter_provider, "client", create=True) as mock_client:
-            mock_client.post = AsyncMock(side_effect=Exception("API connection failed"))
+            mock_client.post = AsyncMock(
+                side_effect=httpx.ConnectError("API connection failed")
+            )
 
             response = await openrouter_provider.generate(request)
 
@@ -361,7 +364,9 @@ class TestHealthCheck:
     async def test_health_check_failure(self, openrouter_provider):
         """Failed health check should mark provider as unhealthy."""
         with patch.object(openrouter_provider, "client", create=True) as mock_client:
-            mock_client.post = AsyncMock(side_effect=Exception("Network error"))
+            mock_client.post = AsyncMock(
+                side_effect=httpx.ConnectError("Network error")
+            )
 
             health_status = await openrouter_provider.health_check()
 
@@ -534,7 +539,7 @@ class TestModelSlugValidation:
         """Unexpected errors should be caught and logged."""
         openrouter_provider.client = AsyncMock()
         openrouter_provider.client.get = AsyncMock(
-            side_effect=Exception("Unexpected error")
+            side_effect=ValueError("Unexpected error")
         )
 
         result = await openrouter_provider.validate_model_slugs()

@@ -176,7 +176,7 @@ class OpenRouterProvider(BaseProvider):
                 "OpenRouter model catalog fetch failed - skipping slug validation",
                 error=str(e),
             )
-        except Exception as e:
+        except (RuntimeError, ValueError, AttributeError, TypeError) as e:
             validation_error = f"Unexpected validation error: {e}"
             logger.warning(
                 "OpenRouter slug validation failed unexpectedly",
@@ -352,7 +352,14 @@ class OpenRouterProvider(BaseProvider):
 
                 return await self._postprocess_response(model_response, request)
 
-            except Exception as e:
+            except (
+                httpx.HTTPError,
+                RuntimeError,
+                ValueError,
+                KeyError,
+                IndexError,
+                TypeError,
+            ) as e:
                 logger.error(
                     "OpenRouter generation failed", error=str(e), exc_info=True
                 )
@@ -563,47 +570,40 @@ class OpenRouterProvider(BaseProvider):
         Returns:
             ProviderHealthStatus with current health information
         """
-        try:
-            # Test with a simple request
-            test_request = ModelRequest(
-                prompt="What is 2+2?",
-                max_tokens=10,
-                timeout_seconds=15,
-                metadata={"tier": "simple"},  # health probe uses the cheap tier
-            )
+        # Test with a simple request
+        test_request = ModelRequest(
+            prompt="What is 2+2?",
+            max_tokens=10,
+            timeout_seconds=15,
+            metadata={"tier": "simple"},  # health probe uses the cheap tier
+        )
 
-            start_time = datetime.now()
-            response = await self.generate(test_request)
-            latency = (datetime.now() - start_time).total_seconds() * 1000
+        start_time = datetime.now()
+        response = await self.generate(test_request)
+        latency = (datetime.now() - start_time).total_seconds() * 1000
 
-            self.health_status.healthy = response.success
-            self.health_status.last_check = datetime.now()
-            self.health_status.avg_latency_ms = latency
+        self.health_status.healthy = response.success
+        self.health_status.last_check = datetime.now()
+        self.health_status.avg_latency_ms = latency
 
-            if response.success:
-                if "4" in response.content:
-                    self.health_status.api_status = "operational"
-                else:
-                    self.health_status.api_status = "degraded"
+        if response.success:
+            if "4" in response.content:
+                self.health_status.api_status = "operational"
             else:
-                self.health_status.api_status = "error"
-                self.health_status.last_error = response.error_message
-
-            # Surface stale slugs in health status metadata for monitoring/alerting
-            if self.stale_slugs:
-                # Degrade status if stale slugs detected
-                if self.health_status.api_status == "operational":
-                    self.health_status.api_status = "degraded"
-                # Add to metadata (health_status has a metadata dict for extra info)
-                if not hasattr(self.health_status, "metadata"):
-                    self.health_status.metadata = {}  # type: ignore[attr-defined]
-                self.health_status.metadata["stale_slugs"] = self.stale_slugs  # type: ignore[attr-defined]
-
-        except Exception as e:
-            logger.error("OpenRouter health check failed", error=str(e), exc_info=True)
-            self.health_status.healthy = False
-            self.health_status.last_error = str(e)
+                self.health_status.api_status = "degraded"
+        else:
             self.health_status.api_status = "error"
+            self.health_status.last_error = response.error_message
+
+        # Surface stale slugs in health status metadata for monitoring/alerting
+        if self.stale_slugs:
+            # Degrade status if stale slugs detected
+            if self.health_status.api_status == "operational":
+                self.health_status.api_status = "degraded"
+            # Add to metadata (health_status has a metadata dict for extra info)
+            if not hasattr(self.health_status, "metadata"):
+                self.health_status.metadata = {}  # type: ignore[attr-defined]
+            self.health_status.metadata["stale_slugs"] = self.stale_slugs  # type: ignore[attr-defined]
 
         return self.health_status
 

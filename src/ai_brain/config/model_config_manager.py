@@ -219,7 +219,7 @@ class ModelConfigManager:
             ModelConfiguration(**config_data)
             return True
 
-        except Exception as e:
+        except (OSError, TypeError, ValueError, yaml.YAMLError) as e:
             logger.error(f"Configuration validation failed: {e}")
             return False
 

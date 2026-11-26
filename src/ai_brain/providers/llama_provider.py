@@ -177,7 +177,14 @@ class LlamaProvider(BaseProvider):
 
             return await self._postprocess_response(model_response, request)
 
-        except Exception as e:
+        except (
+            httpx.HTTPError,
+            RuntimeError,
+            ValueError,
+            KeyError,
+            IndexError,
+            TypeError,
+        ) as e:
             logger.error("Llama generation failed", error=str(e), exc_info=True)
             return self._create_error_response(request, e, "generation_error")
 
@@ -198,44 +205,37 @@ class LlamaProvider(BaseProvider):
         payload = self._build_request_payload(request, model_name)
         payload["stream"] = True
 
-        try:
-            if not self.client:
-                raise RuntimeError("HTTP client not initialized")
-            async with self.client.stream(
-                "POST",
-                f"{self.ollama_endpoint}/api/generate",
-                headers=self._get_headers(),
-                json=payload,
-            ) as response:
-                if response.status_code != 200:
-                    error_text = await response.aread()
-                    error_str = (
-                        error_text.decode("utf-8")
-                        if isinstance(error_text, bytes)
-                        else str(error_text)
-                    )
-                    raise Exception(
-                        f"Ollama error: {response.status_code} - {error_str}"
-                    )
+        if not self.client:
+            raise RuntimeError("HTTP client not initialized")
+        async with self.client.stream(
+            "POST",
+            f"{self.ollama_endpoint}/api/generate",
+            headers=self._get_headers(),
+            json=payload,
+        ) as response:
+            if response.status_code != 200:
+                error_text = await response.aread()
+                error_str = (
+                    error_text.decode("utf-8")
+                    if isinstance(error_text, bytes)
+                    else str(error_text)
+                )
+                raise Exception(f"Ollama error: {response.status_code} - {error_str}")
 
-                async for line in response.aiter_lines():
-                    if line.strip():
-                        try:
-                            chunk = json.loads(line)
-                            content = chunk.get("response", "")
+            async for line in response.aiter_lines():
+                if line.strip():
+                    try:
+                        chunk = json.loads(line)
+                        content = chunk.get("response", "")
 
-                            if content:
-                                yield content
+                        if content:
+                            yield content
 
-                            if chunk.get("done", False):
-                                break
+                        if chunk.get("done", False):
+                            break
 
-                        except json.JSONDecodeError:
-                            continue  # Skip invalid JSON chunks
-
-        except Exception as e:
-            logger.error("Llama streaming failed", error=str(e), exc_info=True)
-            yield f"Error: {e!s}"
+                    except json.JSONDecodeError:
+                        continue  # Skip invalid JSON chunks
 
     def _build_request_payload(
         self, request: ModelRequest, model_name: str
@@ -309,7 +309,7 @@ class LlamaProvider(BaseProvider):
                     logger.info("Pulling model", model_name=model_name)
                     await self._pull_model(model_name)
 
-        except Exception as e:
+        except (httpx.HTTPError, RuntimeError, ValueError, KeyError, TypeError) as e:
             logger.warning(
                 "Failed to check model availability",
                 model_name=model_name,
@@ -329,7 +329,7 @@ class LlamaProvider(BaseProvider):
             "POST", f"{self.ollama_endpoint}/api/pull", json=pull_payload
         ) as response:
             if response.status_code != 200:
-                raise Exception(f"Failed to pull model {model_name}")
+                raise RuntimeError(f"Failed to pull model {model_name}")
 
             # Stream the pull progress
             async for line in response.aiter_lines():
@@ -338,7 +338,7 @@ class LlamaProvider(BaseProvider):
                         progress = json.loads(line)
                         status = progress.get("status", "")
                         if "error" in progress:
-                            raise Exception(f"Model pull error: {progress['error']}")
+                            raise RuntimeError(f"Model pull error: {progress['error']}")
 
                         logger.debug(
                             "Model pull progress",
@@ -368,7 +368,9 @@ class LlamaProvider(BaseProvider):
                 if isinstance(error_detail, bytes)
                 else str(error_detail)
             )
-            raise Exception(f"Ollama API error: {response.status_code} - {error_str}")
+            raise RuntimeError(
+                f"Ollama API error: {response.status_code} - {error_str}"
+            )
 
         return response
 
@@ -496,7 +498,7 @@ class LlamaProvider(BaseProvider):
             response = await self.client.get(f"{self.ollama_endpoint}/api/tags")
 
             if response.status_code != 200:
-                raise Exception("Ollama service not available")
+                raise RuntimeError("Ollama service not available")
 
             # Test generation with a simple request
             test_request = ModelRequest(
@@ -517,7 +519,7 @@ class LlamaProvider(BaseProvider):
             else:
                 self.health_status.api_status = "degraded"
 
-        except Exception as e:
+        except (httpx.HTTPError, RuntimeError) as e:
             logger.error("Llama health check failed", error=str(e), exc_info=True)
             self.health_status.healthy = False
             self.health_status.last_error = str(e)

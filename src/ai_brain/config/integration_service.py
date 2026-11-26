@@ -15,6 +15,8 @@ This service acts as the glue between:
 from datetime import datetime
 from typing import Any
 
+import httpx
+import yaml  # type: ignore[import-untyped]
 from structlog import get_logger
 
 from ...utils.async_helpers import BackgroundTaskTracker
@@ -110,16 +112,12 @@ class ConfigurationIntegrationService:
 
         logger.info(f"Configuration change detected: {event.change_type}")
 
-        try:
-            await self._update_components(event)
+        await self._update_components(event)
 
-            self.update_count += 1
-            self.last_update = datetime.now()
+        self.update_count += 1
+        self.last_update = datetime.now()
 
-            logger.info("Configuration update completed successfully")
-
-        except Exception as e:
-            logger.error(f"Failed to handle configuration change: {e}")
+        logger.info("Configuration update completed successfully")
 
     async def _update_components(self, event: ConfigurationChangeEvent) -> None:
         """Update components after configuration change."""
@@ -263,7 +261,7 @@ class ConfigurationIntegrationService:
                             f"Component '{component_name}' health check failed: {e}"
                         )
 
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, yaml.YAMLError) as e:
             validation_results["valid"] = False
             error_list_temp: list[str] = validation_results.get("errors", [])
             error_list_temp.append(f"Configuration validation failed: {e}")
@@ -277,8 +275,6 @@ class ConfigurationIntegrationService:
 
         try:
             # Simple connectivity check
-            import httpx
-
             health_endpoint = provider_config.health_check_endpoint
             if health_endpoint:
                 full_url = f"{provider_config.api_endpoint.rstrip('/')}/{health_endpoint.lstrip('/')}"
@@ -294,7 +290,7 @@ class ConfigurationIntegrationService:
                     "response_time_ms": 0,  # Would measure actual response time
                 }
 
-        except Exception as e:
+        except (httpx.HTTPError, httpx.InvalidURL) as e:
             return {"reachable": False, "error": str(e), "status_code": None}
 
     async def get_integration_stats(self) -> dict[str, Any]:

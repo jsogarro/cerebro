@@ -17,6 +17,7 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
+import yaml  # type: ignore[import-untyped]
 from structlog import get_logger
 
 from src.core.observability import LLMCallMetrics, record_llm_call
@@ -290,7 +291,7 @@ class BaseProvider(ABC):
                 capability_count=len(self.supported_capabilities),
             )
 
-        except Exception as e:
+        except (OSError, ValueError, yaml.YAMLError, RuntimeError) as e:
             logger.error(
                 "Failed to load provider configuration",
                 provider_name=self.provider_name,
@@ -355,40 +356,24 @@ class BaseProvider(ABC):
         Returns:
             ProviderHealthStatus with current health information
         """
-        try:
-            # Basic health check with a simple request
-            test_request = ModelRequest(
-                prompt="Hello", max_tokens=5, timeout_seconds=10
+        # Basic health check with a simple request
+        test_request = ModelRequest(prompt="Hello", max_tokens=5, timeout_seconds=10)
+
+        start_time = datetime.now()
+        response = await self.generate(test_request)
+        latency = (datetime.now() - start_time).total_seconds() * 1000
+
+        self.health_status.healthy = response.success
+        self.health_status.last_check = datetime.now()
+        self.health_status.avg_latency_ms = latency
+
+        if not response.success:
+            self.health_status.last_error = response.error_message
+            self.health_status.recent_errors.append(
+                f"{datetime.now()}: {response.error_message}"
             )
-
-            start_time = datetime.now()
-            response = await self.generate(test_request)
-            latency = (datetime.now() - start_time).total_seconds() * 1000
-
-            self.health_status.healthy = response.success
-            self.health_status.last_check = datetime.now()
-            self.health_status.avg_latency_ms = latency
-
-            if not response.success:
-                self.health_status.last_error = response.error_message
-                self.health_status.recent_errors.append(
-                    f"{datetime.now()}: {response.error_message}"
-                )
-                # Keep only recent errors (last 10)
-                self.health_status.recent_errors = self.health_status.recent_errors[
-                    -10:
-                ]
-
-        except Exception as e:
-            logger.error(
-                "Health check failed",
-                provider_name=self.provider_name,
-                error=str(e),
-                exc_info=True,
-            )
-            self.health_status.healthy = False
-            self.health_status.last_error = str(e)
-            self.health_status.last_check = datetime.now()
+            # Keep only recent errors (last 10)
+            self.health_status.recent_errors = self.health_status.recent_errors[-10:]
 
         return self.health_status
 

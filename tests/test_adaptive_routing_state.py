@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import numpy as np
 import pytest
@@ -409,3 +410,34 @@ async def test_validated_seed_snapshot_safely_exits_cold_start() -> None:
 
     assert proposal is not None
     assert proposal.ready is True
+
+
+@pytest.mark.asyncio
+async def test_outcome_application_rolls_back_on_expected_errors_only() -> None:
+    router = _router(InMemoryAdaptiveStateStore())
+    router._apply_outcome_to_snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=ValueError("bad outcome")
+    )
+    result = await router.record_routing_outcome(_outcome("rolled-back"))
+    assert result.status == OutcomeApplicationStatus.INCOMPATIBLE_STATE
+
+    router._apply_outcome_to_snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=AttributeError("bug")
+    )
+    with pytest.raises(AttributeError):
+        await router.record_routing_outcome(_outcome("bug"))
+
+
+@pytest.mark.asyncio
+async def test_allocation_adjustment_propagates_unexpected_engine_errors() -> None:
+    router = _router(InMemoryAdaptiveStateStore())
+    with (
+        patch(
+            "src.ai_brain.router.masr.AdaptiveAllocationEngine.allocate_variant",
+            new=AsyncMock(side_effect=AttributeError("bug")),
+        ),
+        pytest.raises(AttributeError),
+    ):
+        await router._get_adaptive_allocation_adjustment(
+            _analysis(), CollaborationMode.PARALLEL, None
+        )

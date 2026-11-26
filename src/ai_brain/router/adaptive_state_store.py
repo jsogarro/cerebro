@@ -18,6 +18,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Protocol
 
+from redis.exceptions import RedisError
+
 from .routing_outcome import (
     ADAPTIVE_ARMS,
     ADAPTIVE_OUTCOME_RETENTION_SECONDS,
@@ -459,7 +461,7 @@ return 1
     async def load(self) -> StateLoadResult:
         try:
             payload = await self._client.get(self.state_key)
-        except Exception as exc:
+        except (RedisError, OSError, TimeoutError) as exc:
             return StateLoadResult(StateLoadStatus.ERROR, reason=type(exc).__name__)
         if payload is None:
             return StateLoadResult(StateLoadStatus.MISSING)
@@ -503,7 +505,7 @@ return 1
                 snapshot.to_json(),
                 str(self.idempotency_retention_seconds),
             )
-        except Exception as exc:
+        except (RedisError, OSError, TimeoutError) as exc:
             return StateWriteResult(StateWriteStatus.ERROR, reason=type(exc).__name__)
 
         if result == 1:
