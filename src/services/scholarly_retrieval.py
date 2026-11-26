@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import string
+import unicodedata
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
@@ -165,6 +166,15 @@ def _without_phrases(terms: list[str], phrases: set[frozenset[str]]) -> list[str
     return terms
 
 
+def _strip_edge_punctuation(token: str) -> str:
+    lo, hi = 0, len(token)
+    while lo < hi and unicodedata.category(token[lo]).startswith("P"):
+        lo += 1
+    while hi > lo and unicodedata.category(token[hi - 1]).startswith("P"):
+        hi -= 1
+    return token[lo:hi]
+
+
 def _sendable(term: str) -> bool:
     mixed = any(c.isdigit() for c in term) and any(c.isalpha() for c in term)
     return (
@@ -184,7 +194,8 @@ def plan_queries(text: str, limit: int = MAX_CANDIDATES) -> QueryPlan:
     for paragraph in paragraphs:
         terms: set[str] = set()
         words: list[str] = []
-        for token in paragraph.split():
+        for raw_token in paragraph.split():
+            token = _strip_edge_punctuation(raw_token)
             if not token.isascii():
                 dropped += 1
                 words.append("")
@@ -319,8 +330,8 @@ class _Session:
             except TimeoutError:
                 breaker.record_failure(self.pacer.now())
                 reply, received = _Reply(None, "deadline_reached", "timeout"), 0
+            elapsed = int((self.pacer.now() - started).total_seconds() * 1000)
             await self.pacer.sleep(_SPACING_S[request.host])
-        elapsed = int((self.pacer.now() - started).total_seconds() * 1000)
         return reply, received, elapsed
 
     async def _fetch(
@@ -366,7 +377,7 @@ class _Session:
         if status == 429 or status >= 500:
             breaker.record_failure(self.pacer.now())
         else:
-            breaker.record_success()
+            breaker.record_abandoned()
         return _Reply(None, f"http_{status}", status)
 
     async def _emit(
@@ -471,12 +482,14 @@ def _candidate(record: Any) -> Candidate:
     )
 
 
-def _key(c: Candidate) -> tuple[str, str]:
-    if c.doi:
-        return ("doi", c.doi.lower())
+def _keys(c: Candidate) -> list[tuple[str, str]]:
+    """Identifiers of one work, strongest first; any shared one means the same work."""
+    keys = [("openalex", c.source_id)]
     if c.arxiv_id:
-        return ("arxiv", c.arxiv_id)
-    return ("openalex", c.source_id)
+        keys.insert(0, ("arxiv", c.arxiv_id))
+    if c.doi:
+        keys.insert(0, ("doi", c.doi.lower()))
+    return keys
 
 
 # -- retrieval ---------------------------------------------------------------
@@ -490,7 +503,7 @@ async def retrieve_candidates(
     record_egress: Callable[[EgressEvent], Awaitable[None]],
     pacer: Pacer,
 ) -> RetrievalResult:
-    if _enforce_host_policy not in http.event_hooks["request"]:
+    if _enforce_host_policy not in http.event_hooks["request"] or http.follow_redirects:
         raise ValueError("http client must come from make_client()")
     session = _Session(http, pacer, record_egress, budget.deadline_s)
     openalex, arxiv = SourceCoverage(), SourceCoverage()
@@ -499,6 +512,7 @@ async def retrieve_candidates(
 
     found: dict[tuple[str, str], Candidate] = {}
     hits: Counter[tuple[str, str]] = Counter()
+    alias: dict[tuple[str, str], tuple[str, str]] = {}
     for terms in plan.queries:
         params: dict[str, Any] = {
             "search": " ".join(terms),
@@ -538,9 +552,13 @@ async def retrieve_candidates(
             except (ValueError, AttributeError, TypeError):
                 openalex.fail("parse_error")
                 continue
-            key = _key(candidate)
-            found.setdefault(key, candidate)
-            hits[key] += 1
+            keys = _keys(candidate)
+            primary = next((alias[k] for k in keys if k in alias), keys[0])
+            existing = found.setdefault(primary, candidate)
+            if candidate.arxiv_id and not existing.arxiv_id:
+                found[primary] = replace(existing, arxiv_id=candidate.arxiv_id)
+            alias.update({k: primary for k in keys if k not in alias})
+            hits[primary] += 1
 
     ranked = sorted(found, key=lambda k: (-hits[k], -(found[k].year or 0), k))
     chosen = [found[k] for k in ranked[:MAX_CANDIDATES]]
@@ -556,7 +574,9 @@ async def _upgrade_to_full_text(
     session: _Session,
     coverage: SourceCoverage,
 ) -> list[Candidate]:
-    eligible = [i for i, c in enumerate(chosen) if c.arxiv_id][: budget.max_fulltext]
+    eligible = [i for i, c in enumerate(chosen) if c.arxiv_id][
+        : min(budget.max_fulltext, MAX_FULLTEXT)
+    ]
     coverage.candidates = len(eligible)
     for index in eligible:
         candidate = chosen[index]

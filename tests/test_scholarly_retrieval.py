@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import re
 import time
@@ -72,6 +73,13 @@ class StuckPacer(sr.RealTime):
         yield
 
 
+@pytest.fixture(autouse=True)
+def fresh_breakers(monkeypatch):
+    registry = BreakerRegistry(_breaker)
+    monkeypatch.setattr(sr, "_BREAKERS", registry)
+    return registry
+
+
 @pytest.fixture
 def clock() -> Clock:
     return Clock()
@@ -83,8 +91,7 @@ def events() -> list[EgressEvent]:
 
 
 @pytest.fixture
-def run(clock, events, monkeypatch):
-    monkeypatch.setattr(sr, "_BREAKERS", BreakerRegistry(_breaker))
+def run(clock, events):
 
     async def record(event: EgressEvent) -> None:
         events.append(event)
@@ -745,3 +752,177 @@ async def test_markdown_in_a_doi_drops_the_doi_not_the_record(httpx_mock, run):
     search_ok(httpx_mock, work(doi="10.1234/abc](https://evil.example)"))
     (c,) = (await run(budget=RetrievalBudget(max_queries=1))).candidates
     assert c.doi is None
+
+
+# -- second review round -----------------------------------------------------
+
+
+async def test_event_duration_excludes_the_spacing_sleep(httpx_mock, run, events):
+    search_ok(httpx_mock, work())
+    await run(budget=RetrievalBudget(max_queries=1))
+    assert events[0].duration_ms == 0
+
+
+def test_typographic_punctuation_does_not_drop_a_term():
+    text = "\n\n".join(['“quantum” —lattice— and "photonic"'] * 3)
+    plan = sr.plan_queries(text)
+    assert plan.terms_dropped_non_ascii == 0 and plan.queries
+
+
+async def test_fulltext_budget_is_clamped_to_the_spec_maximum(
+    httpx_mock, run, extract_spy
+):
+    search_ok(httpx_mock, *(arxiv_work(f"W{i}", f"2101.{i:05d}") for i in range(1, 16)))
+    for i in range(1, 16):
+        httpx_mock.add_response(
+            url=f"https://arxiv.org/pdf/2101.{i:05d}",
+            content=b"%PDF-x",
+            is_optional=True,
+        )
+    res = await run(budget=RetrievalBudget(max_queries=1, max_fulltext=50))
+    assert res.arxiv.queries_sent == sr.MAX_FULLTEXT
+
+
+async def test_the_same_paper_under_different_identifiers_is_one_candidate(
+    httpx_mock, run
+):
+    by_doi = work(wid="W1", doi="https://doi.org/10.1234/Same", publication_year=2020)
+    both = work(
+        wid="W2",
+        doi="https://doi.org/10.1234/same",
+        locations=[{"landing_page_url": "https://arxiv.org/abs/2101.00001"}],
+    )
+    by_arxiv = work(
+        wid="W3", locations=[{"landing_page_url": "https://arxiv.org/abs/2101.00001"}]
+    )
+    search_ok(httpx_mock, by_doi, both, by_arxiv)
+    res = await run(budget=RetrievalBudget(max_queries=1, max_fulltext=0))
+    assert len(res.candidates) == 1
+
+
+async def test_a_404_is_neutral_for_the_breaker(httpx_mock, run, events):
+    httpx_mock.add_response(url=OPENALEX, status_code=503)
+    httpx_mock.add_response(url=OPENALEX, status_code=503)
+    httpx_mock.add_response(url=OPENALEX, status_code=404)
+    httpx_mock.add_response(url=OPENALEX, status_code=503)
+    res = await run(DOC_MANY, budget=RetrievalBudget(max_queries=5))
+    assert res.openalex.failures.get("breaker_open") == 1
+
+
+@pytest.mark.parametrize("kind", ["429", "timeout", "transport"])
+async def test_each_failure_kind_counts_toward_the_breaker(clock, events, kind):
+    def handler(request):
+        if kind == "429":
+            return httpx.Response(429)
+        if kind == "timeout":
+            raise httpx.ReadTimeout("slow")
+        raise httpx.ConnectError("down")
+
+    res = await _run_with(
+        handler, clock, events, DOC_MANY, RetrievalBudget(max_queries=4)
+    )
+    assert res.openalex.failures.get("breaker_open") == 1
+
+
+async def test_a_success_resets_the_failure_count(httpx_mock, run):
+    for status in (503, 503, 200, 503, 503):
+        if status == 200:
+            search_ok(httpx_mock, work())
+        else:
+            httpx_mock.add_response(url=OPENALEX, status_code=status)
+    res = await run(DOC_MANY, budget=RetrievalBudget(max_queries=5))
+    assert "breaker_open" not in res.openalex.failures
+
+
+async def test_openalex_requests_are_spaced_and_carry_the_documented_params(
+    httpx_mock, run, clock, monkeypatch
+):
+    monkeypatch.setattr(sr.settings, "OPENALEX_API_KEY", SENTINEL_KEY)
+    search_ok(httpx_mock, work())
+    search_ok(httpx_mock, work(wid="W2"))
+    await run(budget=RetrievalBudget(max_queries=2))
+    enters = [t for k, h, t in clock.log if k == "enter"]
+    assert enters[1] - enters[0] >= 0.5
+    first = httpx_mock.get_requests()[0].url.params
+    assert first["api_key"] == SENTINEL_KEY and first["per-page"] == "10"
+    assert first["select"] == sr._SELECT and first["search"]
+
+
+async def test_bytes_received_is_the_body_length(httpx_mock, run, events):
+    body = json.dumps({"results": []}).encode()
+    httpx_mock.add_response(url=OPENALEX, content=body)
+    await run(budget=RetrievalBudget(max_queries=1))
+    assert events[0].bytes_received == len(body)
+
+
+async def test_results_must_be_a_list(httpx_mock, run):
+    httpx_mock.add_response(url=OPENALEX, json={"results": {"a": 1}})
+    res = await run(budget=RetrievalBudget(max_queries=1))
+    assert res.openalex.failures == {"parse_error": 1}
+
+
+async def test_only_twenty_candidates_are_kept_newest_first_on_ties(httpx_mock, run):
+    works = [work(wid=f"W{i}", publication_year=2000 + i) for i in range(1, 26)]
+    search_ok(httpx_mock, *works)
+    res = await run(budget=RetrievalBudget(max_queries=1, max_fulltext=0))
+    years = [c.year for c in res.candidates]
+    assert len(years) == sr.MAX_CANDIDATES and years == sorted(years, reverse=True)
+
+
+async def test_author_list_is_capped(httpx_mock, run):
+    many = work(authorships=[{"author": {"display_name": f"A{i}"}} for i in range(80)])
+    search_ok(httpx_mock, many)
+    (c,) = (await run(budget=RetrievalBudget(max_queries=1))).candidates
+    assert len(c.authors) == sr.MAX_AUTHORS
+
+
+async def test_invisible_characters_are_stripped_from_abstracts_and_full_text(
+    httpx_mock, run, monkeypatch
+):
+    from src.core.acquisition.pdf_text import ExtractedText, PageSpan
+
+    async def hidden(data):
+        text = "full​text\U000e0041"
+        return ExtractedText(text, (PageSpan(1, 0, len(text)),), "a" * 64, "b" * 64), 0
+
+    monkeypatch.setattr(sr, "extract_pdf_sandboxed", hidden)
+    search_ok(
+        httpx_mock,
+        work(
+            abstract=("abs​tract",),
+            locations=[{"landing_page_url": "https://arxiv.org/abs/2101.00001"}],
+        ),
+    )
+    httpx_mock.add_response(url="https://arxiv.org/pdf/2101.00001", content=b"%PDF-x")
+    (c,) = (await run(budget=RetrievalBudget(max_queries=1))).candidates
+    assert c.text == "fulltext"
+    search_ok(httpx_mock, work(wid="W5", abstract=("abs​tract",)))
+    (c2,) = (
+        await run(budget=RetrievalBudget(max_queries=1, max_fulltext=0))
+    ).candidates
+    assert "​" not in c2.text
+
+
+def test_stopwords_are_never_sent():
+    text = "\n\n".join(
+        [para(["results", "discussion", "quantum", "lattice", "photonic"])] * 3
+    )
+    terms = {t for q in build_queries(text) for t in q}
+    assert terms == {"quantum", "lattice", "photonic"}
+
+
+async def test_a_client_that_follows_redirects_is_refused(clock):
+    async def record(event):
+        pass
+
+    async with httpx.AsyncClient(
+        follow_redirects=True, event_hooks={"request": [sr._enforce_host_policy]}
+    ) as http:
+        with pytest.raises(ValueError):
+            await retrieve_candidates(
+                DOC,
+                budget=RetrievalBudget(),
+                http=http,
+                record_egress=record,
+                pacer=Pacer(clock),
+            )
