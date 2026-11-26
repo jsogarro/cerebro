@@ -330,9 +330,8 @@ async def test_hostile_inverted_index_is_a_parse_error(httpx_mock, run):
 
 async def test_too_many_abstract_words_is_a_parse_error(httpx_mock, run):
     bad = work(abstract=())
-    bad["abstract_inverted_index"] = {
-        f"w{i}": [i] for i in range(sr.MAX_ABSTRACT_WORDS + 1)
-    }
+    positions = list(range(sr.MAX_ABSTRACT_POSITION + 1))
+    bad["abstract_inverted_index"] = {"first": positions, "second": positions}
     search_ok(httpx_mock, bad)
     res = await run(budget=RetrievalBudget(max_queries=1))
     assert res.openalex.failures == {"parse_error": 1} and res.candidates == ()
@@ -384,6 +383,7 @@ async def test_arxiv_pdf_goes_only_to_the_sandbox(httpx_mock, run, extract_spy):
         "https://arxiv.org/abs/../../etc",
         "https://evil.example/abs/2101.00001",
         "https://arxiv.org.evil.example/abs/2101.00001",
+        "https://evil.example/?u=https://arxiv.org/abs/2101.00001",
     ],
 )
 async def test_bad_arxiv_urls_yield_no_id_and_no_request(
@@ -595,7 +595,9 @@ async def test_dedup_and_ranking_by_hits_then_year(httpx_mock, run):
 
 
 def test_terms_outside_the_whitelist_are_never_sent():
-    odd = ["tiny", "snake_case", "x" * 41, "12345", "caf\u00e9ine", "quo\"te", "ok-term"]
-    text = "\n\n".join(para(["alphabet", "wordlist", "gamma-ray", *odd]) for _ in range(3))
+    odd = ["tiny", "snake_case", "x" * 41, "12345", "caf\u00e9ine", 'quo"te', "ok-term"]
+    text = "\n\n".join(
+        para(["alphabet", "wordlist", "gamma-ray", *odd]) for _ in range(3)
+    )
     terms = {t for q in build_queries(text) for t in q}
     assert terms == {"alphabet", "wordlist", "gamma-ray", "ok-term"}

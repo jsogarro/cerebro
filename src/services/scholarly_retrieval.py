@@ -360,9 +360,13 @@ def _abstract(index: Any) -> str:
     if not isinstance(index, dict):
         raise _ParseError("inverted index is not an object")
     words: dict[int, str] = {}
+    total = 0
     for word, positions in index.items():
         if not isinstance(positions, list):
             raise _ParseError("positions are not a list")
+        total += len(positions)
+        if total > MAX_ABSTRACT_WORDS:
+            raise _ParseError("abstract too long")
         for position in positions:
             if (
                 not isinstance(position, int)
@@ -371,8 +375,6 @@ def _abstract(index: Any) -> str:
             ):
                 raise _ParseError("position out of range")
             words[position] = word
-        if len(words) > MAX_ABSTRACT_WORDS:
-            raise _ParseError("abstract too long")
     return " ".join(words[p] for p in sorted(words))
 
 
