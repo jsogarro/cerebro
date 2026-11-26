@@ -47,3 +47,4 @@ fpdf2>=2.8.0
 pypdf==7.1.1
 orjson>=3.10.0
 tiktoken>=0.7.0
+jsonschema>=4.21.0

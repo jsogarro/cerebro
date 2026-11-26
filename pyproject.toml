@@ -46,6 +46,7 @@ dependencies = [
     "pyotp>=2.9.0",
     "langfuse>=4.13,<6",
     "tiktoken>=0.7.0",
+    "jsonschema>=4.21.0",
 ]
 
 [project.optional-dependencies]
