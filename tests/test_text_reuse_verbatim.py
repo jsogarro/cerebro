@@ -652,3 +652,18 @@ def test_candidate_under_the_match_cap_is_not_reported_as_truncated():
     p = passage()
     res = run(f"{sentence('a', 20)} {p}", [cand(p)])
     assert res.skipped == () and len(res.matches) == 1
+
+
+def test_doubled_spaces_are_listed_even_though_the_match_is_verbatim():
+    p = passage(20)
+    doubled = p.replace(" ", "  ")
+    res = run(f"{sentence('a', 9)} {doubled} {sentence('b', 9)}", [cand(p)])
+    (m,) = res.matches
+    assert m.kind == "verbatim"
+    assert m.normalizations_applied == {"whitespace_collapsed"}
+
+
+def test_identical_text_lists_no_normalization():
+    p = passage(20)
+    (m,) = run(f"{sentence('a', 9)} {p}", [cand(p)]).matches
+    assert m.kind == "verbatim" and m.normalizations_applied == frozenset()

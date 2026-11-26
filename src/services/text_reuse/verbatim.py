@@ -349,13 +349,9 @@ def find_verbatim_reuse(
             doc_raw = _slice(document, doc_tokens, i0, i1)
             src_raw = _slice(c.text, src_tokens, j0, j1)
             verbatim = " ".join(doc_raw.split()) == " ".join(src_raw.split())
-            applied: frozenset[str] = frozenset()
+            applied = normalize(doc_raw).applied | normalize(src_raw).applied
             if not verbatim:
-                applied = (
-                    normalize(doc_raw).applied
-                    | normalize(src_raw).applied
-                    | {"token_key_folding"}
-                )
+                applied |= {"token_key_folding"}
             matches.append(
                 ReuseMatch(
                     candidate_source_id=c.source_id,
