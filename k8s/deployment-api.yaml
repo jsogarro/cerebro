@@ -18,6 +18,7 @@ spec:
         component: api
     spec:
       serviceAccountName: research-platform-sa
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000

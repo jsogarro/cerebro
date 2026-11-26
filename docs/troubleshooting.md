@@ -182,7 +182,7 @@ An execution that belongs to another organization is reported as not found. See 
 
 ## Performance problems
 
-Parallelism is in-process: workers fan out under an `asyncio.Semaphore` whose size is the execution budget's `max_parallel_tasks`, and the production image runs 4 Uvicorn worker processes. Most request latency is model latency.
+Parallelism is in-process: workers fan out under an `asyncio.Semaphore` whose size is the execution budget's `max_parallel_tasks`, and the production image runs one Uvicorn process per container. Most request latency is model latency.
 
 1. Inspect model latency and cost with the `llm_*` metrics (see above).
 2. Compare the pool and concurrency limits in [performance tuning](performance-tuning.md).

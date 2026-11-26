@@ -48,6 +48,7 @@ from src.api.routes import (
 from src.api.services.event_publisher import event_publisher
 from src.api.websocket.connection_manager import websocket_manager
 from src.core.config import settings
+from src.core.process_hardening import make_non_dumpable
 from src.middleware.auth_middleware import AuthMiddleware
 from src.security.audit_logger import AuditLogger
 from src.security.audit_middleware import (
@@ -57,6 +58,8 @@ from src.security.audit_middleware import (
 from src.security.security_headers import SecurityHeadersMiddleware
 
 logger = get_logger()
+
+make_non_dumpable()
 
 
 async def _close_lifespan_resource(

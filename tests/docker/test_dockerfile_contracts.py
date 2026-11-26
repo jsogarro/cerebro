@@ -109,9 +109,9 @@ class TestRootDockerfileContract:
         ) or "curl" in content
 
     def test_production_cmd_unchanged(self, content: str) -> None:
-        # Production stage uvicorn launch with 4 workers
+        # Production stage uvicorn launch with one worker (secrets isolation)
         assert (
-            'CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]'
+            'CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]'
             in content
         )
 
@@ -127,7 +127,7 @@ class TestRootDockerfileContract:
 
         entrypoint_index = production.index('ENTRYPOINT ["/entrypoint.sh"]')
         cmd_index = production.index(
-            'CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]'
+            'CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]'
         )
         assert entrypoint_index < cmd_index
 

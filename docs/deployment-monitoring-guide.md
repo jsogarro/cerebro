@@ -28,7 +28,7 @@ This guide covers the deployment artifacts that exist in this repository: one Do
 | `base` | `gcc`, `g++`, `curl`, `git`, `uv` | none |
 | `development` | `pip install -e ".[dev,mcp]"`, `src/`, `tests/`, `alembic/`, entrypoint | `uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload` |
 | `builder` | `pip install -e .` and `src/` | none |
-| `production` | Site-packages, `alembic`, `uvicorn`, `src/`, `alembic/` copied from `builder`; runs as the non-root user `app` | `uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 4` |
+| `production` | Site-packages, `alembic`, `uvicorn`, `src/`, `alembic/` copied from `builder`; runs as the non-root user `app` | `uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 1` |
 
 The `production` stage declares a healthcheck that runs `curl -f http://localhost:8000/health` every 30 seconds (timeout 3 seconds, start period 40 seconds, 3 retries).
 
@@ -58,7 +58,7 @@ The file reads these variables from the environment or an env file: `DB_PASSWORD
 
 The file also declares `db_password`, `redis_password` and `gemini_api_key` secrets that read from `./secrets/*.txt`; no service references them.
 
-The `api` service sets `GUNICORN_WORKERS`, `GUNICORN_WORKER_CLASS`, `GUNICORN_MAX_REQUESTS` and `GUNICORN_MAX_REQUESTS_JITTER`. Nothing in the image or the application reads them: the image runs Uvicorn with `--workers 4`, and the service does not override the command.
+The `api` service sets `GUNICORN_WORKERS`, `GUNICORN_WORKER_CLASS`, `GUNICORN_MAX_REQUESTS` and `GUNICORN_MAX_REQUESTS_JITTER`. Nothing in the image or the application reads them: the image runs Uvicorn with `--workers 1`, and the service does not override the command.
 
 Several files the production compose file mounts are not in the repository: `docker/postgresql.conf`, `docker/redis.conf`, `docker/nginx/conf.d/`, `docker/ssl/`, `docker/prometheus/prometheus.yml` and `docker/grafana/provisioning/`. Create them, or remove the corresponding `volumes` entries and `command` flags, before `docker compose -f docker-compose.production.yml up`.
 
