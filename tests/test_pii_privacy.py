@@ -29,6 +29,7 @@ from src.models.db.generated_report import GeneratedReport
 from src.models.db.research_project import ResearchProject
 from src.models.db.research_result import ResearchResult
 from src.models.db.session import get_session
+from src.models.db.similarity_check import EgressEvent
 from src.models.db.uploaded_document import UploadedDocument, UsageLedger
 from src.models.db.user import User
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint
@@ -199,6 +200,7 @@ async def test_gdpr_delete_purges_user_database_rows_and_memory() -> None:
             WorkflowCheckpoint,
             UploadedDocument,
             UsageLedger,
+            EgressEvent,
         ):
             await conn.run_sync(model.__table__.create)
 
@@ -295,6 +297,7 @@ async def _gdpr_delete_as(
             WorkflowCheckpoint,
             UploadedDocument,
             UsageLedger,
+            EgressEvent,
         ):
             await conn.run_sync(model.__table__.create)
 

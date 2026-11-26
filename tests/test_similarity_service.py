@@ -597,24 +597,6 @@ async def test_a_pacer_whose_commit_fails_does_not_fail_the_request(
     assert ran
 
 
-async def test_an_audit_row_for_a_deleted_check_is_dropped_without_failing_the_run(
-    factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from sqlalchemy.exc import IntegrityError
-
-    async def refuse(self: object, *args: object, **kwargs: object) -> None:
-        raise IntegrityError("INSERT", {}, Exception("check gone"))
-
-    monkeypatch.setattr(SimilarityRepository, "add_egress", refuse)
-    target = await make_document(factory)
-    events = (EgressEvent("arxiv.org", "pdf", 0, 200, 1, 1),)
-    retrieve, _ = stub_retrieve(events=events)
-    _, view = await run_check(
-        factory, target, options={"open_sources": True}, retrieve=retrieve
-    )
-    assert view.status != "failed"
-
-
 async def test_a_check_deleted_while_being_read_reads_as_missing(
     factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -725,3 +707,77 @@ async def test_an_excerpt_of_an_expired_source_document_is_no_longer_served(
     after = await read_check(factory, check_id)
     assert after.matches[0].source_excerpt is None
     assert "old.txt" not in after.matches[0].source_title
+
+
+async def test_audit_survives_a_deleted_check_and_the_run_stops(
+    factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    real = SimilarityRepository.add_egress
+    calls: list[uuid.UUID | None] = []
+
+    async def fk_fails_for_a_linked_row(
+        self: SimilarityRepository, event: Any, *, check_id: Any, **owner: Any
+    ) -> None:
+        calls.append(check_id)
+        if check_id is not None:
+            raise IntegrityError("INSERT", {}, Exception("check gone"))
+        await real(self, event, check_id=None, **owner)
+
+    monkeypatch.setattr(SimilarityRepository, "add_egress", fk_fails_for_a_linked_row)
+    sent = []
+
+    async def retrieve(text: str, **kwargs: Any) -> Any:
+        for _ in range(3):
+            sent.append(1)
+            await kwargs["record_egress"](EgressEvent("arxiv.org", "pdf", 0, 200, 1, 1))
+        return await stub_retrieve()[0](text, **kwargs)
+
+    target = await make_document(factory)
+    check_id, go = await start_check(
+        factory, target, options={"open_sources": True}, retrieve=retrieve
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await go()
+    view = await read_check(factory, check_id)
+    async with factory() as session:
+        rows = (await session.execute(select(EgressRow))).scalars().all()
+    assert len(sent) == 1
+    assert [r.check_id for r in rows] == [None]
+    assert view.status == "failed"
+
+
+async def test_a_switched_off_feature_stops_a_queued_check_from_going_out(
+    factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.core.config import settings
+
+    retrieve, calls = stub_retrieve()
+    target = await make_document(factory)
+    monkeypatch.setattr(settings, "SIMILARITY_OPEN_SOURCES_ENABLED", False)
+    _, view = await run_check(
+        factory, target, options={"open_sources": True}, retrieve=retrieve
+    )
+    assert calls == []
+    assert view.coverage["sources_searched"]["openalex"]["failures"] == {
+        "open_sources_disabled": 1
+    }
+    assert view.status == "partial"
+
+
+async def test_a_check_keeps_at_most_the_total_match_cap(
+    factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(service, "MAX_MATCHES_PER_CHECK", 3)
+    target = await make_document(factory, text=" ".join(f"w{i}" for i in range(400)))
+    chunks = [" ".join(f"w{i}" for i in range(j, j + 20)) for j in range(0, 400, 40)]
+    retrieve, _ = stub_retrieve(
+        tuple(candidate(f"W{i}", text=c) for i, c in enumerate(chunks)),
+        openalex=SourceCoverage(candidates=len(chunks)),
+    )
+    _, view = await run_check(
+        factory, target, options={"open_sources": True}, retrieve=retrieve
+    )
+    assert len(view.matches) == 3
+    assert "too_many_matches" in view.coverage["partial_reasons"]

@@ -673,3 +673,9 @@ def test_an_openalex_id_has_a_bounded_length():
     with pytest.raises(ValueError):
         make(source_id="W" + "1" * 25)
     assert make(source_id="W" + "1" * 20).source_id == "W" + "1" * 20
+
+
+def test_an_arxiv_id_has_a_bounded_length():
+    with pytest.raises(ValueError):
+        make(origin="arxiv", source_id="a" * 60 + "/1234567")
+    assert make(origin="arxiv", source_id="hep-th/9901001v2").source_id

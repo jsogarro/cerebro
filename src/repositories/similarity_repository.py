@@ -254,7 +254,7 @@ class SimilarityRepository:
         self,
         event: EgressRecord,
         *,
-        check_id: uuid.UUID,
+        check_id: uuid.UUID | None,
         organization_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> None:

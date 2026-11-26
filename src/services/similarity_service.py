@@ -26,6 +26,7 @@ from src.core.memory_encryption import document_cipher
 from src.core.untrusted_text import sanitize_model_field, strip_invisible
 from src.middleware.tenant_context import set_postgres_tenant_context
 from src.repositories.similarity_repository import (
+    ATTRIBUTION_RANK,
     EgressRecord,
     MatchRecord,
     SimilarityRepository,
@@ -58,6 +59,7 @@ SIMILARITY_OPEN_SOURCE_GLOBAL_DAILY = 100
 # 04's total, shared so admission and the runner cannot disagree.
 CANDIDATE_CHAR_BUDGET = MAX_TOTAL_CANDIDATE_CHARS
 MAX_COMPARISON_IDS = 10
+MAX_MATCHES_PER_CHECK = 5_000
 MAX_OWN_UPLOADS = 10
 MAX_TITLE_CHARS = 200
 MAX_EXCERPT_CHARS = 1000
@@ -397,31 +399,45 @@ class _Run:
         self._retrieve = retrieve
 
     async def record_egress(self, event: EgressEvent) -> None:
+        """Persist one audit row; if the check is gone, keep the row unlinked and stop.
+
+        The request has already gone out, so the audit must survive; but a deleted check
+        means the user withdrew it, so no further request may follow.
+        """
         job = self._job
-        async with self._session_factory() as session:
-            await set_postgres_tenant_context(session, str(job.organization_id))
-            try:
-                await SimilarityRepository(session, document_cipher()).add_egress(
-                    EgressRecord(
-                        event.host,
-                        event.request_class,
-                        event.term_count,
-                        event.status,
-                        event.bytes_received,
-                        event.duration_ms,
-                    ),
-                    check_id=job.check_id,
-                    organization_id=job.organization_id,
-                    user_id=job.user_id,
-                )
-                await session.commit()
-            except IntegrityError:
-                # The check was deleted on another worker; the run is being discarded.
-                await session.rollback()
+        record = EgressRecord(
+            event.host,
+            event.request_class,
+            event.term_count,
+            event.status,
+            event.bytes_received,
+            event.duration_ms,
+        )
+        for check_id in (job.check_id, None):
+            async with self._session_factory() as session:
+                await set_postgres_tenant_context(session, str(job.organization_id))
+                try:
+                    await SimilarityRepository(session, document_cipher()).add_egress(
+                        record,
+                        check_id=check_id,
+                        organization_id=job.organization_id,
+                        user_id=job.user_id,
+                    )
+                    await session.commit()
+                except IntegrityError:
+                    await session.rollback()
+                    continue
+            if check_id is None:
+                raise asyncio.CancelledError
+            return
 
     async def _open_sources(self, body: str, sources: _Sources) -> _Retrieved:
         rows = {origin: _blank_row() for origin in ORIGINS}
         if not self._job.options["open_sources"]:
+            return _Retrieved(rows)
+        if not (settings.SIMILARITY_OPEN_SOURCES_ENABLED and terms_verified()):
+            # Switched off after the check was admitted: nothing leaves the server.
+            rows["openalex"]["failures"] = {"open_sources_disabled": 1}
             return _Retrieved(rows)
         retrieved = await self._retrieve(
             body,
@@ -462,11 +478,19 @@ class _Run:
             budget=ReuseBudget(deadline_s=MATCHING_DEADLINE_S),
         )
         by_id = {c.source_id: c for c in sources.candidates}
-        matches = []
-        for m in result.matches:
-            cand = by_id[m.candidate_source_id]
-            matches.append(_record(m, cand, _origin_of(cand, sources.comparison_ids)))
+        kept = sorted(
+            result.matches, key=lambda m: (ATTRIBUTION_RANK[m.attribution], -m.tokens)
+        )[:MAX_MATCHES_PER_CHECK]
+        matches = [
+            _record(m, by_id[m.candidate_source_id], origin)
+            for m in kept
+            for origin in (
+                _origin_of(by_id[m.candidate_source_id], sources.comparison_ids),
+            )
+        ]
         skipped: dict[str, int] = {}
+        if len(kept) < len(result.matches):
+            skipped["too_many_matches"] = 1
         for source_id, reason in result.skipped:
             skipped[reason] = skipped.get(reason, 0) + 1
             if reason in ("too_long", "budget_exhausted"):
