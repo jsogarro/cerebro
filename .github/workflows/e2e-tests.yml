@@ -12,105 +12,9 @@ env:
   NODE_VERSION: '20'
 
 jobs:
-  e2e-tests:
-    name: E2E Tests (${{ matrix.browser }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    # Disabled: this job runs `pytest tests/e2e/ --browser=...` expecting pytest-playwright
-    # tests, but no such tests exist (the JS Playwright specs at cerebro/web/tests/e2e/
-    # need `npx playwright test`, not pytest). Re-enable after either (a) writing
-    # pytest-playwright Python tests, or (b) rewriting this job to run the JS specs.
-    if: false
-    strategy:
-      fail-fast: false
-      matrix:
-        browser: [chromium, firefox]
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v7
-    
-    - name: Set up Python
-      uses: actions/setup-python@v7
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    
-    - name: Set up Node.js
-      uses: actions/setup-node@v7
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-    
-    - name: Install uv
-      run: |
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-    
-    - name: Install dependencies
-      run: |
-        uv pip install --system -e ".[dev]"
-        uv pip install --system playwright pytest-playwright
-    
-    - name: Install Playwright browsers
-      run: |
-        playwright install --with-deps ${{ matrix.browser }}
-    
-    - name: Start services with Docker Compose
-      run: |
-        docker compose up -d
-        
-        # Wait for services to be ready
-        timeout 60 bash -c 'until curl -s http://localhost:8000/health; do sleep 2; done'
-    
-    - name: Run E2E tests
-      env:
-        BASE_URL: http://localhost:8000
-        HEADLESS: true
-        BROWSER: ${{ matrix.browser }}
-      run: |
-        pytest tests/e2e/ \
-          --browser=${{ matrix.browser }} \
-          --base-url=$BASE_URL \
-          --video=retain-on-failure \
-          --screenshot=only-on-failure \
-          --tracing=retain-on-failure \
-          --output=test-results/${{ matrix.browser }} \
-          --junit-xml=test-results/${{ matrix.browser }}/results.xml \
-          -v
-    
-    - name: Upload test artifacts
-      if: failure()
-      uses: actions/upload-artifact@v7
-      with:
-        name: e2e-artifacts-${{ matrix.browser }}
-        path: |
-          test-results/
-          screenshots/
-          videos/
-          traces/
-        retention-days: 7
-    
-    - name: Upload test results
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        name: e2e-results-${{ matrix.browser }}
-        path: test-results/${{ matrix.browser }}/results.xml
-    
-    - name: Publish test results
-      if: always()
-      uses: EnricoMi/publish-unit-test-result-action@v2
-      with:
-        check_name: E2E Test Results (${{ matrix.browser }})
-        files: test-results/${{ matrix.browser }}/results.xml
-    
-    - name: Stop services
-      if: always()
-      run: |
-        docker compose down -v
-
   e2e-python:
     name: E2E Python Tests (docker-compose stack)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # Playwright in cerebro/web has no Chromium build for 26.04
     timeout-minutes: 30
 
     steps:
@@ -122,41 +26,68 @@ jobs:
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
+    - name: Set up Node.js
+      uses: actions/setup-node@v7
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: cerebro/web/package-lock.json
+
     - name: Install uv
       run: |
         curl -LsSf https://astral.sh/uv/install.sh | sh
-        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-    - name: Install dependencies
+    - name: Install Python dependencies
       run: |
         uv pip install --system -e ".[dev]"
 
+    - name: Install web dependencies and Chromium
+      working-directory: cerebro/web
+      run: |
+        npm ci
+        npx playwright install --with-deps chromium
+
     - name: Start services with Docker Compose
       env:
-        # Ephemeral test values so the api container can boot in CI.
-        # Local dev sources these from .env; CI doesn't have that file.
+        # Fake keys: no journey makes a provider call. A journey that would
+        # need a model is a strict xfail until the dry-run packet lands.
         SECRET_KEY: ci-test-secret-key-32-bytes-of-entropy-for-jwt-signing-only
         JWT_SECRET_KEY: ci-test-jwt-secret-key-32-bytes-of-entropy-for-signing
         GEMINI_API_KEY: ci-test-gemini-key-not-used-by-e2e-suite
       run: |
         docker compose up -d
-        # Wait for API /health (no Playwright in this job)
         timeout 90 bash -c 'until curl -fsS http://localhost:8000/health; do sleep 2; done'
 
-    - name: Run Python E2E tests
+    - name: Run Python e2e tests and journeys
       env:
         BASE_URL: http://localhost:8000
+        # The compose postgres publishes 5432 with these credentials.
+        E2E_DATABASE_URL: postgresql://research:research123@localhost:5432/research_db
       run: |
         pytest tests/e2e/ \
+          --no-cov \
           --junit-xml=test-results/python-e2e/results.xml \
           -v
+
+    - name: Run Playwright against the real backend
+      working-directory: cerebro/web
+      env:
+        PLAYWRIGHT_REAL_BACKEND: '1'
+        PLAYWRIGHT_BACKEND_URL: http://127.0.0.1:8000
+        VITE_API_URL: http://127.0.0.1:8000
+        CI: 'true'
+      run: npx playwright test golden-run.spec.ts --retries=0 --trace=retain-on-failure
 
     - name: Upload test artifacts on failure
       if: failure()
       uses: actions/upload-artifact@v7
       with:
-        name: e2e-python-artifacts
-        path: test-results/
+        name: e2e-artifacts
+        path: |
+          test-results/
+          cerebro/web/test-results/
+          cerebro/web/playwright-report/
         retention-days: 7
 
     - name: Dump docker-compose logs on failure
@@ -170,7 +101,7 @@ jobs:
       if: failure()
       uses: actions/upload-artifact@v7
       with:
-        name: e2e-python-docker-logs
+        name: e2e-docker-logs
         path: docker-compose.log
         retention-days: 7
 
