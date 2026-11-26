@@ -208,11 +208,6 @@ def template_sha256(role: Role) -> str:
     return hashlib.sha256(template.encode()).hexdigest()
 
 
-def _error_type(exc: Exception) -> str:
-    """Only a type name is kept; a provider message may quote the manuscript."""
-    return str(exc) if isinstance(exc, ProviderCallError) else type(exc).__name__
-
-
 def _classify_finish(reason: str) -> tuple[str, str | None] | None:
     """Return a terminal (status, error_type), or None when the reply may be parsed."""
     if reason == "STOP":
@@ -431,8 +426,8 @@ async def _run_role(
     for _ in range(MAX_PARSE_ATTEMPTS):
         try:
             reply: ModelReply = await model.complete(prompt)
-        except Exception as exc:
-            return result("failed", error_type=_error_type(exc))
+        except ProviderCallError as exc:
+            return result("failed", error_type=str(exc))
         finish = reply.finish_reason
         if reply.input_tokens is not None:
             tokens_in = (tokens_in or 0) + reply.input_tokens

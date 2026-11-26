@@ -485,13 +485,18 @@ class TestStatus:
         r, _ = self.run(reply([], finish=""))
         assert r.status == "failed" and r.error_type == "unexpected_finish_reason:"
 
-    def test_any_exception_fails_only_that_role(self) -> None:
-        stub = by_role(statistics=ValueError("echoes SENTINEL"))
+    def test_a_provider_error_fails_only_that_role(self) -> None:
+        stub = by_role(statistics=ProviderCallError("ValueError"))
         result = asyncio.run(run_panel(DOC, model=stub))
         failed = only(result, "statistics")
         assert (failed.status, failed.error_type) == ("failed", "ValueError")
         assert only(result, "methods").status == "succeeded"
         assert only(result, "red_team").status == "succeeded"
+
+    def test_an_adapter_bug_fails_the_panel_loudly(self) -> None:
+        stub = by_role(statistics=ValueError("adapter bug"))
+        with pytest.raises(ValueError, match="adapter bug"):
+            asyncio.run(run_panel(DOC, model=stub))
 
     def test_exception_records_type_name_only(self) -> None:
         r, _ = self.run(ProviderCallError("ValueError"))

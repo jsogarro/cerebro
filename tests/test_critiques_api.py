@@ -15,7 +15,7 @@ from cryptography.fernet import Fernet
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from src.agents.critique.model import ModelReply
+from src.agents.critique.model import ModelReply, ProviderCallError
 from src.agents.critique.roles import ROLES, role_named
 from src.api.main import app
 from src.api.routes.critiques import get_job_session_factory, get_review_model
@@ -528,7 +528,7 @@ async def test_two_roles_failing_is_partial(
 ) -> None:
     def handler(prompt: str) -> ModelReply | Exception:
         if role_of(prompt) in {"methods", "statistics"}:
-            return RuntimeError("provider down")
+            return ProviderCallError("RuntimeError")
         return reply([issue(Q1)])
 
     model.handler = handler
@@ -545,7 +545,7 @@ async def test_every_role_failing_is_failed_with_a_reason(
     factory: async_sessionmaker[AsyncSession],
     model: GatedModel,
 ) -> None:
-    model.handler = lambda prompt: RuntimeError("provider down")
+    model.handler = lambda prompt: ProviderCallError("RuntimeError")
     critique = await read(
         client, await run_to_end(client, await make_document(factory))
     )
@@ -1045,8 +1045,8 @@ async def test_a_cancelled_request_still_schedules_the_run_it_committed(
         if seen is not None and (seen.status != "queued" or app.state.document_jobs):
             break
         await asyncio.sleep(0.05)
-    # The run was scheduled once the shielded commit finished; wait for it to end, then
-    # read the row afresh (the read above can still say "running").
+    # The run is scheduled only after the shielded commit, so drain it before rereading;
+    # the read above can still say "running".
     await drain()
     async with factory() as session:
         row = (await session.execute(select(DocumentCritique))).scalar_one()
