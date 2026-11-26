@@ -101,6 +101,8 @@ class KeptIssue:
     second_raw_start: int | None = None
     second_raw_end: int | None = None
     second_page: int | None = None
+    # "normalized" when any quote needed normalization to be located.
+    match_kind: str = "exact"
 
 
 @dataclass(frozen=True)
@@ -242,7 +244,7 @@ def _parse(text: str) -> RoleOutput | Literal["truncated"] | None:
         return None
 
 
-_Span = tuple[str, int, int, int]
+_Span = tuple[str, int, int, int, str]
 
 
 def _ground_quote(
@@ -265,7 +267,7 @@ def _ground_quote(
         page = document.page_of(match.raw_start)
     except IndexError:
         return "off_page"
-    return sliced, match.raw_start, match.raw_end, page
+    return sliced, match.raw_start, match.raw_end, page, match.kind.value
 
 
 def _without_format(text: str) -> str:
@@ -303,9 +305,25 @@ def _ground_issue(
         return None, "delimiter_echo", 0
     if not problem:
         return None, "unsafe_field", 0
-    second_span = spans[1] if len(spans) > 1 else (None, None, None, None)
+    quote, raw_start, raw_end, page, _ = spans[0]
+    second_span = spans[1] if len(spans) > 1 else None
     kept = KeptIssue(
-        role.name, item.category, item.severity, *spans[0], problem, fix, *second_span
+        role.name,
+        item.category,
+        item.severity,
+        quote,
+        raw_start,
+        raw_end,
+        page,
+        problem,
+        fix,
+        second_quote=second_span[0] if second_span else None,
+        second_raw_start=second_span[1] if second_span else None,
+        second_raw_end=second_span[2] if second_span else None,
+        second_page=second_span[3] if second_span else None,
+        match_kind=(
+            "normalized" if any(span[4] == "normalized" for span in spans) else "exact"
+        ),
     )
     return kept, None, p_removed + f_removed
 

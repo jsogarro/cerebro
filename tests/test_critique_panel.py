@@ -236,6 +236,32 @@ class TestGrounding:
         assert k.quote == doc.text[k.raw_start : k.raw_end]
         assert "“" in k.quote
 
+    def test_match_kind_records_whether_the_quote_needed_normalizing(self) -> None:
+        doc = make_doc("We “recruited forty participants” from one  university today.")
+        normalized = self.run(
+            [issue('"recruited forty participants" from one university today')], doc
+        ).issues[0]
+        assert normalized.match_kind == "normalized"
+        assert self.run([issue(Q1)]).issues[0].match_kind == "exact"
+
+    def test_match_kind_is_normalized_when_only_the_second_quote_needed_it(
+        self,
+    ) -> None:
+        doc = make_doc(
+            "We recruited forty participants from one university today.",
+            "The treatment group  improved significantly across every measured outcome.",
+        )
+        r = self.run(
+            [
+                issue(
+                    "recruited forty participants from one university",
+                    second_quote="treatment group improved significantly across every measured outcome",
+                )
+            ],
+            doc,
+        )
+        assert r.issues[0].match_kind == "normalized"
+
     def test_drops_paraphrase_and_four_word_quote(self) -> None:
         r = self.run(
             [
