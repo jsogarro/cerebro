@@ -142,6 +142,44 @@ async def _used(session: AsyncSession, *conditions: Any) -> tuple[int, int]:
     return int(row[0]), int(row[1])
 
 
+@dataclass(frozen=True)
+class _Request:
+    kind: str
+    organization_id: uuid.UUID
+    user_id: uuid.UUID
+    units: int
+    budget_kinds: tuple[str, ...]
+
+
+async def _ledger_breach(
+    session: AsyncSession, limits: JobLimits, request: _Request, now: datetime
+) -> str | None:
+    """The code of the first ledger limit the request would exceed, if any."""
+    since = UsageLedger.created_at >= now - _WINDOW
+    kinds = UsageLedger.kind.in_(request.budget_kinds)
+    mine = UsageLedger.kind == request.kind
+    org = UsageLedger.organization_id == request.organization_id
+    if limits.per_user_daily is not None:
+        count, _ = await _used(
+            session, since, mine, org, UsageLedger.user_id == request.user_id
+        )
+        if count >= limits.per_user_daily:
+            return "user_daily"
+    if limits.per_org_daily_units is not None:
+        _, used = await _used(session, since, kinds, org)
+        if used + request.units > limits.per_org_daily_units:
+            return "org_daily_budget"
+    if limits.global_daily_units is not None:
+        _, used = await _used(session, since, kinds)
+        if used + request.units > limits.global_daily_units:
+            return "global_daily_budget"
+    if limits.global_daily_count is not None:
+        count, _ = await _used(session, since, mine)
+        if count >= limits.global_daily_count:
+            return "global_daily_count"
+    return None
+
+
 async def admit(
     session: AsyncSession,
     *,
@@ -167,33 +205,9 @@ async def admit(
             text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
             {"key": f"admit:{lock or kind}"},
         )
-    since = UsageLedger.created_at >= now - _WINDOW
-    kinds = UsageLedger.kind.in_(budget_kinds or (kind,))
-    mine = UsageLedger.kind == kind
-    if limits.per_user_daily is not None:
-        count, _ = await _used(
-            session,
-            since,
-            mine,
-            UsageLedger.organization_id == organization_id,
-            UsageLedger.user_id == user_id,
-        )
-        if count >= limits.per_user_daily:
-            raise QuotaExceeded("user_daily")
-    if limits.per_org_daily_units is not None:
-        _, used = await _used(
-            session, since, kinds, UsageLedger.organization_id == organization_id
-        )
-        if used + units > limits.per_org_daily_units:
-            raise QuotaExceeded("org_daily_budget")
-    if limits.global_daily_units is not None:
-        _, used = await _used(session, since, kinds)
-        if used + units > limits.global_daily_units:
-            raise QuotaExceeded("global_daily_budget")
-    if limits.global_daily_count is not None:
-        count, _ = await _used(session, since, mine)
-        if count >= limits.global_daily_count:
-            raise QuotaExceeded("global_daily_count")
+    request = _Request(kind, organization_id, user_id, units, budget_kinds or (kind,))
+    if code := await _ledger_breach(session, limits, request, now):
+        raise QuotaExceeded(code)
     if limits.per_org_concurrent is not None:
         active = await count_active(session, organization_id, now)
         if active >= limits.per_org_concurrent:
@@ -210,23 +224,23 @@ async def admit(
     await session.flush()
 
 
-async def _fail(
-    session_factory: SessionFactory,
-    table: Table,
-    job_id: uuid.UUID,
-    organization_id: uuid.UUID,
-    *,
-    expected: str,
-    reason: str,
-) -> None:
+@dataclass(frozen=True)
+class _Job:
+    session_factory: SessionFactory
+    table: Table
+    id: uuid.UUID
+    organization_id: uuid.UUID
+
+
+async def _fail(job: _Job, *, expected: str, reason: str) -> None:
     """Best effort: a row this cannot fail is failed by the stale rule on its next read."""
     try:
-        async with session_factory() as session:
-            await set_postgres_tenant_context(session, str(organization_id))
+        async with job.session_factory() as session:
+            await set_postgres_tenant_context(session, str(job.organization_id))
             await transition(
                 session,
-                table,
-                job_id,
+                job.table,
+                job.id,
                 expected=expected,
                 new="failed",
                 status_reason=reason,
@@ -235,22 +249,17 @@ async def _fail(
             await session.commit()
     except (SQLAlchemyError, OSError) as exc:
         logger.warning(
-            "document_job_fail_write", job_id=str(job_id), error_type=type(exc).__name__
+            "document_job_fail_write", job_id=str(job.id), error_type=type(exc).__name__
         )
 
 
-async def _start(
-    session_factory: SessionFactory,
-    table: Table,
-    job_id: uuid.UUID,
-    organization_id: uuid.UUID,
-) -> bool:
-    async with session_factory() as session:
-        await set_postgres_tenant_context(session, str(organization_id))
+async def _start(job: _Job) -> bool:
+    async with job.session_factory() as session:
+        await set_postgres_tenant_context(session, str(job.organization_id))
         started = await transition(
             session,
-            table,
-            job_id,
+            job.table,
+            job.id,
             expected="queued",
             new="running",
             started_at=datetime.now(UTC),
@@ -260,20 +269,18 @@ async def _start(
 
 
 async def _finish(
-    session_factory: SessionFactory,
-    table: Table,
-    job_id: uuid.UUID,
-    organization_id: uuid.UUID,
+    job: _Job,
     result: Any,
     persist: Callable[[AsyncSession, Any], Awaitable[Outcome]],
 ) -> None:
     """Persist ``result`` only if the row is still running; otherwise discard it."""
-    async with session_factory() as session:
-        await set_postgres_tenant_context(session, str(organization_id))
+    table = job.table
+    async with job.session_factory() as session:
+        await set_postgres_tenant_context(session, str(job.organization_id))
         locked = (
             await session.execute(
                 select(table.c.id)
-                .where(table.c.id == job_id, table.c.status == "running")
+                .where(table.c.id == job.id, table.c.status == "running")
                 .with_for_update()
             )
         ).first()
@@ -284,7 +291,7 @@ async def _finish(
             if not await transition(
                 session,
                 table,
-                job_id,
+                job.id,
                 expected="running",
                 new=final,
                 completed_at=datetime.now(UTC),
@@ -296,7 +303,7 @@ async def _finish(
         except IntegrityError:
             # The parent row was deleted while the job ran; its dependents went with it.
             await session.rollback()
-            logger.info("document_job_discarded", job_id=str(job_id))
+            logger.info("document_job_discarded", job_id=str(job.id))
 
 
 async def run_job(
@@ -317,14 +324,15 @@ async def run_job(
     further columns to set on the job row. It runs only while the row is still
     ``running``, so a deleted or already-failed job discards its result.
     """
-    fail = functools.partial(_fail, session_factory, table, job_id, organization_id)
+    job = _Job(session_factory, table, job_id, organization_id)
+    fail = functools.partial(_fail, job)
     try:
         async with semaphore:
             elapsed = (datetime.now(UTC) - _aware(created_at)).total_seconds()
             if (remaining := deadline_s - elapsed) <= 0:
                 await fail(expected="queued", reason="deadline_exceeded")
                 return
-            if not await _start(session_factory, table, job_id, organization_id):
+            if not await _start(job):
                 return
             try:
                 async with asyncio.timeout(remaining) as deadline:
@@ -335,9 +343,7 @@ async def run_job(
                 logger.warning("document_job_failed", job_id=str(job_id), reason=reason)
                 await fail(expected="running", reason=reason)
                 return
-            await _finish(
-                session_factory, table, job_id, organization_id, result, persist
-            )
+            await _finish(job, result, persist)
     except (asyncio.CancelledError, Exception) as exc:
         cancelled = isinstance(exc, asyncio.CancelledError)
         reason = "interrupted" if cancelled else "internal_error"
