@@ -97,9 +97,25 @@ SANITIZE_PATTERNS = (
 _STRAY_TAG_OPEN = re.compile(r"<(?=[a-z!?/][^<>]*[\s/=])", re.IGNORECASE)
 _ANY_HOST = re.compile(r"(?<![\w:])//[\w.-]+\S*")
 _PRE_CAP_FACTOR = 8
-_COMPILED = tuple(re.compile(p, re.IGNORECASE) for p in SANITIZE_PATTERNS)
-_MARKDOWN_LINK = re.compile(r"!?\[([^\]\n]{0,200})\]\([^)\s]{1,500}\)")
-_MARKDOWN_LINK_INDEX = 2
+# The pinned link pattern with its text captured, so the text survives the removal.
+_LINK_KEEPING_TEXT = SANITIZE_PATTERNS[2].replace(
+    r"\[[^\]\n]{0,200}\]", r"\[([^\]\n]{0,200})\]"
+)
+_RULES = (
+    *(
+        (
+            re.compile(pattern, re.IGNORECASE),
+            r"\1" if pattern is _LINK_KEEPING_TEXT else "",
+        )
+        for pattern in (
+            *SANITIZE_PATTERNS[:2],
+            _LINK_KEEPING_TEXT,
+            *SANITIZE_PATTERNS[3:],
+        )
+    ),
+    (_STRAY_TAG_OPEN, ""),
+    (_ANY_HOST, ""),
+)
 
 
 def sanitize_model_field(text: str, max_len: int) -> tuple[str, bool]:
@@ -110,19 +126,13 @@ def sanitize_model_field(text: str, max_len: int) -> tuple[str, bool]:
     removed = len(window) < len(text) or visible != window
     cleaned = " ".join(visible.split())
     # Removing one construct can splice its neighbours into a new one ("<<b>b>"), so repeat.
-    changed = True
-    while changed:
-        changed = False
-        for index, pattern in enumerate(_COMPILED):
-            if index == _MARKDOWN_LINK_INDEX:
-                cleaned, n = _MARKDOWN_LINK.subn(r"\1", cleaned)
-            else:
-                cleaned, n = pattern.subn("", cleaned)
-            changed = changed or n > 0
-        for extra in (_STRAY_TAG_OPEN, _ANY_HOST):
-            cleaned, n = extra.subn("", cleaned)
-            changed = changed or n > 0
-        removed = removed or changed
+    while True:
+        before = cleaned
+        for pattern, replacement in _RULES:
+            cleaned = pattern.sub(replacement, cleaned)
+        if cleaned == before:
+            break
+        removed = True
     cleaned = " ".join(cleaned.split())
     if len(cleaned) > max_len:
         cut = cleaned[:max_len]

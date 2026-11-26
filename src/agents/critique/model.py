@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -71,7 +72,7 @@ class GeminiReviewModel:
                 message = await self._chat.ainvoke(prompt)
         except Exception as exc:
             raise ProviderCallError(type(exc).__name__) from None
-        usage: dict[str, Any] = dict(message.usage_metadata or {})
+        usage: Mapping[str, Any] = message.usage_metadata or {}
         return ModelReply(
             message.text,
             str(message.response_metadata.get("finish_reason", "")),

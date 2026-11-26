@@ -15,7 +15,8 @@ import secrets
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from functools import cache
+from typing import Any, Literal
 
 from langchain_core.exceptions import OutputParserException
 from langchain_core.output_parsers import PydanticOutputParser
@@ -154,13 +155,16 @@ def _render_prior(findings: Sequence[KeptIssue]) -> str:
     return "\n".join(lines)
 
 
+_PARSER = PydanticOutputParser(pydantic_object=RoleOutput)
+_FORMAT_INSTRUCTIONS = _PARSER.get_format_instructions()
+
+
 def build_prompt(
     role: Role,
     text: str,
     delimiter: str,
     prior_findings: Sequence[KeptIssue] | None = None,
 ) -> str:
-    parser = PydanticOutputParser(pydantic_object=RoleOutput)
     parts = [
         f"Role: {role.name}",
         role.focus,
@@ -181,12 +185,13 @@ def build_prompt(
             f"<<<PRIOR-{delimiter}\n{_render_prior(prior_findings)}\nPRIOR-{delimiter}>>>",
         ]
     parts += [
-        parser.get_format_instructions(),
+        _FORMAT_INSTRUCTIONS,
         'End the JSON object with "complete": true as its final field.',
     ]
     return "\n\n".join(parts)
 
 
+@cache
 def template_sha256(role: Role) -> str:
     template = build_prompt(
         role, "{DOC}", "{DELIM}", () if role.name == "red_team" else None
@@ -219,7 +224,7 @@ def _parse(text: str) -> RoleOutput | Literal["truncated"] | None:
     if isinstance(raw, dict) and raw.get("complete") is not True:
         return "truncated"
     try:
-        return PydanticOutputParser(pydantic_object=RoleOutput).parse(body)
+        return _PARSER.parse(body)
     except (OutputParserException, ValidationError):
         return None
 
@@ -250,6 +255,37 @@ def _ground_quote(
     return sliced, match.raw_start, match.raw_end, page
 
 
+def _ground_issue(
+    item: Issue,
+    role: Role,
+    prepared: PreparedSource,
+    document: ExtractedText,
+    delimiter: str,
+) -> tuple[KeptIssue | None, str | None, int]:
+    """The kept issue (or the drop reason) and how many of its fields were sanitized."""
+    if delimiter in item.problem or delimiter in item.fix:
+        return None, "delimiter_echo", 0
+    if item.category not in role.categories:
+        return None, "unsafe_field", 0
+    spans: list[_Span] = []
+    for quote in (item.quote, item.second_quote):
+        if quote is None:
+            continue
+        span = _ground_quote(quote, prepared, document)
+        if isinstance(span, str):
+            return None, span, 0
+        spans.append(span)
+    problem, p_removed = sanitize_model_field(item.problem, PROBLEM_MAX_CHARS)
+    fix, f_removed = sanitize_model_field(item.fix, FIX_MAX_CHARS)
+    if not problem:
+        return None, "unsafe_field", 0
+    second = spans[1] if len(spans) > 1 else (None, None, None, None)
+    kept = KeptIssue(
+        role.name, item.category, item.severity, *spans[0], problem, fix, *second
+    )
+    return kept, None, p_removed + f_removed
+
+
 def ground_role(
     output: RoleOutput,
     role: Role,
@@ -263,40 +299,14 @@ def ground_role(
     if len(output.issues) > MAX_ISSUES_PER_ROLE:
         drops["over_cap"] = len(output.issues) - MAX_ISSUES_PER_ROLE
     for item in output.issues[:MAX_ISSUES_PER_ROLE]:
-        if delimiter in item.problem or delimiter in item.fix:
-            drops["delimiter_echo"] += 1
-            continue
-        if item.category not in role.categories:
-            drops["unsafe_field"] += 1
-            continue
-        spans: list[_Span] = []
-        for quote in (item.quote, item.second_quote):
-            if quote is None:
-                continue
-            span = _ground_quote(quote, prepared, document)
-            if isinstance(span, str):
-                drops[span] += 1
-                break
-            spans.append(span)
-        else:
-            problem, p_removed = sanitize_model_field(item.problem, PROBLEM_MAX_CHARS)
-            fix, f_removed = sanitize_model_field(item.fix, FIX_MAX_CHARS)
-            if not problem:
-                drops["unsafe_field"] += 1
-                continue
-            sanitized += p_removed + f_removed
-            second = spans[1] if len(spans) > 1 else (None, None, None, None)
-            kept.append(
-                KeptIssue(
-                    role.name,
-                    item.category,
-                    item.severity,
-                    *spans[0],
-                    problem,
-                    fix,
-                    *second,
-                )
-            )
+        issue, reason, removed = _ground_issue(
+            item, role, prepared, document, delimiter
+        )
+        if issue is not None:
+            kept.append(issue)
+            sanitized += removed
+        elif reason is not None:
+            drops[reason] += 1
     return kept, drops, sanitized
 
 
@@ -315,23 +325,30 @@ async def _run_role(
     tokens_out: int | None = None
     finish = ""
 
-    def result(status: str, **kw: object) -> RoleResult:
+    def result(
+        status: str,
+        error_type: str | None = None,
+        issues: tuple[KeptIssue, ...] = (),
+        **fields: Any,
+    ) -> RoleResult:
         logger.info(
             "critique_role",
             role=role.name,
             status=status,
             finish_reason=finish,
-            error_type=kw.get("error_type"),
-            kept=len(kw.get("issues", ())),  # type: ignore[arg-type]
+            error_type=error_type,
+            kept=len(issues),
         )
         return RoleResult(
             role.name,
             status,
             sha,
+            issues=issues,
+            error_type=error_type,
             finish_reason=finish,
             input_tokens=tokens_in,
             output_tokens=tokens_out,
-            **kw,  # type: ignore[arg-type]
+            **fields,
         )
 
     for _ in range(MAX_PARSE_ATTEMPTS):
