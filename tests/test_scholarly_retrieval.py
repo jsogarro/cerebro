@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import re
+import time
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -106,7 +107,8 @@ def _breaker() -> CircuitBreaker:
 
 
 def para(words: list[str]) -> str:
-    return " ".join(words)
+    # Filler keeps the terms from being adjacent, which the phrase guard would prune.
+    return " the ".join(words)
 
 
 DOC = "\n\n".join(
@@ -601,3 +603,145 @@ def test_terms_outside_the_whitelist_are_never_sent():
     )
     terms = {t for q in build_queries(text) for t in q}
     assert terms == {"alphabet", "wordlist", "gamma-ray", "ok-term"}
+
+
+# -- review regressions ------------------------------------------------------
+
+
+def _transport_client(handler):
+    client = make_client()
+    client._transport = httpx.MockTransport(handler)
+    return client
+
+
+async def _run_with(handler, clock, events, text=DOC, budget=None):
+    async def record(event):
+        events.append(event)
+
+    async with _transport_client(handler) as http:
+        return await retrieve_candidates(
+            text,
+            budget=budget or RetrievalBudget(max_queries=2),
+            http=http,
+            record_egress=record,
+            pacer=Pacer(clock),
+        )
+
+
+def _ok(*works):
+    return httpx.Response(200, json={"results": list(works)})
+
+
+async def test_a_request_error_is_a_counted_failure_not_a_crash(clock, events):
+    calls = iter([_ok(work()), httpx.DecodingError("bad body")])
+
+    def handler(request):
+        reply = next(calls)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    res = await _run_with(handler, clock, events)
+    assert len(res.candidates) == 1
+    assert sum(res.openalex.failures.values()) == 1 and len(events) == 2
+
+
+async def test_encoded_responses_are_refused_unread(clock, events):
+    def handler(request):
+        return httpx.Response(200, headers={"content-encoding": "gzip"}, content=b"x")
+
+    res = await _run_with(handler, clock, events, budget=RetrievalBudget(max_queries=1))
+    assert res.openalex.failures == {"unsupported_encoding": 1}
+
+
+async def test_deeply_nested_json_is_a_parse_error(clock, events):
+    body = b'{"results":' + b"[" * 200_000 + b"]" * 200_000 + b"}"
+    res = await _run_with(
+        lambda request: httpx.Response(200, content=body),
+        clock,
+        events,
+        budget=RetrievalBudget(max_queries=1),
+    )
+    assert res.openalex.failures == {"parse_error": 1}
+
+
+async def test_a_slow_drip_body_is_cut_off_at_the_deadline(clock, events):
+    class Slow(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for _ in range(100):
+                await asyncio.sleep(0.05)
+                yield b" "
+
+    t0 = asyncio.get_event_loop().time()
+    res = await _run_with(
+        lambda request: httpx.Response(200, stream=Slow()),
+        clock,
+        events,
+        budget=RetrievalBudget(max_queries=1, deadline_s=0.2),
+    )
+    assert asyncio.get_event_loop().time() - t0 < 2
+    assert res.openalex.deadline_reached
+
+
+async def test_a_malformed_authorship_keeps_the_record(httpx_mock, run):
+    odd = work(
+        authorships=[{"author": None}, "Ann", {"author": {"display_name": "Bo"}}],
+        best_oa_location="cc-by",
+    )
+    search_ok(httpx_mock, odd)
+    (c,) = (await run(budget=RetrievalBudget(max_queries=1))).candidates
+    assert c.authors == ("Bo",) and c.licence.declared_by.value == "undeclared"
+
+
+def test_negative_budgets_are_rejected():
+    for kw in ({"max_queries": -1}, {"max_fulltext": -1}, {"deadline_s": -1}):
+        with pytest.raises(ValueError):
+            RetrievalBudget(**kw)
+
+
+def test_a_reordered_document_phrase_is_not_sent():
+    text = "\n\n".join(["zebra quantum lattice stuff-here"] * 3)
+    for q in build_queries(text):
+        assert not {"zebra", "quantum", "lattice"} <= set(q)
+
+
+def test_tokens_mixing_letters_and_digits_are_never_sent():
+    text = "\n\n".join(
+        [para(["alphabet", "wordlist", "gamma-ray", "ghp1234567890abcdef"])] * 3
+    )
+    assert not any("ghp1234567890abcdef" in q for q in build_queries(text))
+
+
+def test_query_planning_is_not_quadratic_in_paragraph_count():
+    text = "\n\n".join(
+        f"shared-aa shared-bb shared-cc uniq{i}word" for i in range(30000)
+    )
+    t0 = time.perf_counter()
+    build_queries(text)
+    assert time.perf_counter() - t0 < 3
+
+
+@pytest.mark.parametrize(
+    "url", ["https://api.openalex.org:8443/works", "https://arxiv.org:444/pdf/1"]
+)
+async def test_other_ports_are_refused(httpx_mock, url):
+    async with make_client() as http:
+        with pytest.raises(sr.HostNotAllowedError):
+            await http.get(url)
+
+
+def test_the_client_ignores_proxy_environment():
+    assert make_client()._trust_env is False
+
+
+def test_request_repr_hides_terms_and_key():
+    request = sr._Request(
+        "api.openalex.org", "u", {"search": "SECRET-TERM"}, 1, "search", 1
+    )
+    assert "SECRET-TERM" not in repr(request)
+
+
+async def test_markdown_in_a_doi_drops_the_doi_not_the_record(httpx_mock, run):
+    search_ok(httpx_mock, work(doi="10.1234/abc](https://evil.example)"))
+    (c,) = (await run(budget=RetrievalBudget(max_queries=1))).candidates
+    assert c.doi is None

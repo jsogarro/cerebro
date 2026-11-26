@@ -23,6 +23,7 @@ from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from importlib.resources import files
+from itertools import combinations
 from typing import Any, Protocol
 
 import httpx
@@ -73,6 +74,7 @@ _PARAGRAPHS = re.compile(r"\n[ \t\r]*\n")
 _STOPWORDS = frozenset(
     files("src.services.text_reuse").joinpath("stopwords_en.txt").read_text().split()
 )
+_SAFE_DOI = re.compile(r"10\.\d{4,9}/[A-Za-z0-9._;()/:-]{1,200}")
 _USER_AGENT = "cerebro-similarity-check (open-source research workbench)"
 
 
@@ -85,6 +87,10 @@ class RetrievalBudget:
     max_queries: int = MAX_CANDIDATES
     max_fulltext: int = MAX_FULLTEXT
     deadline_s: float = 180
+
+    def __post_init__(self) -> None:
+        if min(self.max_queries, self.max_fulltext, self.deadline_s) < 0:
+            raise ValueError("budget values cannot be negative")
 
 
 @dataclass(frozen=True)
@@ -148,12 +154,25 @@ class QueryPlan:
 # -- queries -----------------------------------------------------------------
 
 
-def _without_phrases(terms: list[str], phrases: set[tuple[str, ...]]) -> list[str]:
-    """Drop terms until no three consecutive terms repeat a phrase of the document."""
-    for i in range(len(terms) - 2):
-        if tuple(terms[i : i + 3]) in phrases:
-            return _without_phrases(terms[: i + 2] + terms[i + 3 :], phrases)
+def _without_phrases(terms: list[str], phrases: set[frozenset[str]]) -> list[str]:
+    """Drop terms until no three of them are three adjacent words of the document.
+
+    Order is ignored: the search API ignores it too, so a reordered phrase leaks as much.
+    """
+    for trio in combinations(terms, 3):
+        if frozenset(trio) in phrases:
+            return _without_phrases([t for t in terms if t != trio[-1]], phrases)
     return terms
+
+
+def _sendable(term: str) -> bool:
+    mixed = any(c.isdigit() for c in term) and any(c.isalpha() for c in term)
+    return (
+        bool(TERM_RE.fullmatch(term))
+        and not mixed
+        and not term.isdigit()
+        and term not in _STOPWORDS
+    )
 
 
 def plan_queries(text: str, limit: int = MAX_CANDIDATES) -> QueryPlan:
@@ -161,7 +180,7 @@ def plan_queries(text: str, limit: int = MAX_CANDIDATES) -> QueryPlan:
     body = text[: region[0]] + text[region[1] :] if region else text
     paragraphs = [p for p in _PARAGRAPHS.split(body) if p.strip()]
     dropped = 0
-    per_paragraph: list[tuple[set[str], set[tuple[str, ...]]]] = []
+    per_paragraph: list[tuple[set[str], set[frozenset[str]]]] = []
     for paragraph in paragraphs:
         terms: set[str] = set()
         words: list[str] = []
@@ -172,13 +191,9 @@ def plan_queries(text: str, limit: int = MAX_CANDIDATES) -> QueryPlan:
                 continue
             term = token.casefold().strip(string.punctuation)
             words.append(term)
-            if (
-                TERM_RE.fullmatch(term)
-                and not term.isdigit()
-                and term not in _STOPWORDS
-            ):
+            if _sendable(term):
                 terms.add(term)
-        phrases = {tuple(words[i : i + 3]) for i in range(len(words) - 2)}
+        phrases = {frozenset(words[i : i + 3]) for i in range(len(words) - 2)}
         per_paragraph.append((terms, phrases))
 
     frequency = Counter(t for terms, _ in per_paragraph for t in terms)
@@ -194,8 +209,10 @@ def plan_queries(text: str, limit: int = MAX_CANDIDATES) -> QueryPlan:
         if len(query) >= MIN_QUERY_TERMS:
             scored.append((-sum(weights[t] for t in query), index, tuple(query)))
     queries: list[tuple[str, ...]] = []
+    seen: set[tuple[str, ...]] = set()
     for _, _, ranked_query in sorted(scored):
-        if ranked_query not in queries:
+        if ranked_query not in seen:
+            seen.add(ranked_query)
             queries.append(ranked_query)
     return QueryPlan(tuple(queries[:limit]), dropped)
 
@@ -208,7 +225,11 @@ def build_queries(text: str, limit: int = MAX_CANDIDATES) -> list[tuple[str, ...
 
 
 async def _enforce_host_policy(request: httpx.Request) -> None:
-    if request.url.scheme != "https" or request.url.host not in ALLOWED_HOSTS:
+    if (
+        request.url.scheme != "https"
+        or request.url.host not in ALLOWED_HOSTS
+        or request.url.port is not None
+    ):
         raise HostNotAllowedError("request refused: host or scheme not allowed")
 
 
@@ -216,6 +237,7 @@ def make_client() -> httpx.AsyncClient:
     """The only way to build the client: no redirects, https and two hosts."""
     return httpx.AsyncClient(
         follow_redirects=False,
+        trust_env=False,
         timeout=httpx.Timeout(15.0),
         headers={"User-Agent": _USER_AGENT},
         event_hooks={"request": [_enforce_host_policy]},
@@ -238,7 +260,7 @@ class _Reply:
 class _Request:
     host: str
     url: str
-    params: dict[str, Any] | None
+    params: dict[str, Any] | None = field(repr=False)
     cap: int
     request_class: str
     term_count: int
@@ -273,7 +295,7 @@ class _Session:
         finally:
             if not judged:
                 breaker.record_abandoned()
-        if reply.failure != "deadline_reached":
+        if reply.status != 0:
             await self._emit(request, reply.status, received, elapsed_ms)
         return reply
 
@@ -290,7 +312,13 @@ class _Session:
                 breaker.record_abandoned()
                 return _Reply(None, "deadline_reached"), 0, 0
             started = self.pacer.now()
-            reply, received = await self._fetch(request, breaker)
+            try:
+                reply, received = await asyncio.wait_for(
+                    self._fetch(request, breaker), max(self.remaining(), 0.001)
+                )
+            except TimeoutError:
+                breaker.record_failure(self.pacer.now())
+                reply, received = _Reply(None, "deadline_reached", "timeout"), 0
             await self.pacer.sleep(_SPACING_S[request.host])
         elapsed = int((self.pacer.now() - started).total_seconds() * 1000)
         return reply, received, elapsed
@@ -306,6 +334,15 @@ class _Session:
                 status = response.status_code
                 if status >= 300:
                     return self._refusal(status, breaker), 0
+                if (
+                    response.headers.get("content-encoding", "identity").lower()
+                    != "identity"
+                ):
+                    # Decoding is what a compression bomb needs; the cap counts decoded bytes.
+                    breaker.record_abandoned()
+                    return _Reply(
+                        None, "unsupported_encoding", "unsupported_encoding"
+                    ), 0
                 chunks: list[bytes] = []
                 async for chunk in response.aiter_bytes():
                     received += len(chunk)
@@ -316,7 +353,7 @@ class _Session:
         except httpx.TimeoutException:
             breaker.record_failure(self.pacer.now())
             return _Reply(None, "timeout", "timeout"), received
-        except httpx.TransportError:
+        except httpx.RequestError:
             breaker.record_failure(self.pacer.now())
             return _Reply(None, "network_error", "network_error"), received
         breaker.record_success()
@@ -392,12 +429,21 @@ def _arxiv_id(record: dict[str, Any]) -> str | None:
     return None
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def _licence(record: dict[str, Any]) -> SourceLicense:
-    location = record.get("best_oa_location") or {}
-    identifier = location.get("license")
+    identifier = _as_dict(record.get("best_oa_location")).get("license")
     if isinstance(identifier, str) and identifier:
         return SourceLicense(identifier, LicenseDeclaration.API_FIELD)
     return SourceLicense(None, LicenseDeclaration.UNDECLARED)
+
+
+def _safe_doi(doi: Any) -> str | None:
+    """A DOI with markup characters is dropped; the rest of the record is kept."""
+    bare = _DOI_PREFIX.sub("", doi) if isinstance(doi, str) else ""
+    return bare if _SAFE_DOI.fullmatch(bare) else None
 
 
 def _candidate(record: Any) -> Candidate:
@@ -406,7 +452,9 @@ def _candidate(record: Any) -> Candidate:
     doi = record.get("doi")
     year = record.get("publication_year")
     names = [
-        _clean(a.get("author", {}).get("display_name"), MAX_AUTHOR_CHARS)
+        _clean(
+            _as_dict(_as_dict(a).get("author")).get("display_name"), MAX_AUTHOR_CHARS
+        )
         for a in (record.get("authorships") or [])[:MAX_AUTHORS]
     ]
     return Candidate(
@@ -415,7 +463,7 @@ def _candidate(record: Any) -> Candidate:
         title=_clean(record.get("title"), MAX_TITLE_CHARS),
         authors=tuple(n for n in names if n),
         year=year if isinstance(year, int) and not isinstance(year, bool) else None,
-        doi=_DOI_PREFIX.sub("", doi) if isinstance(doi, str) else None,
+        doi=_safe_doi(doi),
         arxiv_id=_arxiv_id(record),
         licence=_licence(record),
         text=strip_invisible(_abstract(record.get("abstract_inverted_index")))[0],
@@ -480,7 +528,7 @@ async def retrieve_candidates(
             results = json.loads(reply.body)["results"]
             if not isinstance(results, list):
                 raise _ParseError("results is not a list")
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError, RecursionError):
             openalex.fail("parse_error")
             continue
         openalex.responses_ok += 1
