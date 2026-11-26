@@ -237,47 +237,46 @@ async def test_a_revision_admission_waits_for_a_critique_admission_holding_the_s
         "lock": MODEL_ADMIT_LOCK,
         "budget_kinds": MODEL_JOB_KINDS,
     }
-    holder = factory()
-    await admit(
-        holder,
-        kind="critique",
-        organization_id=ORG,
-        user_id=USERS[ORG],
-        units=10,
-        limits=JobLimits(),
-        count_active=active_model_jobs,
-        **shared,
-    )
-    waiting = asyncio.create_task(
-        admit_critique(factory, document, JobLimits(), kind="revision", **shared)
-    )
-    done, _ = await asyncio.wait({waiting}, timeout=1.5)
-    assert not done, "the revision admission did not wait for the shared lock"
-    await holder.commit()
-    await holder.close()
+    async with factory() as holder:
+        await admit(
+            holder,
+            kind="critique",
+            organization_id=ORG,
+            user_id=USERS[ORG],
+            units=10,
+            limits=JobLimits(),
+            count_active=active_model_jobs,
+            **shared,
+        )
+        waiting = asyncio.create_task(
+            admit_critique(factory, document, JobLimits(), kind="revision", **shared)
+        )
+        done, _ = await asyncio.wait({waiting}, timeout=1.5)
+        released = not done
+        await holder.commit()
     assert await asyncio.wait_for(waiting, 10)
+    assert released, "the revision admission did not wait for the shared lock"
 
 
 async def test_admissions_under_different_locks_do_not_wait_for_each_other(
     factory: Factory,
 ) -> None:
     document = await document_for(factory, ORG)
-    holder = factory()
-    await admit(
-        holder,
-        kind="critique",
-        organization_id=ORG,
-        user_id=USERS[ORG],
-        units=10,
-        limits=JobLimits(),
-        count_active=active_model_jobs,
-        lock="elsewhere",
-    )
-    assert await asyncio.wait_for(
-        admit_critique(factory, document, JobLimits(), kind="revision"), 10
-    )
-    await holder.rollback()
-    await holder.close()
+    async with factory() as holder:
+        await admit(
+            holder,
+            kind="critique",
+            organization_id=ORG,
+            user_id=USERS[ORG],
+            units=10,
+            limits=JobLimits(),
+            count_active=active_model_jobs,
+            lock="elsewhere",
+        )
+        assert await asyncio.wait_for(
+            admit_critique(factory, document, JobLimits(), kind="revision"), 10
+        )
+        await holder.rollback()
 
 
 async def test_revision_units_count_against_a_critiques_org_budget_not_its_user_limit(
