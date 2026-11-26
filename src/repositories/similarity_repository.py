@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
 
-from sqlalchemy import Select, case, delete, func, select
+from sqlalchemy import Select, case, func, select
 from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +29,7 @@ from src.models.db.similarity_check import (
     SimilarityCheck,
     SimilarityMatch,
 )
-from src.models.db.uploaded_document import UploadedDocument, UsageLedger
+from src.models.db.uploaded_document import UploadedDocument
 from src.repositories.tenant_scope import normalize_organization_id, scope_to_owner
 from src.repositories.uploaded_document_repository import UndecryptableDocumentError
 from src.services.document_jobs import flip_if_stale, is_stale, stale_cutoff
@@ -277,17 +277,9 @@ class SimilarityRepository:
         if is_stale(
             row.status, row.created_at, SIMILARITY_DEADLINE_S, datetime.now(UTC)
         ):
-            was_queued = row.status == "queued"
-            flipped = await flip_if_stale(
+            await flip_if_stale(
                 self._session, SIMILARITY_CHECKS, row, SIMILARITY_DEADLINE_S
             )
-            if flipped and was_queued and row.open_sources_ledger_id is not None:
-                # The shared guard releases the first ledger row; this is the second.
-                await self._session.execute(
-                    delete(UsageLedger).where(
-                        UsageLedger.id == row.open_sources_ledger_id
-                    )
-                )
             # Refresh even when the flip lost the race: the job may have just finished.
             try:
                 await self._session.refresh(row)

@@ -118,17 +118,23 @@ async def transition(
     return bool(result.rowcount == 1)  # type: ignore[attr-defined]
 
 
+LEDGER_COLUMNS = ("ledger_id", "open_sources_ledger_id")
+
+
 async def _release_reservation(
     session: AsyncSession, table: Table, job_id: uuid.UUID
 ) -> None:
-    """Give back the ledger row a run never used; a job without one has nothing to give."""
-    if "ledger_id" not in table.c:
-        return
-    ledger_id = await session.scalar(
-        select(table.c.ledger_id).where(table.c.id == job_id)
-    )
-    if ledger_id is not None:
-        await session.execute(delete(UsageLedger).where(UsageLedger.id == ledger_id))
+    """Give back every ledger row a run never used; a job without any has nothing to give."""
+    for name in LEDGER_COLUMNS:
+        if name not in table.c:
+            continue
+        ledger_id = await session.scalar(
+            select(table.c[name]).where(table.c.id == job_id)
+        )
+        if ledger_id is not None:
+            await session.execute(
+                delete(UsageLedger).where(UsageLedger.id == ledger_id)
+            )
 
 
 async def flip_if_stale(

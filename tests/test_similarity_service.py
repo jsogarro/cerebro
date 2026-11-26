@@ -781,3 +781,67 @@ async def test_a_check_keeps_at_most_the_total_match_cap(
     )
     assert len(view.matches) == 3
     assert "too_many_matches" in view.coverage["partial_reasons"]
+
+
+async def test_a_queued_run_that_fails_releases_every_ledger_row_it_reserved(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    from src.models.db.similarity_check import SIMILARITY_CHECKS
+    from src.services.document_jobs import run_job
+
+    target = await make_document(factory)
+    old = datetime.now(UTC) - timedelta(seconds=SIMILARITY_DEADLINE_S + 60)
+    async with factory() as session:
+        first = await admit(
+            session,
+            kind="similarity_check",
+            organization_id=ORG_A,
+            user_id=USER_A,
+            units=1,
+            limits=JobLimits(),
+            count_active=active_similarity_checks,
+        )
+        second = await admit(
+            session,
+            kind="similarity_open_sources",
+            organization_id=ORG_A,
+            user_id=USER_A,
+            units=1,
+            limits=JobLimits(),
+            count_active=active_similarity_checks,
+        )
+        row = await SimilarityRepository(session, document_cipher()).create(
+            NewCheck(
+                target,
+                ORG_A,
+                USER_A,
+                {},
+                {},
+                ledger_id=first,
+                open_sources_ledger_id=second,
+            )
+        )
+        row.created_at = old
+        await session.commit()
+        check_id = row.id
+    ran: list[int] = []
+
+    async def never_runs() -> None:
+        ran.append(1)
+
+    async def persist(session: AsyncSession, result: Any) -> Any:
+        return "succeeded", {}
+
+    await run_job(
+        table=SIMILARITY_CHECKS,
+        job_id=check_id,
+        organization_id=ORG_A,
+        created_at=old,
+        deadline_s=SIMILARITY_DEADLINE_S,
+        session_factory=factory,
+        semaphore=asyncio.Semaphore(1),
+        work=never_runs,
+        persist=persist,
+    )
+    assert ran == []
+    assert await count(factory, UsageLedger) == 0
