@@ -2,7 +2,9 @@
 
 import os
 import re
+import shutil
 import socket
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -407,3 +409,93 @@ def test_sanitizer_work_is_linear_on_nested_tag_splices(
     out = _renderer(monkeypatch, True)._sanitize_rendered_html("<" * n + "b>" * n)
     assert time.perf_counter() - started < 1.0
     assert "<img" not in out
+
+
+def _compile_tex(tex: str, workdir: Path) -> subprocess.CompletedProcess[str]:
+    # Test tooling only: the server never compiles TeX. Scrubbed env, no network
+    # access is needed by pdflatex, and shell escape stays off.
+    (workdir / "report.tex").write_text(tex, encoding="utf-8")
+    return subprocess.run(
+        [
+            "pdflatex",
+            "-no-shell-escape",
+            "-interaction=nonstopmode",
+            "-halt-on-error",
+            "report.tex",
+        ],
+        cwd=workdir,
+        env={"PATH": os.environ["PATH"], "HOME": str(workdir)},
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+
+needs_pdflatex = pytest.mark.skipif(
+    shutil.which("pdflatex") is None and not os.environ.get("CEREBRO_REQUIRE_PDFLATEX"),
+    reason="pdflatex not installed",
+)
+
+
+def _tex_report() -> Report:
+    hostile = r"x}\input{/etc/passwd}% $ & # _ ^ ~"
+    return Report(
+        id="r",
+        title=f"Title {hostile}",
+        query="q",
+        abstract=f"**bold** and *italic* and `code` {hostile}",
+        sections=[
+            ReportSection(
+                title=f"Section {hostile}",
+                content=f"- item {hostile}\n- [link](https://example.org/a?b=1&c=2#d)\n\n**done**",
+                subsections=[ReportSection(title="Sub", content="plain")],
+            ),
+            ReportSection(title="Empty", content=""),
+        ],
+        citations=[
+            Citation(
+                id="c",
+                authors=["A. Author"],
+                title=f"T {hostile}",
+                journal="J",
+                volume="1",
+                pages="1--2",
+                doi="10.1000/abc.123",
+            )
+        ],
+    )
+
+
+@needs_pdflatex
+def test_generated_tex_compiles_to_a_pdf_with_the_expected_text(
+    tmp_path: Path,
+) -> None:
+    tex = LaTeXExporter().export_to_latex(_tex_report()).content
+    assert isinstance(tex, str)
+    result = _compile_tex(tex, tmp_path)
+    assert result.returncode == 0, result.stdout[-2000:]
+    pdf = tmp_path / "report.pdf"
+    assert pdf.read_bytes().startswith(b"%PDF")
+    log = (tmp_path / "report.log").read_text(errors="replace")
+    # \input of the hostile path would be logged as an opened file.
+    assert "/etc/passwd" not in log.replace("\\input{/etc/passwd}", "")
+    if shutil.which("pdftotext"):
+        text = subprocess.run(
+            ["pdftotext", str(pdf), "-"], capture_output=True, text=True, check=True
+        ).stdout
+        for expected in ("bold", "italic", "Section", "A. Author", "Empty"):
+            assert expected in text, text
+        # authblk prints this when \\author is never set.
+        assert "immediate" not in text
+
+
+@needs_pdflatex
+def test_compile_failure_control_detects_broken_tex(tmp_path: Path) -> None:
+    # Proves the compile test above would notice a regression.
+    tex = LaTeXExporter().export_to_latex(_tex_report()).content
+    assert isinstance(tex, str)
+    result = _compile_tex(
+        tex.replace("\\maketitle", "\\maketitle\\undefinedcommand"), tmp_path
+    )
+    assert result.returncode != 0

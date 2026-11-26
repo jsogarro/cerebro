@@ -168,10 +168,10 @@ class LaTeXExporter:
         # Title and author information
         preamble_parts.append(f"\\title{{{self._escape_latex(report.title)}}}")
 
-        if report.configuration.author_name:
-            preamble_parts.append(
-                f"\\author{{{self._escape_latex(report.configuration.author_name)}}}"
-            )
+        # authblk's default \\author prints a stray "immediate" on the title page.
+        preamble_parts.append(
+            f"\\author{{{self._escape_latex(report.configuration.author_name or '')}}}"
+        )
 
         if report.configuration.institution:
             preamble_parts.append(
