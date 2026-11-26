@@ -6,12 +6,14 @@ cd "$ROOT_DIR"
 
 if [[ -n "${PYTHON:-}" ]]; then
   PYTHON_BIN="$PYTHON"
-elif command -v python3.11 >/dev/null 2>&1; then
-  PYTHON_BIN="python3.11"
+elif command -v python3.13 >/dev/null 2>&1; then
+  PYTHON_BIN="python3.13"
 elif command -v python3.12 >/dev/null 2>&1; then
   PYTHON_BIN="python3.12"
+elif command -v python3.11 >/dev/null 2>&1; then
+  PYTHON_BIN="python3.11"
 else
-  echo "error: Python 3.11 or 3.12 is required. Set PYTHON=/path/to/python." >&2
+  echo "error: Python 3.11, 3.12 or 3.13 is required. Set PYTHON=/path/to/python." >&2
   exit 1
 fi
 
