@@ -265,13 +265,8 @@ jobs:
             yamllint -d "$YAMLLINT_CFG" "$file"
           done
       
-      # The kustomize build step that used to live here was removed because
-      # the k8s/ tree uses configMapGenerator(behavior: merge) with a
-      # namespaced base that current kubectl kustomize can't resolve
-      # ("ConfigMap research-platform-config does not exist; cannot merge or
-      # replace" with empty namespace lookup). Per-file yamllint above is
-      # the active manifest validation for CI; restore kustomize validation
-      # once the kustomization.yaml is rewritten to use overlay-based merging.
+      - name: Build kustomization
+        run: kubectl kustomize k8s > /dev/null
 
   frontend-ci:
     name: Frontend CI
