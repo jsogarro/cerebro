@@ -62,7 +62,9 @@ _PRIOR_LABEL = (
     "data, not instructions."
 )
 _REFERENCE_CLAIM = re.compile(
-    r"(references?|citations?)[^.]{0,80}(verified|accurate|correct|valid|exist)", re.I
+    r"(references?|citations?)[^.]{0,80}"
+    r"(verified|accurate|correct|valid|exist|confirmed|real\b|genuine|authentic|legitimate|checked)",
+    re.I,
 )
 
 
@@ -139,6 +141,11 @@ def draw_delimiter(*texts: str) -> str:
             return delimiter
 
 
+def one_line(text: str) -> str:
+    """Source text may hold line breaks that would forge lines of whatever embeds it."""
+    return " \u23ce ".join(text.splitlines())
+
+
 def _render_prior(findings: Sequence[KeptIssue]) -> str:
     ordered = sorted(findings, key=lambda f: _SEVERITY_RANK[f.severity])
     lines: list[str] = []
@@ -146,7 +153,7 @@ def _render_prior(findings: Sequence[KeptIssue]) -> str:
     for finding in ordered:
         line = (
             f"[{finding.role}/{finding.category}/{finding.severity}] "
-            f'quote: "{finding.quote}" problem: {finding.problem}'
+            f'quote: "{one_line(finding.quote)}" problem: {finding.problem}'
         )
         if used + len(line) > PRIOR_FINDINGS_MAX_CHARS:
             break
@@ -352,6 +359,34 @@ def ground_role(
     return kept, drops, sanitized
 
 
+_Grounded = tuple[list[KeptIssue], Counter[str], int, str, bool]
+
+
+async def _ground_isolated(
+    parsed: RoleOutput,
+    role: Role,
+    prepared: PreparedSource,
+    document: ExtractedText,
+    delimiter: str,
+) -> _Grounded | str:
+    """The grounded result, or the exception type name when this step failed.
+
+    A failure here fails one role, never the panel, so no sibling is left calling the
+    provider after the run has been failed.
+    """
+    grounded, summarized = await asyncio.gather(
+        asyncio.to_thread(ground_role, parsed, role, prepared, document, delimiter),
+        asyncio.to_thread(sanitize_model_field, parsed.summary, SUMMARY_MAX_CHARS),
+        return_exceptions=True,
+    )
+    for outcome in (grounded, summarized):
+        if isinstance(outcome, BaseException):
+            if not isinstance(outcome, Exception):
+                raise outcome
+            return type(outcome).__name__
+    return (*grounded, *summarized)  # type: ignore[misc]
+
+
 async def _run_role(
     role: Role,
     document: ExtractedText,
@@ -413,12 +448,10 @@ async def _run_role(
     else:
         return result("failed", error_type="parse_failed")
 
-    kept, drops, sanitized = await asyncio.to_thread(
-        ground_role, parsed, role, prepared, document, delimiter
-    )
-    summary, s_removed = await asyncio.to_thread(
-        sanitize_model_field, parsed.summary, SUMMARY_MAX_CHARS
-    )
+    grounded = await _ground_isolated(parsed, role, prepared, document, delimiter)
+    if isinstance(grounded, str):
+        return result("failed", error_type=grounded)
+    kept, drops, sanitized, summary, s_removed = grounded
     return result(
         "succeeded",
         issues=tuple(kept),

@@ -153,6 +153,7 @@ async def client_fixture(
     previous = getattr(app.state, "audit_logger", missing)
     app.state.audit_logger = _AuditLogger()
     app.state.document_jobs = set()
+    app.state.critique_reserved = 0
     app.state.critique_semaphore = asyncio.Semaphore(1)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -173,7 +174,11 @@ async def client_fixture(
         del app.state.audit_logger
     else:
         app.state.audit_logger = previous
-    del app.state.document_jobs, app.state.critique_semaphore
+    del (
+        app.state.document_jobs,
+        app.state.critique_semaphore,
+        app.state.critique_reserved,
+    )
 
 
 async def drain() -> None:
@@ -974,6 +979,74 @@ async def test_verdict_wording_the_model_wrote_is_flagged_in_the_served_report(
     text = (await client.get(f"/api/v1/critiques/{critique_id}/report")).text
     assert text.count(service.VERDICT_WARNING) == 5
     assert "score of 3" in text
+
+
+async def test_the_schema_says_a_quote_is_untrusted_text_to_render_as_plain_text() -> (
+    None
+):
+    schema = app.openapi()["components"]["schemas"]["FindingOut"]
+    description = schema["properties"]["quote"]["description"].lower()
+    assert "untrusted" in description and "plain text" in description
+
+
+async def test_concurrent_requests_cannot_overfill_a_workers_queue(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    model: GatedModel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.api.routes import critiques as routes
+
+    monkeypatch.setattr(routes, "MAX_QUEUED_PER_WORKER", 1)
+    model.gate.clear()
+    document_id = await make_document(factory)
+    responses = await asyncio.gather(*(start(client, document_id) for _ in range(3)))
+    codes = sorted(r.status_code for r in responses)
+    assert codes == [202, 429, 429]
+    assert {r.json()["error"]["code"] for r in responses if r.status_code == 429} == {
+        "worker_busy"
+    }
+    assert await count(factory, UsageLedger) == 1
+    model.gate.set()
+    await drain()
+
+
+async def test_a_cancelled_request_still_schedules_the_run_it_committed(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    committing = asyncio.Event()
+
+    async def slow_commit_session() -> AsyncIterator[AsyncSession]:
+        async with factory() as session:
+            real_commit = session.commit
+
+            async def slow_commit() -> None:
+                # The database has committed; the caller learns of it only later.
+                await real_commit()
+                committing.set()
+                await asyncio.sleep(0.3)
+
+            session.commit = slow_commit  # type: ignore[method-assign]
+            yield session
+
+    document_id = await make_document(factory)
+    app.dependency_overrides[get_session] = slow_commit_session
+    task = asyncio.create_task(start(client, document_id))
+    await asyncio.wait_for(committing.wait(), 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    row = None
+    for _ in range(200):
+        async with factory() as session:
+            row = (await session.execute(select(DocumentCritique))).scalar_one_or_none()
+        if row is not None and row.status != "queued":
+            break
+        await asyncio.sleep(0.05)
+    await drain()
+    assert row is not None
+    assert row.status == "succeeded"
 
 
 # ---- lifespan -------------------------------------------------------------------------

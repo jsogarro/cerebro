@@ -9,6 +9,7 @@ task that was still running it.
 """
 
 import asyncio
+import contextlib
 import functools
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
@@ -392,8 +393,11 @@ async def run_job(
         )
         # The row is queued until _start commits and running after; the CAS that does not
         # match is a no-op, so trying both covers a cancellation landing between them.
-        await fail(expected="running", reason=reason)
-        await fail(expected="queued", reason=reason)
+        for expected in ("running", "queued"):
+            # Each attempt stands alone: a failure in one must not skip the other, and the
+            # stale rule covers a row neither could fail.
+            with contextlib.suppress(Exception):
+                await fail(expected=expected, reason=reason)
         if cancelled:
             raise
 

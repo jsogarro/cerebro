@@ -575,6 +575,41 @@ async def test_a_job_with_no_recorded_reservation_fails_without_error(
     assert (await row_of(factory, job_id)).status == "failed"  # type: ignore[union-attr]
 
 
+async def test_a_failure_while_failing_a_running_row_still_refunds_a_queued_one(
+    factory: Factory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = await insert_job(factory, with_ledger=True)
+    real = jobs.transition
+
+    async def flaky(
+        session: AsyncSession, table: Any, job: Any, *, expected: str, **kw: Any
+    ) -> bool:
+        if expected == "running":
+            raise RuntimeError("unexpected")
+        return await real(session, table, job, expected=expected, **kw)
+
+    monkeypatch.setattr(jobs, "transition", flaky)
+    task = asyncio.create_task(
+        run_job(
+            table=TABLE,
+            job_id=job_id,
+            organization_id=ORG,
+            created_at=datetime.now(UTC),
+            deadline_s=30,
+            session_factory=factory,
+            semaphore=asyncio.Semaphore(0),
+            work=Spy(),
+            persist=finished,
+        )
+    )
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert (await row_of(factory, job_id)).status == "failed"  # type: ignore[union-attr]
+    assert await ledger_ids(factory) == set()
+
+
 # ---- admission rules (single connection; the races are in the integration suite) --
 
 

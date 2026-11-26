@@ -25,6 +25,7 @@ from src.agents.critique.panel import (
     PRIOR_FINDINGS_MAX_CHARS,
     PanelResult,
     claims_reference_verification,
+    one_line,
     run_panel,
     template_sha256,
 )
@@ -104,8 +105,10 @@ VERDICT_WARNING = (
     "Warning: this finding uses verdict wording, which this system does not produce."
 )
 _VERDICT_WORDING = re.compile(
-    r"\bscor(?:e|es|ed|ing)\b|\baccept(?:ed)?\b|\breject(?:ed|ion)?\b"
-    r"|\bpass(?:\s*/\s*|\s+or\s+)fail\b|\boriginal(?:ity)?\b|plagiarism[- ]free"
+    r"\bscor(?:e|es|ed|ing)\b|\baccept\w*|\breject\w*"
+    r"|\bpass(?:\s*/\s*|\s+or\s+)fail\b|\bpass(?:es|ed)?\s+(?:all|every|the)\s+checks?\b"
+    r"|\boriginal(?:ity)?\b|\bplagiari[sz]\w*|\bfabricat\w*|\b(?:un)?publishable\b"
+    r"|\bgrade[:\s]|\b\d+(?:\.\d+)?\s*/\s*10\b|\brated?\b[^.\n]{0,20}\d+\s*/\s*\d+"
     r"|\d+(?:\.\d+)?\s*%",
     re.IGNORECASE,
 )
@@ -206,11 +209,6 @@ def make_persist(
     return persist
 
 
-def _one_line(text: str) -> str:
-    """A quote is source text, so it may hold line breaks that would forge report lines."""
-    return " \u23ce ".join(text.splitlines())
-
-
 def _dropped(counts: dict[str, int]) -> str:
     return ", ".join(f"{reason} {n}" for reason, n in sorted(counts.items())) or "none"
 
@@ -245,10 +243,10 @@ def render_report(critique: CritiqueView, document_text_sha256: str) -> str:
             "",
             f"{number}. [{finding.severity}] {finding.role} / {finding.category}, "
             f"page {finding.page}",
-            f'   Quote: "{_one_line(finding.quote)}"',
+            f'   Quote: "{one_line(finding.quote)}"',
         ]
         if finding.second_quote:
-            lines.append(f'   Second quote: "{_one_line(finding.second_quote)}"')
+            lines.append(f'   Second quote: "{one_line(finding.second_quote)}"')
         lines += [f"   Problem: {finding.problem}", f"   Fix: {finding.fix}"]
         if claims_reference_verification(
             finding.problem

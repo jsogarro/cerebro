@@ -119,6 +119,12 @@ _MORE_URLS = (
     re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}(?:[:/?]\S*)"),
     re.compile(r"\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?::\d+)?[/?]\S*", re.IGNORECASE),
 )
+# Link forms the pinned patterns miss: a destination with spaces or a title, link
+# reference definitions, and any other "scheme:" (sip:, magnet:, xmpp:). A bare domain or
+# an email is left alone: the report is plain text and stripping them would damage prose.
+_SPACED_LINK = re.compile(r"!?\[([^\]\n]{0,200})\]\(\s*[^)\n]{1,500}\)")
+_LINK_DEFINITION = re.compile(r"\[[^\]\n]{1,200}\]:\s*<?[^\s>]*[./:][^\s>]*>?")
+_ANY_SCHEME = re.compile(r"\b[a-z][a-z0-9+.-]{1,20}:(?=[^\s:])\S+", re.IGNORECASE)
 _PRE_CAP_FACTOR = 2
 _MAX_PASSES = 4
 # The pinned link pattern with its text captured, so the text survives the removal.
@@ -137,6 +143,9 @@ _RULES = (
             *SANITIZE_PATTERNS[3:],
         )
     ),
+    (_SPACED_LINK, r"\1"),
+    (_LINK_DEFINITION, ""),
+    (_ANY_SCHEME, ""),
     (_STRAY_TAG_OPEN, ""),
     (_ANY_HOST, ""),
     (_TAG_OPENER, ""),

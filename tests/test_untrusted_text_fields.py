@@ -202,3 +202,42 @@ def test_cap_does_not_leave_a_tag_opener_at_the_end() -> None:
     out, _ = sanitize_model_field("<imgxyz", 4)
     assert "<" not in out
     assert sanitize_model_field(out, 4) == (out, False)
+
+
+@pytest.mark.parametrize(
+    ("text", "gone", "kept"),
+    [
+        ("see [c]( evil.com ) now", "evil.com", "c"),
+        ('see [c](evil.com "title") now', "evil.com", "c"),
+        ('see ![chart]( evil.com/p.png "t" ) now', "evil.com", "chart"),
+        ("see [x]: <evil.com> now", "evil.com", "see"),
+        ("see [x]: evil.com/a now", "evil.com", "see"),
+        ("see sip:alice@evil.com now", "evil.com", "see"),
+        ("see magnet:?xt=urn:btih:abc now", "btih", "see"),
+        ("see xmpp:bob@evil.com now", "evil.com", "see"),
+        ("see zoommtg:join-me now", "join-me", "see"),
+    ],
+)
+def test_more_link_forms_and_schemes_are_removed(
+    text: str, gone: str, kept: str
+) -> None:
+    out, removed = sanitize_model_field(text, 500)
+    assert removed and gone not in out and kept in out
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "the sample is on attacker.com today",
+        "write to a@evil.com for details",
+        "ratio 3:1 in both arms",
+        "as follows: the groups differ",
+        "see [1]: the authors disagree",
+        "p < 0.05: significant at the first look",
+        "Note: results vary",
+    ],
+)
+def test_bare_domains_emails_and_ordinary_colons_stay_as_plain_text(
+    prose: str,
+) -> None:
+    assert sanitize_model_field(prose, 500) == (prose, False)

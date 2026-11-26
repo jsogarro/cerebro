@@ -6,8 +6,9 @@ is owner-scoped and a miss is always 404. The report is served as plain text.
 """
 
 import asyncio
+import contextlib
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import date
 from typing import Annotated, Any
 
@@ -72,7 +73,12 @@ class FindingOut(BaseModel):
     role: str
     category: str
     severity: str
-    quote: str
+    quote: str = Field(
+        description=(
+            "Untrusted document text, verbatim: render it as plain text, never as "
+            "markdown or HTML."
+        )
+    )
     raw_start: int
     raw_end: int
     page: int
@@ -191,6 +197,19 @@ async def _owned_document(
     return document
 
 
+@contextlib.contextmanager
+def _queue_slot(state: Any) -> Iterator[None]:
+    """Reserve one of this worker's queue places before any await, so concurrent requests
+    cannot all pass the check; released once the task is in the job set (or on failure)."""
+    if len(state.document_jobs) + state.critique_reserved >= MAX_QUEUED_PER_WORKER:
+        raise _error(status.HTTP_429_TOO_MANY_REQUESTS, "worker_busy")
+    state.critique_reserved += 1
+    try:
+        yield
+    finally:
+        state.critique_reserved -= 1
+
+
 @router.get("/critique-config")
 async def critique_config(
     _: TenantContext = Depends(get_tenant_identity),
@@ -259,69 +278,76 @@ async def start_critique(
     if document.char_count > service.CRITIQUE_MAX_CHARS:
         raise _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "too_long_for_critique")
 
-    if len(request.app.state.document_jobs) >= MAX_QUEUED_PER_WORKER:
-        raise _error(status.HTTP_429_TOO_MANY_REQUESTS, "worker_busy")
-    # Built before anything is reserved, so a setup failure leaves no row and no spent quota.
-    model = model_factory()
-    units = service.reserved_units(document.char_count)
-    try:
-        ledger_id = await admit(
-            session,
-            kind="critique",
+    state = request.app.state
+    with _queue_slot(state):
+        # Built before anything is reserved, so a setup failure leaves no row and no spent quota.
+        model = model_factory()
+        units = service.reserved_units(document.char_count)
+        try:
+            ledger_id = await admit(
+                session,
+                kind="critique",
+                organization_id=ids.organization_id,
+                user_id=ids.user_id,
+                units=units,
+                limits=service.CRITIQUE_LIMITS,
+                count_active=active_model_jobs,
+                lock=MODEL_ADMIT_LOCK,
+                budget_kinds=MODEL_JOB_KINDS,
+            )
+        except QuotaExceeded as exc:
+            raise _error(status.HTTP_429_TOO_MANY_REQUESTS, exc.code) from None
+        row = await _repository(session).create(
+            document_id=document_id,
             organization_id=ids.organization_id,
             user_id=ids.user_id,
-            units=units,
-            limits=service.CRITIQUE_LIMITS,
-            count_active=active_model_jobs,
-            lock=MODEL_ADMIT_LOCK,
-            budget_kinds=MODEL_JOB_KINDS,
+            model_id=service.CRITIQUE_MODEL_ID,
+            temperature=service.CRITIQUE_TEMPERATURE,
+            prompt_versions=service.prompt_versions(),
+            consent_text_version=consent.version,
+            consent_text_sha256=consent.sha256,
+            reserved_units=units,
+            ledger_id=ledger_id,
         )
-    except QuotaExceeded as exc:
-        raise _error(status.HTTP_429_TOO_MANY_REQUESTS, exc.code) from None
-    row = await _repository(session).create(
-        document_id=document_id,
-        organization_id=ids.organization_id,
-        user_id=ids.user_id,
-        model_id=service.CRITIQUE_MODEL_ID,
-        temperature=service.CRITIQUE_TEMPERATURE,
-        prompt_versions=service.prompt_versions(),
-        consent_text_version=consent.version,
-        consent_text_sha256=consent.sha256,
-        reserved_units=units,
-        ledger_id=ledger_id,
-    )
-    critique_id, created_at = row.id, row.created_at
-    # The task must find the committed row, so commit before scheduling it.
-    await session.commit()
+        critique_id, created_at = row.id, row.created_at
 
-    state = request.app.state
-    jobs: set[asyncio.Task[None]] = state.document_jobs
-    task = asyncio.create_task(
-        run_job(
-            table=DOCUMENT_CRITIQUES,
-            job_id=critique_id,
-            organization_id=ids.organization_id,
-            created_at=created_at,
-            deadline_s=CRITIQUE_DEADLINE_S,
-            session_factory=session_factory,
-            semaphore=state.critique_semaphore,
-            work=service.make_work(
-                session_factory=session_factory,
-                document_id=document_id,
-                organization_id=ids.organization_id,
-                user_id=ids.user_id,
-                model=model,
-            ),
-            persist=service.make_persist(
-                critique_id=critique_id,
-                organization_id=ids.organization_id,
-                user_id=ids.user_id,
-            ),
-        ),
-        name=f"critique:{critique_id}",
-    )
-    jobs.add(task)
-    task.add_done_callback(jobs.discard)
+        def schedule() -> None:
+            task = asyncio.create_task(
+                run_job(
+                    table=DOCUMENT_CRITIQUES,
+                    job_id=critique_id,
+                    organization_id=ids.organization_id,
+                    created_at=created_at,
+                    deadline_s=CRITIQUE_DEADLINE_S,
+                    session_factory=session_factory,
+                    semaphore=state.critique_semaphore,
+                    work=service.make_work(
+                        session_factory=session_factory,
+                        document_id=document_id,
+                        organization_id=ids.organization_id,
+                        user_id=ids.user_id,
+                        model=model,
+                    ),
+                    persist=service.make_persist(
+                        critique_id=critique_id,
+                        organization_id=ids.organization_id,
+                        user_id=ids.user_id,
+                    ),
+                ),
+                name=f"critique:{critique_id}",
+            )
+            state.document_jobs.add(task)
+            task.add_done_callback(state.document_jobs.discard)
+
+        # The task must find the committed row, so it is scheduled when the commit finishes.
+        # That is a callback on the shielded commit, not code after the await: a client that
+        # disconnects mid-commit cancels this handler (repeatedly, under anyio), but the
+        # commit still completes and a committed row is never left without a task.
+        commit = asyncio.ensure_future(session.commit())
+        commit.add_done_callback(
+            lambda done: None if done.cancelled() or done.exception() else schedule()
+        )
+        await asyncio.shield(commit)
     return CritiqueAccepted(id=critique_id, status="queued")
 
 
@@ -410,7 +436,9 @@ async def delete_critique(
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     await session.commit()
-    # Stop the model call too; its quota stays spent. Only this worker's tasks are
+    # Stop the model call too; its quota stays spent.
+    # ponytail: a delete and re-create that lands on another worker briefly frees an org
+    # slot while the old run still calls the provider; the daily ledger caps still hold. Only this worker's tasks are
     # visible here, so a run on another worker finishes and discards its result.
     running = {
         task

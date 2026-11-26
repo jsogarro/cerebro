@@ -583,6 +583,19 @@ def test_a_fix_that_claims_verified_references_gets_the_warning_too() -> None:
         "Plagiarism free",
         "about 40% of the sample",
         "12.5 % drop",
+        "We recommend acceptance of this manuscript",
+        "The editor recommended rejection",
+        "rated 10/10",
+        "I would rate this paper 7/10",
+        "Grade: B-",
+        "This is unpublishable",
+        "A publishable result",
+        "Rejecting is warranted",
+        "It passes all checks",
+        "appears plagiarised from Smith (2020)",
+        "Plagiarized passage",
+        "Smith et al. (2020) is fabricated",
+        "Fabrication of the data",
     ],
 )
 def test_verdict_wording_in_model_text_gets_a_visible_warning_and_stays(
@@ -613,7 +626,8 @@ def test_verdict_wording_in_model_text_gets_a_visible_warning_and_stays(
     [
         "The sample is small",
         "Passage three repeats itself",
-        "The accepting rate was not reported",
+        "Upgrade the figure resolution",
+        "The authors graded the items themselves",
         "Report an interval of 0.4 to 0.6",
         "Their originals are cited",
     ],
@@ -632,3 +646,29 @@ def test_ordinary_review_wording_is_not_flagged_as_a_verdict(wording: str) -> No
 def test_the_verdict_warning_itself_uses_no_verdict_wording() -> None:
     for pattern in FORBIDDEN:
         assert not re.search(pattern, service.VERDICT_WARNING, re.I), pattern
+
+
+@pytest.mark.parametrize(
+    "wording",
+    ["Reference 12 is a real paper", "every citation was confirmed"],
+)
+def test_wider_reference_assurances_get_the_reference_warning(wording: str) -> None:
+    from src.repositories.critique_repository import FindingView
+
+    finding = FindingView(
+        "citations", "other", "minor", "q", 0, 1, 1, "exact", wording, "f"
+    )
+    view = a_view(status="succeeded", status_reason=None, findings=(finding,))
+    assert service.REFERENCE_WARNING in service.render_report(view, "d" * 64)
+
+
+def test_no_fixed_report_text_trips_its_own_warnings() -> None:
+    fixed = " ".join(
+        (
+            service.REPORT_DISCLAIMER,
+            service.VERDICT_WARNING,
+            service.REFERENCE_WARNING,
+            *service.REPORT_FOOTER,
+        )
+    )
+    assert not service._VERDICT_WORDING.search(fixed)
