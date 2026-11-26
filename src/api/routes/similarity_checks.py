@@ -56,8 +56,9 @@ from src.services.text_reuse.report import render_report
 router = APIRouter(tags=["similarity"])
 
 NO_STORE = "no-store"
-# Queued tasks each wait on one slot per worker.
-MAX_QUEUED_PER_WORKER = 4
+# One check can use most of its deadline (retrieval plus matching), so a longer queue
+# behind the one-at-a-time semaphore would fail with deadline_exceeded before it ran.
+MAX_QUEUED_PER_WORKER = 2
 
 
 class ConsentBody(BaseModel):
@@ -331,8 +332,8 @@ async def _check_open_sources(
             {
                 "recipients": list(CONSENT_RECIPIENTS),
                 "consent_text_version": service.SIMILARITY_CONSENT_TEXT_VERSION,
-                "query_preview": service.query_preview(
-                    document.text if document else ""
+                "query_preview": await asyncio.to_thread(
+                    service.query_preview, document.text if document else ""
                 ),
             },
         )

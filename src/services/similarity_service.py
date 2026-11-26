@@ -11,12 +11,13 @@ import asyncio
 import hashlib
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.acquisition.sources import LicenseDeclaration, SourceLicense
@@ -138,7 +139,9 @@ class PgHostPacer(RealTime):
                 )
                 if acquired:
                     yield
-                    await session.commit()
+                    # The lock dies with the connection, so a lost commit costs nothing.
+                    with suppress(SQLAlchemyError):
+                        await session.commit()
                     return
             await asyncio.sleep(self._poll_s)
 
@@ -397,20 +400,24 @@ class _Run:
         job = self._job
         async with self._session_factory() as session:
             await set_postgres_tenant_context(session, str(job.organization_id))
-            await SimilarityRepository(session, document_cipher()).add_egress(
-                EgressRecord(
-                    event.host,
-                    event.request_class,
-                    event.term_count,
-                    event.status,
-                    event.bytes_received,
-                    event.duration_ms,
-                ),
-                check_id=job.check_id,
-                organization_id=job.organization_id,
-                user_id=job.user_id,
-            )
-            await session.commit()
+            try:
+                await SimilarityRepository(session, document_cipher()).add_egress(
+                    EgressRecord(
+                        event.host,
+                        event.request_class,
+                        event.term_count,
+                        event.status,
+                        event.bytes_received,
+                        event.duration_ms,
+                    ),
+                    check_id=job.check_id,
+                    organization_id=job.organization_id,
+                    user_id=job.user_id,
+                )
+                await session.commit()
+            except IntegrityError:
+                # The check was deleted on another worker; the run is being discarded.
+                await session.rollback()
 
     async def _open_sources(self, body: str, sources: _Sources) -> _Retrieved:
         rows = {origin: _blank_row() for origin in ORIGINS}

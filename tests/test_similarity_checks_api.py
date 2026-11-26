@@ -435,13 +435,16 @@ async def test_a_busy_worker_refuses_new_checks_without_reserving_quota(
         for _ in range(similarity_routes.MAX_QUEUED_PER_WORKER)
     }
     app.state.document_jobs.update(sleepers)
-    refused = await start(client, document_id)
-    assert refused.status_code == 429
-    assert refused.json()["error"]["code"] == "worker_busy"
-    assert await count(factory, UsageLedger) == 0
-    for task in sleepers:
-        task.cancel()
-    app.state.document_jobs.difference_update(sleepers)
+    try:
+        refused = await start(client, document_id)
+        assert refused.status_code == 429
+        assert refused.json()["error"]["code"] == "worker_busy"
+        assert await count(factory, UsageLedger) == 0
+    finally:
+        for task in sleepers:
+            task.cancel()
+        await asyncio.gather(*sleepers, return_exceptions=True)
+        app.state.document_jobs.difference_update(sleepers)
 
 
 async def test_a_third_concurrent_check_in_one_org_is_refused(
@@ -666,19 +669,21 @@ async def test_error_responses_are_not_cached(
     assert missing.status_code == 404 and missing.headers["cache-control"] == "no-store"
 
 
-async def test_deleting_a_check_that_never_started_gives_its_quota_back(
+async def test_deleting_a_check_never_gives_its_quota_back(
     client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
 ) -> None:
     document_id = await make_document(factory)
     await app.state.similarity_semaphore.acquire()
     try:
-        check_id = (await start(client, document_id)).json()["id"]
-        assert await count(factory, UsageLedger) == 1
-        deleted = await client.delete(f"/api/v1/similarity-checks/{check_id}")
-        assert deleted.status_code == 204
+        for _ in range(service.SIMILARITY_PER_USER_DAILY):
+            check_id = (await start(client, document_id)).json()["id"]
+            deleted = await client.delete(f"/api/v1/similarity-checks/{check_id}")
+            assert deleted.status_code == 204
+        refused = await start(client, document_id)
     finally:
         app.state.similarity_semaphore.release()
-    assert await count(factory, UsageLedger) == 0
+    assert refused.status_code == 429
+    assert await count(factory, UsageLedger) == service.SIMILARITY_PER_USER_DAILY
 
 
 async def test_responses_are_never_cached(
@@ -788,3 +793,24 @@ async def test_a_204_is_not_cached_either(
     deleted = await client.delete(f"/api/v1/similarity-checks/{check_id}")
     assert deleted.status_code == 204
     assert deleted.headers["cache-control"] == "no-store"
+
+
+async def test_the_consent_mismatch_preview_is_built_off_the_event_loop(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    seen: list[bool] = []
+    real = service.query_preview
+
+    def spy(text: str) -> Any:
+        seen.append(threading.current_thread() is threading.main_thread())
+        return real(text)
+
+    monkeypatch.setattr(service, "query_preview", spy)
+    document_id = await make_document(factory)
+    body = {"open_sources": consent(consent_text_version="old")}
+    assert (await start(client, document_id, body)).status_code == 409
+    assert seen == [False]

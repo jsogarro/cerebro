@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
 
-from sqlalchemy import Select, case, delete, func, select
+from sqlalchemy import Select, case, func, select
+from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.memory_encryption import (
@@ -28,7 +29,6 @@ from src.models.db.similarity_check import (
     SimilarityCheck,
     SimilarityMatch,
 )
-from src.models.db.uploaded_document import UsageLedger
 from src.repositories.tenant_scope import normalize_organization_id, scope_to_owner
 from src.repositories.uploaded_document_repository import UndecryptableDocumentError
 from src.services.document_jobs import flip_if_stale, is_stale, stale_cutoff
@@ -270,7 +270,7 @@ class SimilarityRepository:
         )
         await self._session.flush()
 
-    async def _fresh(self, row: SimilarityCheck) -> SimilarityCheck:
+    async def _fresh(self, row: SimilarityCheck) -> SimilarityCheck | None:
         if is_stale(
             row.status, row.created_at, SIMILARITY_DEADLINE_S, datetime.now(UTC)
         ):
@@ -278,7 +278,11 @@ class SimilarityRepository:
                 self._session, SIMILARITY_CHECKS, row, SIMILARITY_DEADLINE_S
             )
             # Refresh even when the flip lost the race: the job may have just finished.
-            await self._session.refresh(row)
+            try:
+                await self._session.refresh(row)
+            except InvalidRequestError:
+                # Deleted between the flip and the refresh.
+                return None
         return row
 
     def _match(self, row: SimilarityMatch) -> MatchView:
@@ -355,7 +359,10 @@ class SimilarityRepository:
         ).scalar_one_or_none()
         if row is None:
             return None
-        row = await self._fresh(row)
+        fresh = await self._fresh(row)
+        if fresh is None:
+            return None
+        row = fresh
         matches: list[SimilarityMatch] = []
         total = 0
         if row.status not in ACTIVE_STATUSES:
@@ -384,6 +391,7 @@ class SimilarityRepository:
                                 ),
                                 SimilarityMatch.tokens.desc(),
                                 SimilarityMatch.doc_start,
+                                SimilarityMatch.id,
                             )
                             .offset(max(0, offset))
                             .limit(max(1, min(limit, MAX_REPORT_MATCHES))),
@@ -421,7 +429,8 @@ class SimilarityRepository:
                 )
             )
         ).scalars()
-        return [self._view(await self._fresh(row)) for row in list(rows)]
+        fresh = [await self._fresh(row) for row in list(rows)]
+        return [self._view(row) for row in fresh if row is not None]
 
     async def delete(
         self, check_id: uuid.UUID, *, organization_id: uuid.UUID, user_id: uuid.UUID
@@ -429,7 +438,10 @@ class SimilarityRepository:
         row = (
             await self._session.execute(
                 self._owned(
-                    select(SimilarityCheck).where(SimilarityCheck.id == check_id),
+                    select(SimilarityCheck)
+                    .where(SimilarityCheck.id == check_id)
+                    # A run starting meanwhile waits for this delete and then finds no row.
+                    .with_for_update(),
                     SimilarityCheck,
                     organization_id,
                     user_id,
@@ -438,11 +450,6 @@ class SimilarityRepository:
         ).scalar_one_or_none()
         if row is None:
             return False
-        if row.status == "queued" and row.ledger_id is not None:
-            # Never started, so nothing was used; a started run keeps its charge.
-            await self._session.execute(
-                delete(UsageLedger).where(UsageLedger.id == row.ledger_id)
-            )
         await self._session.delete(row)
         await self._session.flush()
         return True

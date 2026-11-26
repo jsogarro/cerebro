@@ -332,7 +332,9 @@ class _Session:
                 breaker.record_failure(self.pacer.now())
                 reply, received = _Reply(None, "deadline_reached", "timeout"), 0
             elapsed = int((self.pacer.now() - started).total_seconds() * 1000)
-            await self.pacer.sleep(_SPACING_S[request.host])
+            await self.pacer.sleep(
+                min(_SPACING_S[request.host], max(self.remaining(), 0.0))
+            )
         return reply, received, elapsed
 
     async def _fetch(
@@ -631,6 +633,12 @@ async def _upgrade_to_full_text(
             coverage.fail("extract_error")
             continue
         text = strip_invisible(extracted.text)[0]
-        chosen[index] = replace(candidate, text=text, text_kind="full_text")
+        # The licence OpenAlex reported describes its best open copy, not this arXiv PDF.
+        chosen[index] = replace(
+            candidate,
+            text=text,
+            text_kind="full_text",
+            licence=SourceLicense(None, LicenseDeclaration.UNDECLARED),
+        )
         coverage.full_text_count += 1
     return chosen

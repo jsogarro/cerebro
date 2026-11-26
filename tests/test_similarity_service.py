@@ -527,3 +527,136 @@ async def test_the_report_page_keeps_the_most_severe_matches_when_it_is_cut(
         )
     assert view is not None and [m.source_id for m in view.matches] == ["W3"]
     assert view.match_total == 3
+
+
+async def test_matches_page_without_gaps_or_repeats_when_their_keys_tie(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    from src.repositories.similarity_repository import MatchRecord
+
+    target = await make_document(factory)
+    check_id, _ = await run_check(factory, target)
+    records = [
+        MatchRecord(
+            "verbatim",
+            "unattributed",
+            False,
+            0,
+            5,
+            12,
+            "openalex",
+            None,
+            f"W{i}",
+            f"title-{i}",
+            None,
+            {},
+            "full_text",
+            0,
+            5,
+            None,
+        )
+        for i in range(7)
+    ]
+    async with factory() as session:
+        repository = SimilarityRepository(session, document_cipher())
+        await repository.add_matches(
+            check_id=check_id, organization_id=ORG_A, user_id=USER_A, matches=records
+        )
+        await session.commit()
+        pages = [
+            await repository.get(
+                check_id, organization_id=ORG_A, user_id=USER_A, offset=o, limit=3
+            )
+            for o in (0, 3, 6)
+        ]
+    ids = [m.id for page in pages if page for m in page.matches]
+    assert len(ids) == 7 and len(set(ids)) == 7
+
+
+async def test_a_pacer_whose_commit_fails_does_not_fail_the_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqlalchemy.exc import OperationalError
+
+    class Session:
+        async def __aenter__(self) -> "Session":
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+        async def scalar(self, *args: object) -> bool:
+            return True
+
+        async def commit(self) -> None:
+            raise OperationalError("COMMIT", {}, Exception("connection lost"))
+
+    pacer = service.PgHostPacer(Session, poll_s=0.01)  # type: ignore[arg-type]
+    async with pacer.slot("arxiv.org"):
+        ran = True
+    assert ran
+
+
+async def test_an_audit_row_for_a_deleted_check_is_dropped_without_failing_the_run(
+    factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    async def refuse(self: object, *args: object, **kwargs: object) -> None:
+        raise IntegrityError("INSERT", {}, Exception("check gone"))
+
+    monkeypatch.setattr(SimilarityRepository, "add_egress", refuse)
+    target = await make_document(factory)
+    events = (EgressEvent("arxiv.org", "pdf", 0, 200, 1, 1),)
+    retrieve, _ = stub_retrieve(events=events)
+    _, view = await run_check(
+        factory, target, options={"open_sources": True}, retrieve=retrieve
+    )
+    assert view.status != "failed"
+
+
+async def test_a_check_deleted_while_being_read_reads_as_missing(
+    factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy.exc import InvalidRequestError
+
+    target = await make_document(factory)
+    stale = datetime.now(UTC) - timedelta(seconds=SIMILARITY_DEADLINE_S + 600)
+    async with factory() as session:
+        row = await SimilarityRepository(session, document_cipher()).create(
+            NewCheck(target, ORG_A, USER_A, {}, {})
+        )
+        row.created_at = stale
+        await session.commit()
+        check_id = row.id
+
+    async def gone(*args: object, **kwargs: object) -> None:
+        raise InvalidRequestError("row vanished")
+
+    async with factory() as session:
+        monkeypatch.setattr(session, "refresh", gone)
+        view = await SimilarityRepository(session, document_cipher()).get(
+            check_id, organization_id=ORG_A, user_id=USER_A
+        )
+    assert view is None
+
+
+async def test_deleting_a_check_locks_its_row(
+    factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[object] = []
+    real = SimilarityRepository._owned
+
+    def spy(self: SimilarityRepository, query: Any, *args: Any) -> Any:
+        seen.append(getattr(query, "_for_update_arg", None))
+        return real(self, query, *args)
+
+    monkeypatch.setattr(SimilarityRepository, "_owned", spy)
+    target = await make_document(factory)
+    check_id, _ = await run_check(factory, target)
+    async with factory() as session:
+        await SimilarityRepository(session, document_cipher()).delete(
+            check_id, organization_id=ORG_A, user_id=USER_A
+        )
+        await session.commit()
+    assert seen[-1] is not None
