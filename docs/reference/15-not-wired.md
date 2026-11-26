@@ -12,7 +12,7 @@ This page lists code and settings present in the repository that no production p
 | Model configuration manager | Not wired | none | `src/ai_brain/config/`, `configs/models/` |
 | Prompt manager and versioning | Not wired | none | `src/prompts/` |
 | Reliability service registry | Not wired | none | `src/reliability/service_registry.py` |
-| Stub packages | Not wired | none | `src/benchmarks/`, `src/costs/`, `src/improvement/`, `src/memory/`, `src/research_platform/` |
+| Stub packages | Not wired | none | `src/research_platform/` |
 | Citation binding and PDF text extraction | Not wired | none | `src/core/claims/citation_*.py`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py` |
 | Orphan modules | Not wired | none | see [Orphan modules](#orphan-modules) |
 | Dead execution attributes | Not wired | none | `src/api/services/direct_execution_service.py`, `src/core/config.py` |
@@ -63,7 +63,7 @@ Tests that exercise it: `tests/test_ab_testing_integration.py`, `tests/test_ab_t
 
 > **Not wired.** `SupervisionFeedbackLearner` in `src/ai_brain/learning/supervision_feedback.py` records execution feedback and recommends routing strategies. `MASRRoutingService.__init__` assigns one to `self.feedback_learner`, and no code calls a method on it.
 
-The `src/improvement/` package is listed under [Stub packages](#stub-packages). `SELF_IMPROVEMENT_REFLECTION_FREQUENCY`, `SELF_IMPROVEMENT_PERFORMANCE_THRESHOLD`, `SELF_IMPROVEMENT_ENABLE_PROMPT_OPTIMIZATION`, `FINE_TUNING_ENABLED`, `FINE_TUNING_MIN_EXAMPLES`, `FINE_TUNING_QUALITY_THRESHOLD` and `FINE_TUNING_AUTO_TRIGGER` are read only by `Settings.get_ai_brain_config`.
+`SELF_IMPROVEMENT_REFLECTION_FREQUENCY`, `SELF_IMPROVEMENT_PERFORMANCE_THRESHOLD`, `SELF_IMPROVEMENT_ENABLE_PROMPT_OPTIMIZATION`, `FINE_TUNING_ENABLED`, `FINE_TUNING_MIN_EXAMPLES`, `FINE_TUNING_QUALITY_THRESHOLD` and `FINE_TUNING_AUTO_TRIGGER` are read only by `Settings.get_ai_brain_config`.
 
 ## Model configuration manager
 
@@ -87,14 +87,10 @@ The one part of `src/reliability/` in production use is `retry_strategies.Circui
 
 ## Stub packages
 
-> **Not wired.** These packages hold small in-memory dataclass modules. Nothing under `src/`, `tests/`, `evals/` or `scripts/` imports them.
+> **Not wired.** This package is a script target with no other caller.
 
 | Package | Contents |
 |---|---|
-| `src/benchmarks/` | `BenchmarkDataset`, `BenchmarkLibrary`, `ReplicationPackage`, `ResearchReplicationToolkit`, `BenchmarkEvaluator`, `PeerReviewSystem` |
-| `src/costs/` | `CostTransaction`, `CostTracker` (with a fixed per-model price table), `Budget`, `BudgetManager`, `CostForecaster`, `CostOptimizer` |
-| `src/improvement/` | `FeedbackCollectionService`, `RewardModel`, `RLTrainer`, `PromptOptimizer`, `AgentReflection`, `MetaLearner`, `ContinuousImprovementPipeline` |
-| `src/memory/` | `WorkingMemoryManager`, `EpisodicMemoryService`, `EntityExtractionService`, `ProceduralMemoryService`, `QuerySuggestionService` |
 | `src/research_platform/` | `main()`, the `research-platform` script target; see [CLI and web clients](13-cli-and-web-clients.md) |
 
 ## Citation binding and PDF text extraction
@@ -127,10 +123,8 @@ Tests that exercise them live in `tests/unit/core/claims/` and `tests/unit/core/
 
 ## Dead execution attributes
 
-> **Not wired.** Five names in the execution path and the settings are defined and never read. The live execution path is described in [research execution](05-research-execution.md).
+> **Not wired.** Three names in the execution path and the settings are defined and never read. The live execution path is described in [research execution](05-research-execution.md).
 
-- `DirectExecutionService.max_domain_parallelism` is assigned `4` in `__init__` and read nowhere.
-- `DirectExecutionService._fast_path_passes_quality` is a method that nothing calls.
 - `DirectExecutionService._fast_path_provider` is initialised to `None`, never assigned a provider and only closed and reset in `close`.
 - `Settings.MULTI_DOMAIN_MERGE_STRATEGY` (default `concat`) and `Settings.MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT` (default 4000) are read by no code under `src/`.
 
@@ -152,7 +146,7 @@ The web workbench pages for workflows, runs, run detail and memory call API rout
 - `src/ai_brain/config/`, `configs/models/`: model configuration manager and YAML files
 - `src/prompts/`: `PromptManager`, versioning, templates
 - `src/reliability/`: `service_registry.py` (not wired) and `retry_strategies.py` (used)
-- `src/benchmarks/`, `src/costs/`, `src/improvement/`, `src/memory/`, `src/research_platform/`: stub packages
+- `src/research_platform/`: stub packages
 - `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py`: citation and PDF text modules (the rest of `src/core/claims/` is the live claim-support path)
 - `tests/architecture/test_module_reachability.py`: import-graph test that lists the modules no entry point reaches
 - `src/api/services/direct_execution_service.py`: the dead execution attributes

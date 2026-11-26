@@ -403,11 +403,6 @@ class DirectExecutionService:
     the same functionality with better performance and easier debugging.
     """
 
-    # Fast-path quality gate: a response shorter than this, or opening with a
-    # known apology/error prefix, is treated as degraded and escalated.
-    _FAST_PATH_MIN_RESPONSE_CHARS = 50
-    _FAST_PATH_FAILURE_PREFIXES = ("Error:", "I'm sorry")
-
     def __init__(
         self,
         masr_router: MASRouter | None = None,
@@ -491,7 +486,6 @@ class DirectExecutionService:
         self.default_timeout_seconds = DEFAULT_AGENT_TIMEOUT
         self.enable_retry = True
         self.max_retries = MAX_RETRY_ATTEMPTS
-        self.max_domain_parallelism = 4  # Bounded multi-domain concurrency
 
         # Durable-write resilience. A lifecycle write is retried a bounded
         # number of times before it is treated as unavailable; a terminal
@@ -619,6 +613,7 @@ class DirectExecutionService:
                     phase=phase,
                     checkpoint_type="automatic",
                     execution_metrics=execution_metrics,
+                    run_id=execution_status.run_id,
                 )
                 await session.commit()
 
@@ -2305,20 +2300,6 @@ class DirectExecutionService:
         if ledger is None:
             return fields
         return {**fields, "usage": ledger.usage_payload()}
-
-    def _fast_path_passes_quality(self, response: str) -> bool:
-        """Minimal quality gate for fast-path responses.
-
-        Args:
-            response: The LLM response text
-
-        Returns:
-            True if response passes basic quality checks
-        """
-        stripped = response.strip() if response else ""
-        if len(stripped) < self._FAST_PATH_MIN_RESPONSE_CHARS:
-            return False
-        return not stripped.startswith(self._FAST_PATH_FAILURE_PREFIXES)
 
     @retry(
         stop=stop_after_attempt(_WORKFLOW_MAX_ATTEMPTS),

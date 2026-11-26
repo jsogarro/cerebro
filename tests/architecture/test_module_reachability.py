@@ -34,7 +34,6 @@ ENTRY_POINTS = (
 
 KNOWN_UNREACHABLE: frozenset[str] = frozenset(
     {
-        "src.agents.delegation_contract",
         "src.ai_brain.config.integration_service",
         "src.ai_brain.config.legacy_adapter",
         "src.ai_brain.experimentation.core.system_experiment_registry",
@@ -51,16 +50,12 @@ KNOWN_UNREACHABLE: frozenset[str] = frozenset(
         "src.ai_brain.experimentation.statistical.multi_variate_analysis",
         "src.ai_brain.router.masr_service",
         "src.api.services.masr_analytics",
-        "src.benchmarks",
         "src.core.claims.citation_binding",
         "src.core.claims.citation_prose",
         "src.core.claims.citation_render",
         "src.core.claims.citation_validation",
         "src.core.contracts.citation",
         "src.core.production_config",
-        "src.costs",
-        "src.improvement",
-        "src.memory",
         "src.models.base",
         "src.models.db.migrations",
         "src.research_platform",

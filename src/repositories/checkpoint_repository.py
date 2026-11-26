@@ -155,6 +155,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         phase: str,
         checkpoint_type: str = "automatic",
         execution_metrics: dict[str, Any] | None = None,
+        run_id: str | None = None,
     ) -> WorkflowCheckpoint:
         """
         Create a new checkpoint.
@@ -166,6 +167,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             phase: Current workflow phase
             checkpoint_type: Type of checkpoint
             execution_metrics: Performance metrics
+            run_id: Durable run the checkpoint belongs to, if any
 
         Returns:
             Created checkpoint
@@ -177,6 +179,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             phase=phase,
             checkpoint_type=checkpoint_type,
             execution_metrics=execution_metrics,
+            run_id=run_id,
             is_recoverable=True,
         )
 

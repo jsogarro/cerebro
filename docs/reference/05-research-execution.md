@@ -17,7 +17,7 @@ Research execution is the plan path: a research request is bound to a stored exe
 | Startup rehydration | Active | `restore_active_executions` during `lifespan` | `DirectExecutionService.restore_active_executions` |
 | Terminal-outcome reconciliation | Active | `reconcile_pending_terminal_transitions` | `DirectExecutionService.reconcile_pending_terminal_transitions` |
 | Fixture mode | Not wired | `execution_policy.fixture_mode` argument | `DirectExecutionService.start_research_execution`, `src/ai_brain/router/routing_types.py` (`RoutingExecutionPolicy`) |
-| Multi-domain fan-out and provider fast path | Not wired | none | `DirectExecutionService` (`max_domain_parallelism`, `_fast_path_passes_quality`, `_fast_path_provider`), `src/core/config.py` (`Settings.MULTI_DOMAIN_MERGE_STRATEGY`) |
+| Multi-domain fan-out and provider fast path | Not wired | none | `DirectExecutionService` (`_fast_path_provider`), `src/core/config.py` (`Settings.MULTI_DOMAIN_MERGE_STRATEGY`) |
 
 ## Entry points
 

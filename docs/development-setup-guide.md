@@ -254,14 +254,10 @@ src/
   ai_brain/         MASR router, LLM providers, memory tiers, experimentation, compaction, config
   api/              FastAPI app (main.py), routes/, auth/, middleware/, services/, websocket/
   auth/             JWT service, password service, auth request and response models
-  benchmarks/       Benchmark dataset, replication, and evaluator classes
   cli/              research-cli (click commands, API client, formatters)
   core/             Settings, environment loading, kernel, contracts, capabilities, claims, tools
-  costs/            Cost tracker, budget manager, forecaster, and optimizer classes
   evals/            Agent cost pilot: runner, trial setup, cost arithmetic (used by evals/live)
-  improvement/      Feedback, reward-model, and prompt-optimizer classes
   mcp/              MCP server, client, registry, and tools
-  memory/           Working, episodic, semantic, and procedural memory service classes
   middleware/       Authentication middleware and tenant-context dependencies
   models/           API models; db/ holds the SQLAlchemy models
   prompts/          Prompt manager, versioning, YAML prompt templates
