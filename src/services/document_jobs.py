@@ -326,6 +326,7 @@ async def run_job(
     """
     job = _Job(session_factory, table, job_id, organization_id)
     fail = functools.partial(_fail, job)
+    holds = "queued"
     try:
         async with semaphore:
             elapsed = (datetime.now(UTC) - _aware(created_at)).total_seconds()
@@ -334,6 +335,7 @@ async def run_job(
                 return
             if not await _start(job):
                 return
+            holds = "running"
             try:
                 async with asyncio.timeout(remaining) as deadline:
                     result = await work()
@@ -353,7 +355,7 @@ async def run_job(
             reason=reason,
             error_type=type(exc).__name__,
         )
-        await fail(expected="running", reason=reason)
+        await fail(expected=holds, reason=reason)
         if cancelled:
             raise
 

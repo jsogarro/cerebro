@@ -20,6 +20,7 @@ from src.models.db.document_critique import (
     DocumentCritique,
 )
 from src.models.db.uploaded_document import UsageLedger
+from src.services import document_jobs as jobs
 from src.services.document_jobs import (
     MODEL_JOB_KINDS,
     STALE_GRACE_S,
@@ -351,6 +352,46 @@ async def test_an_exception_inside_persist_leaves_no_partial_rows_and_no_text_in
         count = await session.scalar(select(func.count()).select_from(CritiqueFinding))
     assert count == 0
     assert "SENTINEL" not in repr(captured)
+
+
+async def test_a_job_cancelled_while_waiting_for_a_slot_is_failed_as_interrupted(
+    factory: Factory,
+) -> None:
+    job_id = await insert_job(factory)
+    held = asyncio.Semaphore(0)
+    work = Spy()
+    task = asyncio.create_task(
+        run_job(
+            table=TABLE,
+            job_id=job_id,
+            organization_id=ORG,
+            created_at=datetime.now(UTC),
+            deadline_s=30,
+            session_factory=factory,
+            semaphore=held,
+            work=work,
+            persist=finished,
+        )
+    )
+    await asyncio.sleep(0.05)
+    await asyncio.wait_for(cancel_all({task}), 5)
+    row = await row_of(factory, job_id)
+    assert (row.status, row.status_reason) == ("failed", "interrupted")  # type: ignore[union-attr]
+    assert work.calls == 0
+
+
+async def test_an_error_while_starting_fails_the_queued_row(
+    factory: Factory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = await insert_job(factory)
+
+    async def broken(job: Any) -> bool:
+        raise OSError("connection reset")
+
+    monkeypatch.setattr(jobs, "_start", broken)
+    await start(factory, job_id, Spy())
+    row = await row_of(factory, job_id)
+    assert (row.status, row.status_reason) == ("failed", "internal_error")  # type: ignore[union-attr]
 
 
 async def test_cancel_all_interrupts_every_running_job_and_waits_for_the_writes(

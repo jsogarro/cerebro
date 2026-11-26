@@ -228,7 +228,9 @@ async def test_a_global_count_limit_holds_across_orgs_admitting_concurrently(
     assert results.count(True) == 1
 
 
-async def count_both_kinds(session: AsyncSession, org: uuid.UUID, now: datetime) -> int:
+async def count_both_kinds_unblocked(
+    session: AsyncSession, org: uuid.UUID, now: datetime
+) -> int:
     return int(
         await session.scalar(
             select(func.count())
@@ -242,20 +244,62 @@ async def count_both_kinds(session: AsyncSession, org: uuid.UUID, now: datetime)
     )
 
 
+def counting_both_kinds_after_a_meeting() -> Any:
+    """Counts both kinds, but only after both admissions have reached the count.
+
+    With one shared lock the second admission cannot reach it until the first
+    commits, so the wait times out and the race is decided by the lock; without
+    one, both arrive together and both see a free slot.
+    """
+    meeting = asyncio.Barrier(2)
+
+    async def count(session: AsyncSession, org: uuid.UUID, now: datetime) -> int:
+        try:
+            await asyncio.wait_for(meeting.wait(), 1)
+        except (TimeoutError, asyncio.BrokenBarrierError):
+            pass
+        return int(
+            await session.scalar(
+                select(func.count())
+                .select_from(UsageLedger)
+                .where(
+                    UsageLedger.organization_id == org,
+                    UsageLedger.kind.in_(MODEL_JOB_KINDS),
+                )
+            )
+            or 0
+        )
+
+    return count
+
+
 async def test_a_critique_and_a_revision_racing_for_the_last_slot_admit_exactly_one(
     factory: Factory,
 ) -> None:
     document = await document_for(factory, ORG)
     limits = JobLimits(per_org_concurrent=2)
-    shared = {
-        "lock": MODEL_ADMIT_LOCK,
-        "budget_kinds": MODEL_JOB_KINDS,
-        "count_active": count_both_kinds,
-    }
-    assert await admit_critique(factory, document, limits, **shared)
+    shared = {"lock": MODEL_ADMIT_LOCK, "budget_kinds": MODEL_JOB_KINDS}
+    assert await admit_critique(
+        factory, document, limits, count_active=count_both_kinds_unblocked, **shared
+    )
+    count_active = counting_both_kinds_after_a_meeting()
     results = await asyncio.gather(
-        admit_critique(factory, document, limits, kind="critique", **shared),
-        admit_critique(factory, document, limits, kind="revision", **shared),
+        admit_critique(
+            factory,
+            document,
+            limits,
+            kind="critique",
+            count_active=count_active,
+            **shared,
+        ),
+        admit_critique(
+            factory,
+            document,
+            limits,
+            kind="revision",
+            count_active=count_active,
+            **shared,
+        ),
     )
     assert results.count(True) == 1
 

@@ -431,6 +431,49 @@ async def test_the_sixth_critique_in_a_day_is_429_with_a_code_and_no_new_ledger_
     assert await count(factory, UsageLedger) == 1
 
 
+async def test_the_scheduled_task_joins_the_lifespans_job_set(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    model: GatedModel,
+) -> None:
+    model.gate.clear()
+    lifespan_set = app.state.document_jobs
+    await start(client, await make_document(factory))
+    assert app.state.document_jobs is lifespan_set and len(lifespan_set) == 1
+    model.gate.set()
+    await drain()
+    assert lifespan_set == set()
+
+
+async def test_a_provider_setup_failure_leaves_no_row_and_no_spent_quota(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    def broken() -> Any:
+        raise RuntimeError("provider setup failed")
+
+    app.dependency_overrides[get_review_model] = lambda: broken
+    document_id = await make_document(factory)
+    with pytest.raises(RuntimeError):
+        await start(client, document_id)
+    assert await count(factory, DocumentCritique) == 0
+    assert await count(factory, UsageLedger) == 0
+
+
+async def test_the_request_commits_before_the_run_starts_even_if_the_session_would_not(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async def never_commits() -> AsyncIterator[AsyncSession]:
+        async with factory() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = never_commits
+    critique_id = await run_to_end(client, await make_document(factory))
+    async with factory() as session:
+        row = await session.get(DocumentCritique, uuid.UUID(critique_id))
+    assert row is not None and row.status == "succeeded"
+
+
 # ---- runner outcomes ---------------------------------------------------------------
 
 

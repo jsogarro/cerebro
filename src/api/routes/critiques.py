@@ -213,6 +213,8 @@ async def start_critique(
     if document.char_count > service.CRITIQUE_MAX_CHARS:
         raise _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "too_long_for_critique")
 
+    # Built before anything is reserved, so a setup failure leaves no row and no spent quota.
+    model = model_factory()
     units = service.reserved_units(document.char_count)
     try:
         await admit(
@@ -244,8 +246,9 @@ async def start_critique(
     await session.commit()
 
     state = request.app.state
-    jobs: set[asyncio.Task[None]] = getattr(state, "document_jobs", None) or set()
-    state.document_jobs = jobs
+    jobs: set[asyncio.Task[None]] | None = getattr(state, "document_jobs", None)
+    if jobs is None:
+        jobs = state.document_jobs = set()
     task = asyncio.create_task(
         run_job(
             table=DOCUMENT_CRITIQUES,
@@ -261,7 +264,7 @@ async def start_critique(
                 document_id=document_id,
                 organization_id=ids.organization_id,
                 user_id=ids.user_id,
-                model=model_factory(),
+                model=model,
             ),
             persist=service.make_persist(
                 critique_id=critique_id,
