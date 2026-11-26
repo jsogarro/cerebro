@@ -135,7 +135,7 @@ In CI, `.github/workflows/ci.yml` (`frontend-ci`) installs dependencies, lints a
 
 ## Live evaluations
 
-`evals/live/` (`test_provider_health.py`, `test_text_routing.py`, `test_structured_routing.py`, `test_multi_domain.py`, `test_cost_pilot.py`) calls real providers and costs money. Every module is marked `live_eval`, so a normal `pytest` run deselects it, and `testpaths` does not include `evals/`.
+`evals/live/` (`test_provider_health.py`, `test_text_routing.py`, `test_structured_routing.py`, `test_multi_domain.py`, `test_cost_pilot.py`) calls real providers and costs money. Every module is marked `live_eval` (the pilot also `cost_pilot`), so a normal `pytest` run deselects it, and `testpaths` does not include `evals/`.
 
 ```bash
 export OPENROUTER_API_KEY=...
@@ -144,13 +144,13 @@ export LIVE_EVAL_BUDGET_USD=0.25      # default when unset
 bash scripts/run_live_evals.sh
 ```
 
-- `scripts/run_live_evals.sh` exits 1 when `OPENROUTER_API_KEY` is unset or `ENABLE_LIVE_EVAL` is not `1`, creates `evals/out/` and runs `pytest evals/live -m live_eval -v --no-cov --tb=short`.
+- `scripts/run_live_evals.sh` exits 1 when `OPENROUTER_API_KEY` is unset or `ENABLE_LIVE_EVAL` is not `1`, creates `evals/out/` and runs `pytest evals/live -m "live_eval and not cost_pilot" -v --no-cov --tb=short`.
 - The suite is serial only (`evals/live/conftest.py`); parallel runners such as pytest-xdist are unsupported.
 - Without the two variables, `live_eval_settings_guard` skips every test. With `LIVE_EVAL_REQUIRED=1` it fails instead, so a misconfigured runner cannot report green. The shell script exits first when the variables are missing, so `LIVE_EVAL_REQUIRED` matters when running pytest directly.
 - `LIVE_EVAL_BUDGET_USD` (default `0.25`) is enforced three ways: a check before each test, a check inside each recorded LLM call that raises once the total exceeds the budget and a check at session end.
 - The session writes `evals/out/live_eval_report.json` and a Markdown report next to it (`evals/live/report.py`), with per-call model, token counts and cost.
 - The fixtures `openrouter_spy` and `gemini_fallback_guard` record request payloads and count calls into the Gemini fallback path.
-- `test_cost_pilot.py` is part of `evals/live`, so the script collects it too, and it fails on a missing `PILOT_TRIALS` unless the variables in [Agent cost pilot](#agent-cost-pilot) are set. To skip it, run `pytest evals/live -m live_eval --no-cov --deselect evals/live/test_cost_pilot.py` instead of the script.
+- `test_cost_pilot.py` is also marked `cost_pilot`, and the script excludes it. Run the pilot by its own command, described in [Agent cost pilot](#agent-cost-pilot).
 
 The template [nightly workflow](ci/nightly-live-eval.yml.example) runs the script at 06:00 UTC and on manual dispatch, uploads the report and opens an issue on failure. Copy it to `.github/workflows/` to use it; it is not active from `docs/ci/`. It needs the repository secrets `OPENROUTER_API_KEY` and `GEMINI_API_KEY`.
 
@@ -173,6 +173,12 @@ It spends real money on the OpenRouter key, so it needs all of these:
 | `LIVE_EVAL_BUDGET_USD` | total budget; the preflight refuses when `(runs + concurrency) * PILOT_PER_RUN_CAP_USD` exceeds it |
 | `PILOT_CASES` | optional comma-separated case ids to run a subset |
 | `PILOT_TASK_TIMEOUT_SECONDS` | optional per-task timeout, default 240 |
+
+Run it with:
+
+```bash
+pytest evals/live/test_cost_pilot.py -m cost_pilot -v --no-cov --tb=short
+```
 
 Research runs also need `MCP_TOOL_PATH_ENABLED` to be true (its default). The test writes `evals/out/cost_pilot.json`. The report takes the unit cost from the difference in the key's all-time usage on OpenRouter before and after the runs, read once two consecutive reads 30 seconds apart agree, and compares it with the sum of the runs' ledger costs (`usage.cost_usd` on the terminal events). It marks the ledger untrusted when a run has no usage or the two differ by more than 10%. From the unit cost it estimates a nightly cost and recommends a cadence against a $12 ceiling. The test fails if any Gemini fallback call ran or if the billed total exceeds the budget.
 

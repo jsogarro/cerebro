@@ -75,6 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A rejected request no longer spends an idempotency key (#106); idempotency keys are scoped to the caller and reserved before executing (#190).
 - Rejected requests no longer amplify durable audit writes (#225).
 - Registration unique-index collisions return 409, and `lower(email)` and `lower(username)` are indexed (#202).
+- `scripts/run_live_evals.sh` no longer collects the agent cost pilot, which failed on missing `PILOT_*` variables or spent real money when they were set; run the pilot by its own command.
 
 ### Security
 - Required authenticated WebSocket handshakes and failed closed when token revocation storage is unavailable, persisted durable audit events for request admission and outcome, kept the MCP service on the internal Compose network, ran migrations in the production image entrypoint, and answered CORS preflights at the outer middleware (#118).
