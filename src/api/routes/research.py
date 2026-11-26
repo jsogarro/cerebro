@@ -108,7 +108,6 @@ async def create_research_project(
                 detail="Cannot create a project for another user",
             )
 
-        # Create research project in database
         db_project = await repo.create(
             title=request.title,
             query=_json.dumps(request.query.model_dump()),
@@ -223,7 +222,6 @@ async def get_research_project(
         updated_at=db_project.updated_at,
     )
 
-    # Update status from direct execution
     try:
         execution_service = _resolved_execution_service(execution_service)
         # Find execution for this project (simplified for demo)
@@ -291,7 +289,6 @@ async def list_research_projects(
             organization_id=tenant_context.organization_id,
         )
 
-    # Convert to API models
     import json as _json
 
     def _parse_query(q: Any) -> dict[str, Any]:
@@ -320,7 +317,6 @@ async def get_research_progress(
     execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> ResearchProgress:
     """Get real-time progress of a research project."""
-    # Check project exists
     db_project = await repo.get_for_user(
         project_id,
         user_id=tenant_context.user_id,
@@ -344,7 +340,6 @@ async def get_research_progress(
                 break
 
         if execution_status:
-            # Calculate progress from execution status
             total_tasks = 4  # Typical research workflow phases
             completed_tasks = int(
                 execution_status.progress_percentage / 25
@@ -378,7 +373,6 @@ async def get_research_progress(
 
     except Exception as e:
         logger.error(f"Failed to get progress: {e}")
-        # Return default progress
         return ResearchProgress(
             project_id=project_id,
             total_tasks=1,
@@ -399,7 +393,6 @@ async def cancel_research_project(
     execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> None:
     """Cancel a research project."""
-    # Check project exists
     db_project = await repo.get_for_user(
         project_id,
         user_id=tenant_context.user_id,
@@ -469,7 +462,6 @@ async def get_research_results(
     execution_service: DirectExecutionService = _EXECUTION_SERVICE_DEPENDENCY,
 ) -> dict[str, Any]:
     """Get the results of a completed research project."""
-    # Check project exists
     db_project = await repo.get_for_user(
         project_id,
         user_id=tenant_context.user_id,
@@ -482,7 +474,6 @@ async def get_research_results(
             detail=f"Research project {project_id} not found",
         )
 
-    # Check DB results first
     if db_project.results:
         # Rows persisted before verification fabrication was removed are still
         # served verbatim; flag them rather than present them as evidence.

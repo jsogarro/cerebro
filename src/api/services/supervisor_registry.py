@@ -143,7 +143,6 @@ class SupervisorRegistry:
     def get_worker_types_for_supervisor(
         self, supervisor_type: SupervisorType
     ) -> list[str]:
-        """Get worker types for a supervisor."""
         worker_types_map = {
             SupervisorType.RESEARCH: [
                 "literature_review",

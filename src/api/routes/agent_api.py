@@ -159,13 +159,12 @@ async def list_agents(
         service = _resolved_agent_operations(execution_service)
         agents = await service.get_agent_list()
 
-        # Calculate system metrics
         system_stats = await service.get_service_stats(
             organization_id=tenant_context.organization_id
         )
         system_health = system_stats.get("system_health", "unknown")
 
-        response = AgentListResponse(
+        return AgentListResponse(
             agents=agents,
             total_agents=len(agents),
             total_capabilities=len(
@@ -182,8 +181,6 @@ async def list_agents(
             ),
             system_uptime_seconds=0.0,  # Would be calculated from service start time
         )
-
-        return response
 
     except Exception as e:
         logger.error(f"Failed to list agents: {e}")
@@ -437,7 +434,7 @@ async def validate_agent_input(
                 "Consider breaking down complex query into smaller parts"
             )
 
-        response = AgentValidationResponse(
+        return AgentValidationResponse(
             valid=validation_score >= 0.7,
             agent_type=agent_type,
             validation_score=validation_score,
@@ -451,8 +448,6 @@ async def validate_agent_input(
             if validation_score >= 0.7
             else ["Query or parameters need improvement"],
         )
-
-        return response
 
     except Exception as e:
         logger.error(f"Validation failed for {agent_type.value}: {e}")
@@ -861,7 +856,6 @@ async def get_agents_health_summary(
                 "issues": health.current_issues,
             }
 
-            # Convert status to numeric score for overall calculation
             status_scores = {
                 "healthy": 1.0,
                 "degraded": 0.7,
@@ -870,7 +864,6 @@ async def get_agents_health_summary(
             }
             overall_health_scores.append(status_scores.get(health.status, 0.0))
 
-        # Calculate overall system health
         overall_health_score = (
             statistics.mean(overall_health_scores) if overall_health_scores else 0.0
         )
@@ -951,7 +944,6 @@ async def compare_agent_performance(
                 "recent_executions": metrics.recent_executions,
             }
 
-        # Calculate rankings
         sorted_agents = sorted(
             comparison_data.items(),
             key=lambda x: x[1]["value"],

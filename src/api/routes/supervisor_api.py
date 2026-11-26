@@ -53,7 +53,6 @@ from src.models.supervisor_api_models import (
 
 logger = get_logger()
 
-# Create router with prefix and tags
 router = APIRouter(
     prefix="/api/v1/supervisors",
     tags=["supervisors", "hierarchical-coordination"],
@@ -83,7 +82,6 @@ def _resolved_supervisor_service(
     return service
 
 
-# Initialize connection manager
 connection_manager = SupervisorProgressTracker()
 
 
@@ -109,7 +107,6 @@ async def execute_supervisor_task(
     """
     supervisor_service = _resolved_supervisor_service(service)
     try:
-        # Validate supervisor type
         if supervisor_type not in SupervisorType:
             raise HTTPException(
                 status_code=404, detail=f"Supervisor type '{supervisor_type}' not found"
@@ -651,11 +648,9 @@ async def supervisor_websocket(
             try:
                 data = await websocket.receive_json()
 
-                # Handle different message types
                 if data.get("type") == "ping":
                     await websocket.send_json({"type": "pong"})
                 elif data.get("type") == "subscribe":
-                    # Handle subscription requests
                     pass
                 elif data.get("type") == "get_status":
                     health = await supervisor_service.get_supervisor_health(

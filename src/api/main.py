@@ -108,7 +108,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             masr_runtime,
         )
 
-        # Initialize WebSocket services
         try:
             await event_publisher.initialize()
             logger.info("Event publisher initialized")
@@ -120,7 +119,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             event_publisher.shutdown,
         )
 
-        # Initialize database
         from src.models.db.session import get_session_factory, init_db
 
         database_initialized = False
@@ -179,7 +177,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning(f"Database initialization failed: {e}")
 
-        # Initialize Gemini service
         gemini_service = None
         if settings.GEMINI_API_KEY:
             try:
@@ -196,7 +193,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "GEMINI_API_KEY not set — agents will use fallback responses"
             )
 
-        # Initialize all active MASR consumers from the application-owned runtime.
         from src.api.services.agent_execution_service import (
             configure_agent_execution_service,
         )
@@ -435,7 +431,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # await close_temporal()
 
 
-# Create FastAPI application
 app = FastAPI(
     title="Research Platform API",
     description="Multi-Agent Graduate-Level Research Platform",
@@ -464,7 +459,6 @@ app.add_middleware(
 
 app.add_middleware(LLMCostDriftMiddleware)
 
-# Add Authentication middleware
 app.add_middleware(AuthMiddleware)
 
 # Registered after authentication, so rejection logging and the response
@@ -518,7 +512,6 @@ app.include_router(run_stream.router, prefix="/api/v1", tags=["run-stream"])
 
 
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Global exception handler."""
     logger.error(
         "Unhandled exception",
         exc_info=exc,

@@ -93,7 +93,6 @@ class TalkHierSessionManager:
             started_at=datetime.now(UTC),
         )
 
-        # Update protocol stats
         if config.get("protocol_type"):
             self.protocol_stats[config["protocol_type"]]["total_sessions"] += 1
 
@@ -103,7 +102,6 @@ class TalkHierSessionManager:
             metrics = self.sessions[session_id]
             metrics.completed_at = datetime.now(UTC)
 
-            # Update protocol stats
             if metrics.protocol_type:
                 stats = self.protocol_stats[metrics.protocol_type]
                 if metrics.success:
@@ -145,7 +143,6 @@ class TalkHierSessionManager:
 
         coordination_id = f"coord_{datetime.now(UTC).timestamp()}"
 
-        # Create coordination group
         coordination = CoordinationGroup(
             coordination_id=coordination_id,
             session_ids=request.session_ids,
@@ -157,7 +154,6 @@ class TalkHierSessionManager:
 
         self.coordinations[coordination_id] = coordination
 
-        # Initialize session statuses
         session_statuses = {}
         for session_id in request.session_ids:
             if session_id in self.sessions:
@@ -197,7 +193,6 @@ class TalkHierSessionManager:
         ):
             raise ValueError(f"Coordination {coordination_id} not found")
 
-        # Calculate overall progress
         total_progress = 0.0
         total_quality = 0.0
         session_statuses = {}
@@ -237,7 +232,6 @@ class TalkHierSessionManager:
     ) -> dict[str, Any]:
         """Get aggregated analytics"""
         self._validate_identity(user_id, organization_id)
-        # Parse time range
         cutoff_time = self._parse_time_range(time_range)
 
         # Filter sessions
@@ -259,7 +253,6 @@ class TalkHierSessionManager:
         if not filtered_sessions:
             return self._empty_analytics()
 
-        # Calculate aggregated metrics
         total_sessions = len(filtered_sessions)
         active_sessions = sum(1 for m in filtered_sessions if not m.completed_at)
         successful_sessions = sum(1 for m in filtered_sessions if m.success)
@@ -323,7 +316,6 @@ class TalkHierSessionManager:
         user_id: str | None = None,
         organization_id: str | None = None,
     ) -> None:
-        """Log an analytics event"""
         self._validate_identity(user_id, organization_id)
 
         session_metrics = self.sessions.get(session_id)
@@ -415,8 +407,6 @@ class TalkHierSessionManager:
             "analytics_events": len(analytics_events),
         }
 
-    # Helper methods
-
     def _parse_time_range(self, time_range: str) -> datetime | None:
         """Parse time range string to datetime cutoff"""
         now = datetime.now(UTC)
@@ -471,7 +461,6 @@ class TalkHierSessionManager:
     def _calculate_strategy_performance(
         self, sessions: list[SessionMetrics]
     ) -> dict[str, dict[str, float]]:
-        """Calculate performance by strategy"""
         # Simplified - would need strategy tracking
         return {
             "quality_focused": {"avg_quality": 0.88, "avg_rounds": 3.2},
@@ -492,7 +481,6 @@ class TalkHierSessionManager:
                 hour_key = metrics.started_at.replace(minute=0, second=0, microsecond=0)
                 hourly_quality[hour_key].append(metrics.final_quality)
 
-        # Calculate averages
         for hour, qualities in sorted(hourly_quality.items()):
             trends.append(
                 {
