@@ -43,6 +43,21 @@ class _SuccessfulDurableAuditLogger:
         self.pending_events.clear()
 
 
+_SANDBOX_MARKER = "requires_linux_sandbox"
+_skipped_sandbox_tests: list[str] = []
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    if report.skipped and _SANDBOX_MARKER in report.keywords:
+        _skipped_sandbox_tests.append(report.nodeid)
+
+
+def pytest_sessionfinish(session: pytest.Session) -> None:
+    """In CI a skipped Linux-only control test is a vacuous control: fail."""
+    if os.environ.get("CI") and _skipped_sandbox_tests:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
 @pytest.fixture(autouse=True)
 def install_test_audit_logger() -> Generator[None, None, None]:
     """Provide audit state for raw ASGI clients without weakening production.

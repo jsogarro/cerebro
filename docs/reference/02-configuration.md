@@ -415,7 +415,7 @@ Compose interpolates these variables from the shell or an `.env` file next to th
 
 The `mcp-server` service reads the process variable `MCP_PORT` (set to `9000` in the compose file) in its start command.
 
-Both compose files also set literal environment entries that no code reads: `ENABLE_DIRECT_EXECUTION` (both files), `MASR_ENABLE_ROUTING`, `MASR_ENABLE_LEARNING`, `MASR_MAX_AGENTS` and `MASR_QUALITY_THRESHOLD` (production file and the `masr-router` service), and in the production file `GUNICORN_WORKERS`, `GUNICORN_WORKER_CLASS`, `GUNICORN_MAX_REQUESTS` and `GUNICORN_MAX_REQUESTS_JITTER`. The production image starts `uvicorn` with `--workers 4`, not gunicorn.
+Both compose files also set literal environment entries that no code reads: `ENABLE_DIRECT_EXECUTION` (both files), `MASR_ENABLE_ROUTING`, `MASR_ENABLE_LEARNING`, `MASR_MAX_AGENTS` and `MASR_QUALITY_THRESHOLD` (production file and the `masr-router` service), and in the production file `GUNICORN_WORKERS`, `GUNICORN_WORKER_CLASS`, `GUNICORN_MAX_REQUESTS` and `GUNICORN_MAX_REQUESTS_JITTER`. The production image starts `uvicorn` with `--workers 1`, not gunicorn.
 
 ## Example environment files
 

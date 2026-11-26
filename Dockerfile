@@ -112,5 +112,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
 # Run database migrations before starting Uvicorn
 ENTRYPOINT ["/entrypoint.sh"]
 
-# Production command
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Production command: one process per pod, so none holds the secrets dumpably
+# beside it (capacity comes from HPA replicas)
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

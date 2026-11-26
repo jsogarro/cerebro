@@ -9,12 +9,12 @@ This guide lists the limits the code applies to request rate, concurrency, datab
 | `MAX_REQUESTS_PER_MINUTE` | Setting / environment variable | 100 | Requests per caller per 60-second window | `src/core/config.py` (`Settings`), `src/api/main.py` |
 | `ENABLE_RATE_LIMITING` | Setting / environment variable | `true` | Turns the limiter on or off | `src/core/config.py`, `src/api/main.py` |
 | Window length | `RateLimitMiddleware(window_seconds=...)` constructor argument; `src/api/main.py` does not pass it | 60 seconds | The fixed window | `src/api/middleware/rate_limiter.py` |
-| Uvicorn worker processes | `--workers` in the image `CMD` | 4 | API processes per container | `Dockerfile` (`production` stage) |
+| Uvicorn worker processes | `--workers` in the image `CMD` | 1 | API processes per container | `Dockerfile` (`production` stage) |
 | nginx request limits | `limit_req_zone` in the nginx file | 10 requests per second on `/api/`, 5 per second on `/ws`, per client address | Traffic through the reverse proxy | `docker/nginx/nginx.conf` |
 
 `RateLimitMiddleware` counts requests in Redis with an in-memory fallback; the keys, response headers and exempt paths are in [HTTP API](reference/03-http-api.md#rate-limiting). The in-memory fallback is per process, so with several Uvicorn workers or replicas a Redis outage multiplies the effective limit by the process count.
 
-The image runs Uvicorn with `--workers 4`. Each worker is a separate process with its own database pool, its own in-memory execution registry and its own routing cache. Docker Compose does not override the command in the production file, and the `GUNICORN_*` variables it sets are not read ([configuration](reference/02-configuration.md)).
+The image runs Uvicorn with `--workers 1`: one process per container, made non-dumpable at import (`src/core/process_hardening.py`) so same-uid children cannot read its environment secrets, and scaled by replicas. The process has its own database pool, its own in-memory execution registry and its own routing cache. Docker Compose does not override the command in the production file, and the `GUNICORN_*` variables it sets are not read ([configuration](reference/02-configuration.md)).
 
 ## Execution concurrency
 
@@ -28,7 +28,7 @@ The image runs Uvicorn with `--workers 4`. Each worker is a separate process wit
 | `AGENTS_MAX_WORKERS_PER_SUPERVISOR` | Setting / environment variable | 10 | Upper bound on agents per query in the router (`max_agents`) | `src/core/config.py`, `src/ai_brain/router/factory.py` |
 | `COST_MAX_PER_REQUEST` | Setting / environment variable | 0.10 (USD) | Copied to the router's `cost_threshold`, which nothing reads, so it limits nothing (see [MASR routing](reference/06-masr-routing.md)) | `src/core/config.py`, `src/ai_brain/router/factory.py` |
 
-Both service counters are per process and live in memory. Running 4 Uvicorn workers admits up to 200 concurrent executions across the container, and each Kubernetes replica adds its own. For how runs are admitted and stored, see [durable runs and events](reference/08-durable-runs-and-events.md); for routing allocation, see [MASR routing](reference/06-masr-routing.md).
+Both service counters are per process and live in memory. Each container admits up to 50 concurrent executions, and each Kubernetes replica adds its own. For how runs are admitted and stored, see [durable runs and events](reference/08-durable-runs-and-events.md); for routing allocation, see [MASR routing](reference/06-masr-routing.md).
 
 ## Database pool
 
@@ -40,7 +40,7 @@ Both service counters are per process and live in memory. Running 4 Uvicorn work
 | `max_overflow` | 10 | Extra connections allowed beyond `pool_size` |
 | `pool_timeout` | 30 | Seconds a request waits for a free connection |
 
-The engine also sets `pool_pre_ping=True` and `pool_recycle=3600` and uses `AsyncAdaptedQueuePool` (SQLite URLs use `NullPool`). Because each Uvicorn worker builds its own engine, one container can hold up to 30 connections per worker, 120 with 4 workers; Postgres `max_connections` has to cover that total across all replicas. To change the pool, pass arguments to `init_db(...)` in `lifespan`; there is no setting for them. `DatabaseManager.get_pool_status` in the same module reports pool size and checked-in connections.
+The engine also sets `pool_pre_ping=True` and `pool_recycle=3600` and uses `AsyncAdaptedQueuePool` (SQLite URLs use `NullPool`). Because each Uvicorn worker builds its own engine, one container can hold up to 30 connections; Postgres `max_connections` has to cover that total across all replicas. To change the pool, pass arguments to `init_db(...)` in `lifespan`; there is no setting for them. `DatabaseManager.get_pool_status` in the same module reports pool size and checked-in connections.
 
 ## Model calls
 
