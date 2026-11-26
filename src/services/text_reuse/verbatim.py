@@ -278,6 +278,18 @@ def _slice(raw: str, tokens: list[tuple[str, int, int]], a: int, b: int) -> str:
     return raw[tokens[a][1] : tokens[b - 1][2]]
 
 
+def _skip_reason(
+    c: Candidate, started: float, total_chars: int, budget: ReuseBudget
+) -> SkipReason | None:
+    if time.monotonic() - started >= budget.deadline_s:
+        return "deadline_reached"
+    if total_chars >= budget.max_total_chars:
+        return "budget_exhausted"
+    if len(c.text) > budget.max_candidate_chars:
+        return "too_long"
+    return None
+
+
 def find_verbatim_reuse(
     document: str,
     candidates: Iterable[Candidate],
@@ -311,13 +323,7 @@ def find_verbatim_reuse(
     common_total = 0
     total_chars = 0
     for c in candidates:
-        reason: SkipReason | None = None
-        if time.monotonic() - started >= budget.deadline_s:
-            reason = "deadline_reached"
-        elif total_chars >= budget.max_total_chars:
-            reason = "budget_exhausted"
-        elif len(c.text) > budget.max_candidate_chars:
-            reason = "too_long"
+        reason = _skip_reason(c, started, total_chars, budget)
         if reason:
             skipped.append((c.source_id, reason))
             continue
