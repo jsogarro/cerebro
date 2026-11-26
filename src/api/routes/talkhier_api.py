@@ -54,12 +54,10 @@ from src.models.talkhier_api_models import (
 
 logger = get_logger()
 
-# Create router with prefix and tags
 router = APIRouter(
     prefix="/api/v1/talkhier", tags=["TalkHier Protocol", "Agent Framework APIs"]
 )
 
-# Initialize non-routing services
 session_manager = TalkHierSessionManager()
 websocket_handler = TalkHierWebSocketHandler()
 connection_manager = ConnectionManager()
@@ -159,7 +157,6 @@ async def create_refinement_session(
             query_preview=redact_pii(request.query)[:100],
         )
 
-        # Create session through service
         session_response = await talkhier_service.create_session(
             request,
             user_id=tenant_context.user_id,
@@ -179,7 +176,6 @@ async def create_refinement_session(
             organization_id=tenant_context.organization_id,
         )
 
-        # Log analytics
         await _log_session_analytics(
             "session_created",
             session_response.session_id,
@@ -233,7 +229,6 @@ async def get_session_status(
             organization_id=tenant_context.organization_id,
         )
 
-        # Log access
         await _log_session_analytics(
             "session_accessed",
             session_id,
@@ -310,7 +305,6 @@ async def execute_refinement_round(
         # Broadcast round completion via WebSocket
         await websocket_handler.broadcast_round_completed(session_id, round_response)
 
-        # Update session manager
         await session_manager.update_round_metrics(
             session_id,
             {
@@ -321,7 +315,6 @@ async def execute_refinement_round(
             },
         )
 
-        # Log analytics
         await _log_session_analytics(
             "round_executed",
             session_id,
@@ -397,7 +390,6 @@ async def check_consensus_status(
         # Broadcast consensus update via WebSocket
         await websocket_handler.broadcast_consensus_update(session_id, consensus_result)
 
-        # Log analytics
         await _log_session_analytics(
             "consensus_checked",
             session_id,
@@ -491,7 +483,6 @@ async def close_session(
                     errors=disconnect_errors,
                 )
 
-        # Log analytics
         await _log_session_analytics(
             "session_closed",
             session_id,
@@ -626,7 +617,6 @@ async def validate_communication_structure(
     try:
         validation_response = await talkhier_service.validate_protocol(request)
 
-        # Log validation
         logger.info(
             "talkhier_protocol_validation_completed",
             is_valid=validation_response.is_valid,
@@ -679,7 +669,6 @@ async def get_protocol_analytics(
         ```
     """
     try:
-        # Get analytics from session manager
         analytics = await session_manager.get_analytics(
             time_range=time_range or "24h",
             protocol_type=protocol_type,
@@ -688,7 +677,6 @@ async def get_protocol_analytics(
             organization_id=tenant_context.organization_id,
         )
 
-        # Add protocol-specific insights
         if protocol_type:
             analytics["protocol_insights"] = await _get_protocol_insights(
                 protocol_type, analytics
@@ -774,7 +762,6 @@ async def websocket_session_updates(websocket: WebSocket, session_id: str) -> No
         while True:
             data = await websocket.receive_json()
 
-            # Handle client messages (e.g., status requests)
             if data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
             elif data.get("type") == "get_status":
@@ -855,7 +842,6 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
         init_data = await websocket.receive_json()
 
         if init_data.get("type") == "init_session":
-            # Create or join session
             if "session_id" in init_data:
                 session_id = init_data["session_id"]
                 _authorize_websocket_session(
@@ -869,7 +855,6 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
                 )
                 registered = True
             else:
-                # Create new interactive session
                 request = TalkHierSessionRequest(**init_data.get("config", {}))
                 session_response = await session_service.create_session(
                     request,
@@ -888,12 +873,10 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
                 {"type": "session_initialized", "session_id": session_id}
             )
 
-        # Handle interactive messages and commands
         while True:
             data = await websocket.receive_json()
 
             if data.get("type") == "message":
-                # Handle interactive message
                 message = InteractiveMessage(**data)
                 if session_id is not None:
                     await websocket_handler.handle_interactive_message(
@@ -901,7 +884,6 @@ async def websocket_interactive_session(websocket: WebSocket) -> None:
                     )
 
             elif data.get("type") == "command":
-                # Handle interactive command
                 command = InteractiveCommand(**data)
                 if session_id is not None:
                     await websocket_handler.handle_interactive_command(
@@ -1087,14 +1069,12 @@ async def coordinate_multiple_sessions(
                 organization_id=tenant_context.organization_id,
             )
 
-        # Create coordination through session manager
         coordination_status = await session_manager.coordinate_sessions(
             request,
             user_id=tenant_context.user_id,
             organization_id=tenant_context.organization_id,
         )
 
-        # Log coordination
         logger.info(
             "talkhier_sessions_coordination_created",
             coordination_id=coordination_status.coordination_id,

@@ -124,7 +124,6 @@ async def websocket_endpoint(
         # Accept connection BEFORE authentication so we can send proper WS close codes
         await websocket.accept()
 
-        # Get User-Agent for client type detection
         user_agent = websocket.headers.get("user-agent")
 
         # Authenticate connection
@@ -150,7 +149,6 @@ async def websocket_endpoint(
             client_type=client_type,
         )
 
-        # Handle messages
         consecutive_errors = 0
         while True:
             try:
@@ -158,7 +156,6 @@ async def websocket_endpoint(
                 data = await websocket.receive_text()
                 message_data = deserialize(data)
 
-                # Handle subscription requests
                 if message_data.get("type") == "subscription":
                     subscription_request = SubscriptionRequest(
                         **message_data.get("data", {})
@@ -177,7 +174,6 @@ async def websocket_endpoint(
                         response_message
                     )
 
-                # Handle heartbeat responses
                 elif message_data.get("type") == "heartbeat_response":
                     websocket_manager.connections[client_id].update_heartbeat()
 
@@ -264,7 +260,6 @@ async def project_websocket_endpoint(
         # Accept connection BEFORE authentication so we can send proper WS close codes
         await websocket.accept()
 
-        # Get User-Agent for client type detection
         user_agent = websocket.headers.get("user-agent")
 
         # Authenticate connection
@@ -302,18 +297,15 @@ async def project_websocket_endpoint(
         # Send initial project state (if available)
         # TODO: Send current project status and progress
 
-        # Handle messages (mainly heartbeats and additional subscriptions)
         consecutive_errors = 0
         while True:
             try:
                 data = await websocket.receive_text()
                 message_data = deserialize(data)
 
-                # Handle heartbeat responses
                 if message_data.get("type") == "heartbeat_response":
                     websocket_manager.connections[client_id].update_heartbeat()
 
-                # Handle additional subscription requests
                 elif message_data.get("type") == "subscription":
                     subscription_request = SubscriptionRequest(
                         **message_data.get("data", {})
@@ -448,7 +440,6 @@ async def cli_websocket_endpoint(
         )
         await websocket_manager.connections[client_id].send_message(welcome_message)
 
-        # Handle messages (mainly heartbeats)
         consecutive_errors = 0
         while True:
             try:
@@ -456,7 +447,6 @@ async def cli_websocket_endpoint(
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
                 message_data = deserialize(data)
 
-                # Handle heartbeat responses
                 if message_data.get("type") == "heartbeat_response":
                     websocket_manager.connections[client_id].update_heartbeat()
 

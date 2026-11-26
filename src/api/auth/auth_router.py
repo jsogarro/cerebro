@@ -48,7 +48,6 @@ from src.security.login_throttle import LoginThrottle
 
 logger = structlog.get_logger(__name__)
 
-# Create router
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 # Security scheme
@@ -123,7 +122,6 @@ async def register(
     Creates a new user with the provided credentials and returns authentication tokens.
     """
     async with password_service:
-        # Check if user exists
         user_repo = UserRepository(db)
 
         existing_user = await user_repo.get_by_email(request.email)
@@ -138,7 +136,6 @@ async def register(
                 status_code=status.HTTP_409_CONFLICT, detail="Username already taken"
             )
 
-        # Validate password strength
         validation = password_service.validate_password_strength(
             request.password, username=request.username, email=request.email
         )
@@ -152,7 +149,6 @@ async def register(
                 },
             )
 
-        # Check for breached password
         if await password_service.check_password_breach(request.password):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -252,12 +248,10 @@ async def login(
             headers={"Retry-After": str(retry_after)},
         )
 
-    # Get user
     user_repo = UserRepository(db)
     user = await user_repo.get_by_email(request.email)
 
     if not user or not user.verify_password(request.password):
-        # Log failed attempt
         logger.warning(
             "Failed login attempt",
             email=request.email,
@@ -268,7 +262,6 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
         )
 
-    # Check if account is active
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled"
@@ -415,7 +408,6 @@ async def forgot_password(
                 detail="Password recovery service unavailable",
             ) from exc
 
-        # Get user
         user_repo = UserRepository(db)
         user = await user_repo.get_by_email(request.email)
 
@@ -457,7 +449,6 @@ async def reset_password(
     Validates the reset token and updates the user's password.
     """
     async with password_service:
-        # Validate token
         try:
             user_id = await password_service.validate_reset_token(request.token)
         except PasswordTokenStoreUnavailableError as exc:
@@ -472,7 +463,6 @@ async def reset_password(
                 detail="Invalid or expired reset token",
             )
 
-        # Get user
         user_repo = UserRepository(db)
         user = await user_repo.get(user_id)
 
@@ -481,7 +471,6 @@ async def reset_password(
                 status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
             )
 
-        # Validate new password
         validation = password_service.validate_password_strength(
             request.new_password, username=user.username, email=user.email
         )
@@ -495,24 +484,20 @@ async def reset_password(
                 },
             )
 
-        # Check password history
         if await password_service.check_password_history(user_id, request.new_password):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Password was recently used. Please choose a different password.",
             )
 
-        # Check for breached password
         if await password_service.check_password_breach(request.new_password):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="This password has been found in data breaches. Please choose a different password.",
             )
 
-        # Update password
         user.update_password(request.new_password)
 
-        # Add to password history
         await password_service.add_to_password_history(user_id, user.hashed_password)
 
         await db.commit()
@@ -545,7 +530,6 @@ async def change_password(
                 detail="Current password is incorrect",
             )
 
-        # Validate new password
         validation = password_service.validate_password_strength(
             request.new_password,
             username=current_user.username,
@@ -561,7 +545,6 @@ async def change_password(
                 },
             )
 
-        # Check password history
         user_id = str(current_user.id)
         if await password_service.check_password_history(user_id, request.new_password):
             raise HTTPException(
@@ -569,17 +552,14 @@ async def change_password(
                 detail="Password was recently used. Please choose a different password.",
             )
 
-        # Check for breached password
         if await password_service.check_password_breach(request.new_password):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="This password has been found in data breaches. Please choose a different password.",
             )
 
-        # Update password
         current_user.update_password(request.new_password)
 
-        # Add to password history
         await password_service.add_to_password_history(
             user_id, current_user.hashed_password
         )
@@ -675,7 +655,6 @@ async def revoke_session(
 
     Terminates the session associated with the given device ID.
     """
-    # Get all sessions
     sessions = await jwt_service.get_active_sessions(str(current_user.id))
 
     # Find and revoke matching session

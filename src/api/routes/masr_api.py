@@ -27,7 +27,6 @@ from src.models.masr_api_models import (
     StrategyEvaluationResponse,
 )
 
-# Create router with prefix and tags
 router = APIRouter(
     prefix="/api/v1/masr",
     dependencies=[Depends(get_current_token)],
@@ -84,8 +83,7 @@ async def get_routing_decision(
     allocates supervisors and workers, and provides cost/latency estimates.
     """
     try:
-        response = await routing_service.get_routing_decision(request)
-        return response
+        return await routing_service.get_routing_decision(request)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -132,8 +130,7 @@ async def estimate_cost(
     - Optimization recommendations
     """
     try:
-        response = await routing_service.estimate_cost(request)
-        return response
+        return await routing_service.estimate_cost(request)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -169,8 +166,7 @@ async def evaluate_strategies(
     - Custom weight preferences
     """
     try:
-        response = await routing_service.evaluate_strategies(request)
-        return response
+        return await routing_service.evaluate_strategies(request)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -206,8 +202,7 @@ async def analyze_complexity(
     - Routing recommendations
     """
     try:
-        response = await routing_service.analyze_complexity(request)
-        return response
+        return await routing_service.analyze_complexity(request)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -239,8 +234,7 @@ async def get_strategies(
     - Recommendations
     """
     try:
-        response = await routing_service.get_available_strategies()
-        return response
+        return await routing_service.get_available_strategies()
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -270,8 +264,7 @@ async def get_models(routing_service: MASRServiceDependency) -> ModelsListRespon
     - Capabilities and costs
     """
     try:
-        response = await routing_service.get_available_models()
-        return response
+        return await routing_service.get_available_models()
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -307,8 +300,7 @@ async def submit_feedback(
     - Enhance overall performance
     """
     try:
-        response = await routing_service.submit_feedback(feedback)
-        return response
+        return await routing_service.submit_feedback(feedback)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -352,8 +344,7 @@ async def get_status(routing_service: MASRServiceDependency) -> RouterStatus:
     - Active supervisor count
     """
     try:
-        response = await routing_service.get_router_status()
-        return response
+        return await routing_service.get_router_status()
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

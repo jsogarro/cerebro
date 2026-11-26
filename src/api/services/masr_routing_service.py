@@ -143,7 +143,6 @@ class MASRRoutingService:
             RoutingDecisionResponse with routing decision and allocations
         """
         try:
-            # Get routing decision
             decision = await self.router.route(
                 request.query, context=request.context, strategy=request.strategy
             )
@@ -154,7 +153,6 @@ class MASRRoutingService:
             # Store for feedback tracking
             self.routing_history[routing_id] = decision
 
-            # Convert to supervisor allocations
             supervisor_allocations = []
             if hasattr(decision.agent_allocation, "supervisors"):
                 for supervisor in decision.agent_allocation.supervisors:
@@ -183,7 +181,6 @@ class MASRRoutingService:
                     model_tier = ModelTier.STANDARD
             selected_models = self._get_model_info(model_tier)
 
-            # Calculate confidence score
             confidence_score = decision.confidence_score
 
             # Extract complexity from complexity_analysis
@@ -207,7 +204,6 @@ class MASRRoutingService:
             )
             domain = domains[0] if domains else QueryDomain.GENERAL
 
-            # Build response
             response = RoutingDecisionResponse(
                 routing_id=routing_id,
                 domain=domain,
@@ -223,14 +219,12 @@ class MASRRoutingService:
                 alternatives=self._get_alternatives(decision),
             )
 
-            # Update metrics
             strategy_val = decision.routing_strategy
             self._update_metrics(strategy_val, success=True)
 
             return response
 
         except Exception as e:
-            # Update metrics for failure
             if request.strategy:
                 self._update_metrics(request.strategy, success=False)
             raise e
@@ -247,10 +241,8 @@ class MASRRoutingService:
         Returns:
             CostEstimationResponse with detailed breakdown
         """
-        # Get routing decision for cost calculation
         decision = await self.router.route(request.query, strategy=request.strategy)
 
-        # Build breakdown if requested
         breakdown = None
         if request.include_breakdown:
             breakdown = CostBreakdown(
@@ -292,7 +284,7 @@ class MASRRoutingService:
             ModelTier.SPECIALIZED: 3.0,
             ModelTier.PREMIUM: 4.0,
         }
-        response = CostEstimationResponse(
+        return CostEstimationResponse(
             estimated_cost=decision.estimated_cost,
             breakdown=breakdown,
             confidence_score=decision.confidence_score,
@@ -307,8 +299,6 @@ class MASRRoutingService:
             },
             recommendations=recommendations,
         )
-
-        return response
 
     async def evaluate_strategies(
         self, request: StrategyEvaluationRequest
@@ -331,10 +321,8 @@ class MASRRoutingService:
         best_score = -1.0
 
         for strategy in strategies:
-            # Get routing decision for this strategy
             decision = await self.router.route(request.query, strategy=strategy)
 
-            # Calculate metrics
             cost = decision.estimated_cost
             quality = decision.estimated_quality
             latency_ms = decision.estimated_latency_ms
@@ -342,7 +330,6 @@ class MASRRoutingService:
             # Apply custom weights if provided
             weights = request.weights or {"cost": 0.3, "quality": 0.5, "latency": 0.2}
 
-            # Calculate recommendation score
             cost_score = 1.0 / (1.0 + cost)
             latency_score = 1.0 / (1.0 + latency_ms / 10000)
 
@@ -357,7 +344,6 @@ class MASRRoutingService:
                 best_score = recommendation_score
                 best_strategy = strategy
 
-            # Build comparison
             comparison = StrategyComparison(
                 strategy=strategy,
                 estimated_cost=cost,
@@ -369,18 +355,15 @@ class MASRRoutingService:
             )
             comparisons.append(comparison)
 
-        # Build response
         if best_strategy is None:
             best_strategy = RoutingStrategy.BALANCED
 
-        response = StrategyEvaluationResponse(
+        return StrategyEvaluationResponse(
             comparisons=comparisons,
             recommended_strategy=best_strategy,
             reasoning=self._generate_strategy_reasoning(best_strategy, comparisons),
             trade_offs=self._get_trade_offs(best_strategy),
         )
-
-        return response
 
     async def analyze_complexity(
         self, request: ComplexityAnalysisRequest
@@ -394,16 +377,12 @@ class MASRRoutingService:
         Returns:
             ComplexityAnalysisResponse with detailed analysis
         """
-        # Get routing decision
         decision = await self.router.route(request.query)
 
-        # Get analysis
         analysis = decision.complexity_analysis
 
-        # Calculate complexity score (0-1)
         complexity_score = self._calculate_complexity_score(analysis)
 
-        # Build features if requested
         features = None
         if request.include_features:
             domains = analysis.domains if hasattr(analysis, "domains") else []
@@ -433,16 +412,13 @@ class MASRRoutingService:
 
             complexity_level = ComplexityLevel.MODERATE
 
-        # Build response
-        response = ComplexityAnalysisResponse(
+        return ComplexityAnalysisResponse(
             complexity=complexity_level,
             complexity_score=complexity_score,
             features=features,
             recommended_approach=self._recommend_approach(analysis),
             routing_recommendations=routing_recommendations,
         )
-
-        return response
 
     async def submit_feedback(self, feedback: RoutingFeedback) -> dict[str, Any]:
         """
@@ -454,7 +430,6 @@ class MASRRoutingService:
         Returns:
             Acknowledgment response
         """
-        # Get original routing decision
         if feedback.routing_id not in self.routing_history:
             raise ValueError(f"Unknown routing ID: {feedback.routing_id}")
 
@@ -504,13 +479,11 @@ class MASRRoutingService:
             )
             strategies.append(available_strategy)
 
-        response = StrategiesListResponse(
+        return StrategiesListResponse(
             strategies=strategies,
             default_strategy=RoutingStrategy.BALANCED,
             total_count=len(strategies),
         )
-
-        return response
 
     async def get_available_models(self) -> ModelsListResponse:
         """
@@ -522,7 +495,6 @@ class MASRRoutingService:
         models = []
         tiers: dict[str, list[str]] = {}
 
-        # Get model configurations from settings
         model_configs = self._get_model_configurations()
 
         for config in model_configs:
@@ -544,14 +516,12 @@ class MASRRoutingService:
                 tiers[tier_name] = []
             tiers[tier_name].append(config["model_id"])
 
-        response = ModelsListResponse(
+        return ModelsListResponse(
             models=models,
             tiers=tiers,
             total_count=len(models),
             providers=list({m.provider for m in models}),
         )
-
-        return response
 
     async def get_router_status(self) -> RouterStatus:
         """
@@ -560,15 +530,12 @@ class MASRRoutingService:
         Returns:
             RouterStatus with health and metrics
         """
-        # Calculate uptime
         uptime = (datetime.now(UTC) - self.start_time).total_seconds()
 
-        # Calculate total routes
         _total_routes = sum(
             m["total_requests"] for m in self.performance_metrics.values()
         )
 
-        # Calculate average latency
         latencies = [
             m["average_latency_ms"]
             for m in self.performance_metrics.values()
@@ -576,7 +543,6 @@ class MASRRoutingService:
         ]
         avg_latency = sum(latencies) / len(latencies) if latencies else 0
 
-        # Calculate success rate
         success_rates = [
             m["success_rate"]
             for m in self.performance_metrics.values()
@@ -586,13 +552,10 @@ class MASRRoutingService:
             sum(success_rates) / len(success_rates) if success_rates else 1.0
         )
 
-        # Get active supervisors from bridge
         active_supervisors = getattr(self.bridge, "active_supervisor_count", 0)
 
-        # Check model availability
         model_availability = self._check_model_availability()
 
-        # Calculate total routes as int
         total_routes_int = int(
             sum(m["total_requests"] for m in self.performance_metrics.values())
         )
@@ -605,7 +568,7 @@ class MASRRoutingService:
 
         learning_metrics = await self.router.get_adaptive_status()
 
-        response = RouterStatus(
+        return RouterStatus(
             status=status,
             uptime_seconds=int(uptime),
             total_routes=total_routes_int,
@@ -627,10 +590,6 @@ class MASRRoutingService:
             last_error=None,
             last_error_time=None,
         )
-
-        return response
-
-    # Helper methods
 
     def _get_model_info(self, tier: ModelTier) -> list[ModelInfo]:
         """Get model information for a tier"""
@@ -717,7 +676,6 @@ class MASRRoutingService:
         """Update performance metrics from feedback"""
         metrics = self.performance_metrics[strategy.value]
 
-        # Update averages using exponential moving average
         alpha = 0.1
         metrics["average_cost"] = (
             alpha * feedback.actual_cost + (1 - alpha) * metrics["average_cost"]
@@ -731,7 +689,6 @@ class MASRRoutingService:
         )
 
     def _get_model_configurations(self) -> list[dict[str, Any]]:
-        """Get model configurations"""
         configs: list[dict[str, Any]] = [
             {
                 "provider": "deepseek",
@@ -866,7 +823,6 @@ class MASRRoutingService:
         return cons_map.get(strategy, [])
 
     def _get_strategy_description(self, strategy: RoutingStrategy) -> str:
-        """Get strategy description"""
         descriptions = {
             RoutingStrategy.COST_EFFICIENT: "Minimizes cost while maintaining acceptable quality",
             RoutingStrategy.QUALITY_FOCUSED: "Maximizes output quality regardless of cost",
@@ -940,7 +896,6 @@ class MASRRoutingService:
         reasoning = f"{strategy.value} strategy is recommended because it "
         reasoning += f"optimizes for {self._get_optimization_focus(strategy)}. "
 
-        # Add comparison insight
         best_comp = max(comparisons, key=lambda c: c.recommendation_score)
         reasoning += f"It scores {best_comp.recommendation_score:.2f} based on "
         reasoning += "weighted evaluation of cost, quality, and latency factors."

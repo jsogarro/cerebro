@@ -288,7 +288,6 @@ async def generate_report(
             session
         )
 
-        # Build report configuration
         config = ReportConfiguration(
             format=request.formats[0] if request.formats else ReportFormat.HTML,
             type=request.report_type,
@@ -338,7 +337,6 @@ async def generate_report(
             raise RuntimeError("Persisted report could not be reloaded")
         db_report = reloaded_report
 
-        # Add background task for generation
         background_tasks.add_task(
             _generate_report_task,
             generator,
@@ -392,7 +390,6 @@ async def get_report_statistics(
                 detail="Report storage service not available",
             )
 
-        # Get statistics from storage service
         stats = await storage_service.get_storage_statistics(
             organization_id=organization_id,
             user_id=authenticated_user_id,
@@ -455,7 +452,6 @@ async def get_report(
                 detail=f"Report {report_id} not found",
             )
 
-        # Update access statistics
         await storage_service.update_report_access(
             report_id,
             organization_id=organization_id,
@@ -522,7 +518,6 @@ async def download_report(
         extension = extensions.get(format_type, f".{format_type}")
         filename = f"report_{report_id}{extension}"
 
-        # Update access statistics
         await storage_service.update_report_access(
             report_id,
             organization_id=organization_id,
@@ -584,7 +579,6 @@ async def list_reports(
         )
         has_more = offset + len(reports) < total_count
 
-        # Convert to response models
         report_responses = [ReportResponse.from_db_report(report) for report in reports]
 
         return ReportListResponse(
@@ -625,7 +619,6 @@ async def search_reports(
                 detail="Report storage service not available",
             )
 
-        # Build search filters
         filters: dict[str, str | int | float] = {}
         if request.report_type:
             filters["report_type"] = str(request.report_type)

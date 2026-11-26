@@ -2196,7 +2196,6 @@ class DirectExecutionService:
                 f"Maximum concurrent executions ({self.max_concurrent_executions}) reached"
             )
 
-        # Create execution status
         execution_status = ExecutionStatus(
             execution_id=execution_id,
             project_id=str(project.id),
@@ -2546,7 +2545,6 @@ class DirectExecutionService:
                 execution_status.completed_at - execution_status.started_at
             ).total_seconds()
 
-            # Update average execution time
             if self.execution_stats["total_executions"] > 0:
                 current_avg = self.execution_stats["average_execution_time"]
                 total_executions = self.execution_stats["total_executions"]
@@ -2757,7 +2755,6 @@ class DirectExecutionService:
         return False
 
     async def list_active_executions(self) -> list[ExecutionStatus]:
-        """List all active executions."""
         return [
             execution
             for execution in self.active_executions.values()
@@ -2861,7 +2858,6 @@ class DirectExecutionService:
 
         components: dict[str, str] = {}
 
-        # Check MASR router health
         if self.masr_router:
             try:
                 masr_health = await self.masr_router.health_check()
@@ -2871,7 +2867,6 @@ class DirectExecutionService:
         else:
             components["masr_router"] = "unavailable"
 
-        # Check supervisor bridge health
         if self.supervisor_bridge:
             try:
                 bridge_health = await self.supervisor_bridge.health_check()
@@ -2883,7 +2878,6 @@ class DirectExecutionService:
         else:
             components["supervisor_bridge"] = "unavailable"
 
-        # Check supervisor factory health
         if self.supervisor_factory:
             try:
                 factory_health = await self.supervisor_factory.health_check()
@@ -2904,14 +2898,12 @@ class DirectExecutionService:
         else:
             overall_status = "unknown"
 
-        health = {
+        return {
             "status": overall_status,
             "components": components,
             "active_executions": len(self.active_executions),
             "service_stats": self.execution_stats,
         }
-
-        return health
 
     async def close(self) -> None:
         """Cancel background work owned by this exact service instance."""
