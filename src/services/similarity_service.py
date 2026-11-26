@@ -16,15 +16,18 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from structlog import get_logger
 
 from src.core.acquisition.sources import LicenseDeclaration, SourceLicense
 from src.core.config import settings
 from src.core.memory_encryption import document_cipher
 from src.core.untrusted_text import sanitize_model_field, strip_invisible
 from src.middleware.tenant_context import set_postgres_tenant_context
+from src.models.db.uploaded_document import UploadedDocument
+from src.models.db.user import User
 from src.repositories.similarity_repository import (
     ATTRIBUTION_RANK,
     EgressRecord,
@@ -51,6 +54,8 @@ from src.services.text_reuse.types import (
     ReuseBudget,
 )
 from src.services.text_reuse.verbatim import author_key, find_verbatim_reuse
+
+logger = get_logger()
 
 SIMILARITY_PER_WORKER_CONCURRENCY = 1
 SIMILARITY_PER_USER_DAILY = 10
@@ -413,7 +418,10 @@ class _Run:
             event.bytes_received,
             event.duration_ms,
         )
+        last_error = None
         for check_id in (job.check_id, None):
+            if check_id is None and not await self._user_exists():
+                break
             async with self._session_factory() as session:
                 await set_postgres_tenant_context(session, str(job.organization_id))
                 try:
@@ -424,12 +432,23 @@ class _Run:
                         user_id=job.user_id,
                     )
                     await session.commit()
-                except IntegrityError:
+                except IntegrityError as exc:
                     await session.rollback()
+                    last_error = type(exc).__name__
                     continue
             if check_id is None:
                 raise asyncio.CancelledError
             return
+        logger.warning("egress_audit_lost", error_type=last_error or "user_erased")
+        raise asyncio.CancelledError
+
+    async def _user_exists(self) -> bool:
+        """An erased user must not get a fresh audit row from a job still running."""
+        async with self._session_factory() as session:
+            found = await session.scalar(
+                select(User.id).where(User.id == self._job.user_id)
+            )
+        return found is not None
 
     async def _open_sources(self, body: str, sources: _Sources) -> _Retrieved:
         rows = {origin: _blank_row() for origin in ORIGINS}
@@ -539,12 +558,34 @@ def make_persist(
     *, check_id: uuid.UUID, organization_id: uuid.UUID, user_id: uuid.UUID
 ) -> Callable[[AsyncSession, RunResult], Awaitable[Outcome]]:
     async def persist(session: AsyncSession, result: RunResult) -> Outcome:
+        wanted = {m.source_document_id for m in result.matches if m.source_document_id}
+        live = set(
+            (
+                await session.scalars(
+                    select(UploadedDocument.id).where(UploadedDocument.id.in_(wanted))
+                )
+            )
+            if wanted
+            else ()
+        )
+        gone = wanted - live
+        kept = [m for m in result.matches if m.source_document_id not in gone]
+        coverage, status = result.coverage, result.status
+        if gone:
+            # A source deleted during the run takes only its own results with it.
+            reasons = sorted({*coverage["partial_reasons"], "source_unavailable"})
+            coverage = {
+                **coverage,
+                "unavailable_sources": coverage["unavailable_sources"] + len(gone),
+                "partial_reasons": reasons,
+            }
+            status = "partial"
         await SimilarityRepository(session, document_cipher()).add_matches(
             check_id=check_id,
             organization_id=organization_id,
             user_id=user_id,
-            matches=result.matches,
+            matches=kept,
         )
-        return result.status, {"coverage": result.coverage}
+        return status, {"coverage": coverage}
 
     return persist

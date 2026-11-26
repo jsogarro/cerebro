@@ -726,6 +726,7 @@ async def test_audit_survives_a_deleted_check_and_the_run_stops(
         await real(self, event, check_id=None, **owner)
 
     monkeypatch.setattr(SimilarityRepository, "add_egress", fk_fails_for_a_linked_row)
+    await seed_user(factory)
     sent = []
 
     async def retrieve(text: str, **kwargs: Any) -> Any:
@@ -845,3 +846,139 @@ async def test_a_queued_run_that_fails_releases_every_ledger_row_it_reserved(
     )
     assert ran == []
     assert await count(factory, UsageLedger) == 0
+
+
+async def test_open_sources_need_the_terms_date_at_run_time_too(
+    factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.core.config import settings
+
+    retrieve, calls = stub_retrieve()
+    target = await make_document(factory)
+    monkeypatch.setattr(settings, "PROVIDER_TERMS_VERIFIED_ON", "")
+    _, view = await run_check(
+        factory, target, options={"open_sources": True}, retrieve=retrieve
+    )
+    assert calls == []
+    assert view.coverage["sources_searched"]["openalex"]["failures"] == {
+        "open_sources_disabled": 1
+    }
+
+
+async def test_the_total_cap_keeps_the_longest_matches_not_the_first(
+    factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(service, "MAX_MATCHES_PER_CHECK", 1)
+    short = " ".join(f"s{i}" for i in range(13))
+    long = " ".join(f"l{i}" for i in range(30))
+    target = await make_document(factory, text=f"{short} filler-word-here {long}")
+    retrieve, _ = stub_retrieve(
+        (candidate("W1", text=short), candidate("W2", text=long)),
+        openalex=SourceCoverage(candidates=2),
+    )
+    _, view = await run_check(
+        factory, target, options={"open_sources": True}, retrieve=retrieve
+    )
+    assert [m.tokens for m in view.matches] == [30]
+
+
+async def test_a_source_deleted_mid_run_drops_only_its_matches(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    from src.models.db.uploaded_document import UploadedDocument
+
+    target = await make_document(factory)
+    gone = await make_document(factory, text=other_text("gg"), filename="gone.txt")
+    kept = await make_document(factory, text=other_text("kk"), filename="kept.txt")
+
+    def delete_after(work: Any) -> Any:
+        async def run() -> Any:
+            result = await work()
+            async with factory() as session:
+                row = await session.get(UploadedDocument, gone)
+                assert row is not None
+                await session.delete(row)
+                await session.commit()
+            return result
+
+        return run
+
+    _, view = await run_check(
+        factory,
+        target,
+        options={"comparison_document_ids": [str(gone), str(kept)]},
+        work_wrapper=delete_after,
+    )
+    assert [m.source_title for m in view.matches] == ["kept.txt"]
+    assert view.status == "partial"
+    assert "source_unavailable" in view.coverage["partial_reasons"]
+
+
+async def test_an_audit_row_that_cannot_be_written_stops_the_run_and_logs_the_type(
+    factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import structlog
+    from sqlalchemy.exc import IntegrityError
+
+    async def always(self: object, *args: object, **kwargs: object) -> None:
+        raise IntegrityError("INSERT", {}, Exception("nope"))
+
+    monkeypatch.setattr(SimilarityRepository, "add_egress", always)
+    await seed_user(factory)
+    retrieve, _ = stub_retrieve(events=(EgressEvent("arxiv.org", "pdf", 0, 200, 1, 1),))
+    target = await make_document(factory)
+    _check_id, go = await start_check(
+        factory, target, options={"open_sources": True}, retrieve=retrieve
+    )
+    with (
+        structlog.testing.capture_logs() as captured,
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await go()
+    assert any(
+        e.get("event") == "egress_audit_lost"
+        and e.get("error_type") == "IntegrityError"
+        for e in captured
+    )
+
+
+async def test_no_audit_row_is_recreated_for_an_erased_user(
+    factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    real = SimilarityRepository.add_egress
+
+    async def check_gone(
+        self: SimilarityRepository, event: Any, *, check_id: Any, **owner: Any
+    ) -> None:
+        if check_id is not None:
+            raise IntegrityError("INSERT", {}, Exception("check gone"))
+        await real(self, event, check_id=None, **owner)
+
+    monkeypatch.setattr(SimilarityRepository, "add_egress", check_gone)
+    retrieve, _ = stub_retrieve(events=(EgressEvent("arxiv.org", "pdf", 0, 200, 1, 1),))
+    target = await make_document(factory)
+    _, go = await start_check(
+        factory, target, options={"open_sources": True}, retrieve=retrieve
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await go()
+    async with factory() as session:
+        rows = (await session.execute(select(EgressRow))).scalars().all()
+    assert rows == []
+
+
+async def seed_user(factory: async_sessionmaker[AsyncSession]) -> None:
+    from src.models.db.user import User
+
+    async with factory() as session:
+        session.add(
+            User(
+                id=USER_A,
+                email="a@example.com",
+                username="user-a",
+                hashed_password="x",
+            )
+        )
+        await session.commit()

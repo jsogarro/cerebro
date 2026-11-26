@@ -158,7 +158,26 @@ def _match_lines(number: int, m: MatchView, text: str) -> list[str]:
     return lines
 
 
+def _failed_report(check: CheckView) -> str:
+    reason = f" ({check.status_reason})" if check.status_reason else ""
+    return "\n".join(
+        [
+            "Text similarity report",
+            f"Status: failed{reason}",
+            "",
+            f"This check failed{reason} before it finished, so it says nothing about "
+            "the document: no sources were searched to completion and no comparison "
+            "is reported.",
+            "",
+            FOOTER,
+            "",
+        ]
+    )
+
+
 def render_report(check: CheckView, document_text: str) -> str:
+    if check.status == "failed":
+        return _failed_report(check)
     sources = _source_count(check)
     lines = [
         "Text similarity report",

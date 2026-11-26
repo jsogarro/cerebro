@@ -412,3 +412,27 @@ def test_an_unavailable_uploaded_source_says_so_instead_of_naming_a_licence():
     text = render_report(check(gone), DOC)
     assert "excerpt withheld: the uploaded document is no longer available" in text
     assert "licence" not in text.split("Matches", 1)[1]
+
+
+def test_a_failed_check_says_it_failed_and_claims_nothing_about_coverage():
+    failed = CheckView(
+        **{
+            **vars(check()),
+            "status": "failed",
+            "status_reason": "deadline_exceeded",
+            "coverage": {},
+            "matches": (),
+            "match_total": 0,
+        }
+    )
+    full = render_report(failed, DOC)
+    assert "This check failed (deadline_exceeded)" in full
+    assert full.rstrip().endswith("not a finding of misconduct.")
+    text = full.replace(report.FOOTER, "")
+    for claim in (
+        "No matching text was found",
+        "sources searched",
+        "references were compared",
+        "Excluded regions",
+    ):
+        assert claim not in text

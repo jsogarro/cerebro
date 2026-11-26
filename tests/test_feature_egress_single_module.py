@@ -12,6 +12,11 @@ FEATURE_FILES = [
     *sorted((SRC / "services").glob("document_*.py")),
     *sorted((SRC / "services").glob("critique*.py")),
     *sorted((SRC / "services").glob("similarity*.py")),
+    *sorted((SRC / "repositories").glob("*similarity*.py")),
+    *sorted((SRC / "repositories").glob("*document*.py")),
+    *sorted((SRC / "api" / "routes").glob("similarity*.py")),
+    SRC / "api" / "routes" / "documents.py",
+    SRC / "api" / "routes" / "critiques.py",
     OWNER,
 ]
 NETWORK_ROOTS = {"httpx", "requests", "aiohttp", "socket"}

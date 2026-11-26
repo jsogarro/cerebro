@@ -847,3 +847,77 @@ async def test_a_committed_check_always_gets_its_task_even_if_the_client_leaves(
             (await session.execute(select(SimilarityCheck.status))).scalars().all()
         )
     assert "queued" not in statuses
+
+
+USER_C = uuid.uuid4()
+
+
+async def test_another_user_of_the_same_organisation_cannot_touch_a_check(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    document_id = await make_document(factory)
+    check_id = await run_to_end(client, document_id)
+    Caller.user, Caller.org = USER_C, ORG_A
+    for method, url in (
+        ("GET", checks_url(document_id)),
+        ("POST", checks_url(document_id)),
+        ("GET", f"/api/v1/similarity-checks/{check_id}"),
+        ("GET", f"/api/v1/similarity-checks/{check_id}/report"),
+        ("DELETE", f"/api/v1/similarity-checks/{check_id}"),
+    ):
+        response = await client.request(
+            method, url, json={} if method == "POST" else None
+        )
+        assert response.status_code == 404, (method, url)
+    Caller.user, Caller.org = USER_A, ORG_A
+    assert (
+        await client.get(f"/api/v1/similarity-checks/{check_id}")
+    ).status_code == 200
+
+
+async def test_the_repository_never_returns_another_users_check(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    from src.core.memory_encryption import document_cipher
+    from src.repositories.similarity_repository import SimilarityRepository
+
+    document_id = await make_document(factory)
+    _, run = None, None
+    check_id = None
+    async with factory() as session:
+        from src.repositories.similarity_repository import NewCheck
+
+        row = await SimilarityRepository(session, document_cipher()).create(
+            NewCheck(document_id, ORG_A, USER_A, {}, {})
+        )
+        await session.commit()
+        check_id = row.id
+    async with factory() as session:
+        repo = SimilarityRepository(session, document_cipher())
+        assert await repo.get(check_id, organization_id=ORG_A, user_id=USER_C) is None
+        assert (
+            await repo.list_for_document(
+                document_id, organization_id=ORG_A, user_id=USER_C
+            )
+            == []
+        )
+        assert not await repo.delete(check_id, organization_id=ORG_A, user_id=USER_C)
+    assert _ == run
+
+
+async def test_a_document_deleted_before_the_check_row_is_written_is_a_404(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    from src.repositories.similarity_repository import SimilarityRepository
+
+    async def foreign_key_violation(self: object, new: object) -> None:
+        raise IntegrityError("INSERT", {}, Exception("document gone"))
+
+    monkeypatch.setattr(SimilarityRepository, "create", foreign_key_violation)
+    document_id = await make_document(factory)
+    assert (await start(client, document_id)).status_code == 404
+    assert await count(factory, UsageLedger) == 0

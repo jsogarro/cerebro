@@ -15,6 +15,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
@@ -429,21 +430,24 @@ async def _schedule(
         "open_sources": open_sources,
         "semantic": body.semantic,
     }
-    row = await _repository(scope.session).create(
-        NewCheck(
-            document_id=document_id,
-            organization_id=ids.organization_id,
-            user_id=ids.user_id,
-            options=options,
-            policy_versions=service.policy_versions(),
-            consent_text_version=(
-                service.SIMILARITY_CONSENT_TEXT_VERSION if open_sources else None
-            ),
-            consent_text_sha256=service.consent_sha256() if open_sources else None,
-            ledger_id=ledger_id,
-            open_sources_ledger_id=open_sources_ledger_id,
-        )
+    new_check = NewCheck(
+        document_id=document_id,
+        organization_id=ids.organization_id,
+        user_id=ids.user_id,
+        options=options,
+        policy_versions=service.policy_versions(),
+        consent_text_version=(
+            service.SIMILARITY_CONSENT_TEXT_VERSION if open_sources else None
+        ),
+        consent_text_sha256=service.consent_sha256() if open_sources else None,
+        ledger_id=ledger_id,
+        open_sources_ledger_id=open_sources_ledger_id,
     )
+    try:
+        row = await _repository(scope.session).create(new_check)
+    except IntegrityError:
+        # The document was deleted after the ownership check; nothing was committed.
+        raise _missing() from None
     job = service.CheckJob(
         row.id, document_id, ids.organization_id, ids.user_id, options
     )
