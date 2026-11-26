@@ -262,3 +262,74 @@ async def test_an_upload_in_flight_during_erasure_does_not_survive_it(
         assert left == 0
     finally:
         await engine.dispose()
+
+
+async def test_the_purge_works_for_a_non_owner_role_under_rls_and_leaves_no_poison(
+    migrated: str,
+) -> None:
+    from datetime import UTC, datetime
+
+    from src.repositories.uploaded_document_repository import (
+        UploadedDocumentRepository,
+    )
+
+    engine = create_async_engine(
+        migrated.replace("postgresql://", "postgresql+asyncpg://")
+    )
+    try:
+        async with engine.begin() as setup:
+            await setup.execute(
+                text(
+                    "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE "
+                    "rolname = 'doc_app') THEN CREATE ROLE doc_app NOLOGIN; END IF; END $$"
+                )
+            )
+            await setup.execute(
+                text(
+                    "GRANT SELECT, INSERT, UPDATE, DELETE ON uploaded_documents, "
+                    "usage_ledger, users TO doc_app"
+                )
+            )
+            user_id = await _insert_user(setup)
+            await _insert_document(setup, usr=user_id)
+            await _insert_document(setup, usr=user_id)
+            await setup.execute(
+                text(
+                    "UPDATE uploaded_documents SET expires_at = now() + interval '1 day' "
+                    "WHERE id = (SELECT id FROM uploaded_documents WHERE user_id = :u LIMIT 1)"
+                ),
+                {"u": user_id},
+            )
+
+        async with engine.connect() as connection:
+            await connection.execute(text("SET ROLE doc_app"))
+            await connection.commit()
+            # A request transaction sets the tenant and ends, leaving the GUC empty.
+            async with connection.begin():
+                await connection.execute(
+                    text("SELECT set_config('app.current_org_id', :o, true)"),
+                    {"o": str(uuid.uuid4())},
+                )
+            async with connection.begin():
+                await connection.execute(
+                    text("SELECT count(*) FROM uploaded_documents")
+                )
+            async with AsyncSession(bind=connection) as session:
+                purged = await UploadedDocumentRepository(session, None).purge_expired(
+                    datetime.now(UTC)
+                )
+                await session.commit()
+            assert purged == 1
+            await connection.execute(text("RESET ROLE"))
+            await connection.commit()
+            left = await connection.scalar(
+                text("SELECT count(*) FROM uploaded_documents WHERE user_id = :u"),
+                {"u": user_id},
+            )
+            assert left == 1
+        async with engine.begin() as cleanup:
+            await cleanup.execute(
+                text("DELETE FROM users WHERE id = :u"), {"u": user_id}
+            )
+    finally:
+        await engine.dispose()

@@ -30,6 +30,13 @@ from src.services.document_ingestion import (
 )
 from tests.test_document_ingestion import _pdf
 
+
+@pytest.fixture(autouse=True)
+def _fresh_extraction_slot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A contended semaphore binds to one event loop; each test has its own."""
+    monkeypatch.setattr(di, "_EXTRACT_SLOTS", asyncio.Semaphore(1))
+
+
 linux_only = pytest.mark.skipif(sys.platform != "linux", reason="needs Linux rlimits")
 PREAMBLE = (
     "import ctypes, os, pathlib, resource, sys, time\n"
@@ -328,3 +335,50 @@ async def test_only_one_extraction_runs_at_a_time(tmp_path: Path) -> None:
     started = time.monotonic()
     await asyncio.gather(_run(argv), _run(argv))
     assert time.monotonic() - started >= 1.9
+
+
+async def test_waiting_for_the_slot_counts_against_the_deadline(
+    tmp_path: Path,
+) -> None:
+    slow = _script(tmp_path, "time.sleep(3)\n")
+    holder = asyncio.create_task(_run(slow, timeout=30))
+    await asyncio.sleep(0.5)
+    started = time.monotonic()
+    assert await _code(_run(slow, timeout=1)) == "extraction_busy"
+    assert time.monotonic() - started < 2
+    await holder
+
+
+@pytest.mark.parametrize("breaks", ["extraction", "reply"])
+def test_running_out_of_memory_anywhere_exits_with_the_memory_code(
+    monkeypatch: pytest.MonkeyPatch, breaks: str
+) -> None:
+    monkeypatch.setattr(extract_child, "_limit_self", lambda: None)
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"")))
+    if breaks == "extraction":
+        monkeypatch.setattr(
+            extract_child.pdf_text,
+            "extract_pdf_text",
+            lambda *a, **k: _raise(MemoryError),
+        )
+    else:
+        monkeypatch.setattr(
+            extract_child.pdf_text,
+            "extract_pdf_text",
+            lambda *a, **k: extract_child.pdf_text.ExtractedText(
+                text="t",
+                pages=(extract_child.pdf_text.PageSpan(1, 0, 1),),
+                text_sha256="0" * 64,
+                source_sha256="0" * 64,
+            ),
+        )
+        monkeypatch.setattr(
+            extract_child.json, "dumps", lambda *a, **k: _raise(MemoryError)
+        )
+    with pytest.raises(SystemExit) as caught:
+        extract_child.main(["300", "2000000"])
+    assert caught.value.code == extract_child.EXIT_MEMORY
+
+
+def _raise(error: type[BaseException]) -> None:
+    raise error

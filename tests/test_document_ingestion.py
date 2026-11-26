@@ -631,3 +631,39 @@ async def test_page_and_extractor_metadata_are_stored(
     text_row = await _ingest(session, b"t")
     assert text_row.page_count is None
     assert text_row.extractor_version.startswith("text-utf8/")
+
+
+async def test_the_character_cap_applies_after_normalization(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "DOCUMENT_MAX_CHARS", 10)
+    expands = "\u0958" * 8  # 8 characters that normalize to 16
+    assert await _code(_ingest(session, expands.encode())) == "too_much_text"
+
+
+@pytest.mark.parametrize("removed", [10**30, 21 << 20])
+def test_an_absurd_removed_count_in_a_reply_is_malformed(removed: int) -> None:
+    with pytest.raises(DocumentIngestionError) as caught:
+        di._parse_reply(_reply(invisible_chars_removed=removed))
+    assert caught.value.code == "malformed_pdf"
+
+
+async def test_reply_verification_runs_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    seen: list[int] = []
+    real = di._parse_reply
+
+    def spy(raw: bytes) -> object:
+        seen.append(threading.get_ident())
+        return real(raw)
+
+    async def fake_child(*_: object, **__: object) -> bytes:
+        return _reply(source_sha256=snapshot_digest(b"%PDF-1.7"))
+
+    monkeypatch.setattr(di, "_parse_reply", spy)
+    monkeypatch.setattr(di, "_run_child", fake_child)
+    await extract_pdf_sandboxed(b"%PDF-1.7")
+    assert seen and seen[0] != threading.get_ident()

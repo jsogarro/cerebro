@@ -2,8 +2,9 @@
 
 Run as ``python -I -B -m src.core.acquisition.extract_child <max_pages>
 <max_chars>`` with the PDF bytes on stdin and a scrubbed environment; the
-reply is one JSON line on stdout. It imports only the standard library, the
-extractor and ``untrusted_text`` so a parser bug has no application code,
+reply is one JSON line on stdout. It imports the standard library, the
+extractor and ``untrusted_text`` (plus what those import, pydantic and
+``src.core.contracts``) so a parser bug has no application code,
 settings or credentials to reach.
 
 The child bounds hangs, CPU, memory and output and receives no secrets in its
@@ -83,6 +84,10 @@ def _error_code(error: Exception) -> str:
 
 
 def main(argv: list[str]) -> None:
+    guarded(lambda: _extract(argv))
+
+
+def _extract(argv: list[str]) -> None:
     _limit_self()
     max_pages, max_chars = int(argv[0]), int(argv[1])
     removed = 0

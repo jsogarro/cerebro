@@ -195,13 +195,14 @@ async def test_list_recent_is_newest_first_by_creation_time(
     repo = UploadedDocumentRepository(session, cipher)
     ids = [await _create(repo) for _ in range(3)]
     for position, doc_id in enumerate(ids):
-        await session.execute(
+        updated = await session.execute(
             text("UPDATE uploaded_documents SET created_at = :at WHERE id = :id"),
             {
                 "at": datetime(2026, 1, 1 + position, tzinfo=UTC),
-                "id": str(doc_id).replace("-", ""),
+                "id": str(doc_id),
             },
         )
+        assert updated.rowcount == 1  # type: ignore[attr-defined]
     listed = [
         m.id for m in await repo.list_recent(organization_id=ORG_A, user_id=USER_A)
     ]
@@ -246,3 +247,17 @@ async def test_create_refuses_a_missing_identity(
 ) -> None:
     with pytest.raises(MissingOrganizationContextError):
         await _create(UploadedDocumentRepository(session, cipher), org=org, user=user)  # type: ignore[arg-type]
+
+
+async def test_expired_documents_are_not_readable_before_the_sweep(
+    session: AsyncSession, cipher: MemoryEncryption
+) -> None:
+    repo = UploadedDocumentRepository(session, cipher)
+    gone = await _create(repo, expires_at=datetime.now(UTC) - timedelta(seconds=1))
+    kept = await _create(repo, expires_at=datetime.now(UTC) + timedelta(days=1))
+    assert await repo.get_meta(gone, organization_id=ORG_A, user_id=USER_A) is None
+    assert await repo.get_text(gone, organization_id=ORG_A, user_id=USER_A) is None
+    listed = [
+        m.id for m in await repo.list_recent(organization_id=ORG_A, user_id=USER_A)
+    ]
+    assert listed == [kept]

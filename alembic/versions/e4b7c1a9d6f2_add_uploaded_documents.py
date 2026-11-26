@@ -24,6 +24,8 @@ TENANT_TABLES = ("uploaded_documents", "usage_ledger")
 
 
 def _enable_tenant_rls() -> None:
+    # NULLIF: after a transaction that set the tenant ends, the setting reads
+    # back as '' and a bare ::uuid cast would fail every later query.
     for table in TENANT_TABLES:
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         op.execute(
@@ -31,7 +33,22 @@ def _enable_tenant_rls() -> None:
             CREATE POLICY tenant_isolation_{table}
             ON {table}
             USING (
-                organization_id = current_setting('app.current_org_id', true)::uuid
+                organization_id
+                = NULLIF(current_setting('app.current_org_id', true), '')::uuid
+            )
+            """
+        )
+    # The retention sweep is system-wide, so it cannot name one tenant. It may
+    # delete only expired rows, and only after announcing itself.
+    # DELETE ... WHERE also needs the rows to be visible, hence both commands.
+    for command in ("SELECT", "DELETE"):
+        op.execute(
+            f"""
+            CREATE POLICY purge_expired_{command.lower()}_uploaded_documents
+            ON uploaded_documents FOR {command}
+            USING (
+                expires_at <= now()
+                AND current_setting('app.purge_expired', true) = 'on'
             )
             """
         )
@@ -121,6 +138,11 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Drop the policies, then the tables."""
     if op.get_bind().dialect.name == "postgresql":
+        for command in ("select", "delete"):
+            op.execute(
+                f"DROP POLICY IF EXISTS purge_expired_{command}_uploaded_documents "
+                "ON uploaded_documents"
+            )
         for table in TENANT_TABLES:
             op.execute(f"DROP POLICY IF EXISTS tenant_isolation_{table} ON {table}")
     op.drop_table("usage_ledger")

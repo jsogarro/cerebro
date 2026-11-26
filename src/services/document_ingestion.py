@@ -11,6 +11,7 @@ import signal
 import sys
 import unicodedata
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, cast
 
@@ -43,13 +44,17 @@ __all__ = [
     "DocumentIngestionError",
     "document_cipher",
     "extract_pdf_sandboxed",
+    "extract_upload",
     "ingest",
     "require_document_key",
     "sniff_media_type",
+    "store_document",
 ]
 
 _CHILD_ENV: Final = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
 _STDOUT_SLACK = 1 << 20
+# One extraction per process keeps at most one parser child alive per worker.
+# That limit belongs to the sandbox plan and may change with its approval.
 _EXTRACT_SLOTS = asyncio.Semaphore(1)
 _DECLARED_TYPES = {
     "application/pdf": "pdf",
@@ -152,26 +157,34 @@ def _raise_for_exit(returncode: int | None) -> None:
 async def _run_child(
     argv_tail: list[str], data: bytes, *, timeout: float, max_out: int
 ) -> bytes:
-    """Run one child to completion; always kill and reap it."""
-    async with _EXTRACT_SLOTS:
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            *argv_tail,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            env=_CHILD_ENV,
-        )
-        try:
-            async with asyncio.timeout(timeout):
+    """Run one child to completion; always kill and reap it.
+
+    The deadline covers the wait for the extraction slot too, so a queue of
+    slow documents is refused as ``extraction_busy`` instead of waiting
+    unbounded.
+    """
+    proc: asyncio.subprocess.Process | None = None
+    try:
+        async with asyncio.timeout(timeout), _EXTRACT_SLOTS:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                *argv_tail,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                env=_CHILD_ENV,
+            )
+            try:
                 out = await _exchange(proc, data, max_out)
                 await proc.wait()
-        except TimeoutError:
-            raise DocumentIngestionError("extraction_timeout") from None
-        finally:
-            if proc.returncode is None:
-                proc.kill()
-            await asyncio.shield(proc.wait())
+            finally:
+                if proc.returncode is None:
+                    proc.kill()
+                await asyncio.shield(proc.wait())
+    except TimeoutError:
+        raise DocumentIngestionError(
+            "extraction_busy" if proc is None else "extraction_timeout"
+        ) from None
     _raise_for_exit(proc.returncode)
     return out
 
@@ -185,7 +198,7 @@ def _verify_reply(reply: Any) -> tuple[ExtractedText, int]:
         type(text) is not str
         or not 0 < len(text) <= settings.DOCUMENT_MAX_CHARS
         or type(removed) is not int
-        or removed < 0
+        or not 0 <= removed <= settings.DOCUMENT_MAX_BYTES
         or reply["text_sha256"] != snapshot_digest(text.encode("utf-8"))
     ):
         raise ValueError("child reply failed verification")
@@ -242,7 +255,7 @@ async def extract_pdf_sandboxed(data: bytes) -> tuple[ExtractedText, int]:
         timeout=settings.DOCUMENT_EXTRACT_TIMEOUT_S,
         max_out=settings.DOCUMENT_MAX_CHARS * 6 + _STDOUT_SLACK,
     )
-    extracted, removed = _parse_reply(raw_reply)
+    extracted, removed = await asyncio.to_thread(_parse_reply, raw_reply)
     if extracted.source_sha256 != snapshot_digest(data):
         raise DocumentIngestionError("malformed_pdf")
     return extracted, removed
@@ -254,6 +267,8 @@ def _extract_text(raw: bytes) -> tuple[ExtractedText, int]:
         raise DocumentIngestionError("too_much_text")
     text, removed = strip_invisible(decoded)
     text = _normalize(text)
+    if len(text) > settings.DOCUMENT_MAX_CHARS:
+        raise DocumentIngestionError("too_much_text")
     if not text:
         raise DocumentIngestionError("no_text")
     return (
@@ -295,6 +310,79 @@ async def _extract(
     return media_type, extracted, removed, f"text-utf8/normalizer-{NORMALIZER_VERSION}"
 
 
+@dataclass(frozen=True)
+class PreparedDocument:
+    """A validated, extracted upload that has not touched the database."""
+
+    media_type: str
+    extracted: ExtractedText
+    removed: int
+    version: str
+    filename: str
+    authors: list[str]
+    size: int
+
+
+async def extract_upload(
+    raw: bytes,
+    declared_media_type: str,
+    filename: str,
+    declared_authors: list[str],
+) -> PreparedDocument:
+    """Validate and extract an upload; needs no database connection."""
+    document_cipher()
+    try:
+        authors = _clean_authors(declared_authors)
+        media_type, extracted, removed, version = await _extract(
+            raw, declared_media_type
+        )
+    except DocumentIngestionError as error:
+        logger.warning("document_rejected", code=error.code, size=len(raw))
+        raise
+    return PreparedDocument(
+        media_type,
+        extracted,
+        removed,
+        version,
+        _clean_filename(filename),
+        authors,
+        len(raw),
+    )
+
+
+async def store_document(
+    session: AsyncSession,
+    prepared: PreparedDocument,
+    *,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> UploadedDocument:
+    """Encrypt and persist a prepared upload for its owner."""
+    row = await UploadedDocumentRepository(session, document_cipher()).create(
+        organization_id=organization_id,
+        user_id=user_id,
+        filename=prepared.filename,
+        media_type=prepared.media_type,
+        extracted=prepared.extracted,
+        extractor_version=prepared.version,
+        invisible_chars_removed=prepared.removed,
+        declared_authors=prepared.authors,
+        expires_at=datetime.now(UTC) + timedelta(days=settings.DOCUMENT_RETENTION_DAYS),
+        page_count=len(prepared.extracted.pages)
+        if prepared.media_type == "pdf"
+        else None,
+    )
+    logger.info(
+        "document_ingested",
+        document_id=str(row.id),
+        media_type=prepared.media_type,
+        size=prepared.size,
+        chars=row.char_count,
+        invisible_chars_removed=prepared.removed,
+    )
+    return row
+
+
 async def ingest(
     raw: bytes,
     declared_media_type: str,
@@ -306,36 +394,9 @@ async def ingest(
     session: AsyncSession,
 ) -> UploadedDocument:
     """Validate, extract, encrypt and store one upload for its owner."""
-    cipher = document_cipher()
-    started = datetime.now(UTC)
-    try:
-        authors = _clean_authors(declared_authors)
-        media_type, extracted, removed, version = await _extract(
-            raw, declared_media_type
-        )
-    except DocumentIngestionError as error:
-        logger.warning("document_rejected", code=error.code, size=len(raw))
-        raise
-
-    row = await UploadedDocumentRepository(session, cipher).create(
-        organization_id=organization_id,
-        user_id=user_id,
-        filename=_clean_filename(filename),
-        media_type=media_type,
-        extracted=extracted,
-        extractor_version=version,
-        invisible_chars_removed=removed,
-        declared_authors=authors,
-        expires_at=started + timedelta(days=settings.DOCUMENT_RETENTION_DAYS),
-        page_count=len(extracted.pages) if media_type == "pdf" else None,
+    prepared = await extract_upload(
+        raw, declared_media_type, filename, declared_authors
     )
-    logger.info(
-        "document_ingested",
-        document_id=str(row.id),
-        media_type=media_type,
-        size=len(raw),
-        chars=row.char_count,
-        invisible_chars_removed=removed,
-        duration_ms=int((datetime.now(UTC) - started).total_seconds() * 1000),
+    return await store_document(
+        session, prepared, organization_id=organization_id, user_id=user_id
     )
-    return row

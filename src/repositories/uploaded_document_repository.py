@@ -9,10 +9,10 @@ decrypted.
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
 
-from sqlalchemy import Select, delete, select
+from sqlalchemy import Select, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
@@ -128,7 +128,10 @@ class UploadedDocumentRepository:
         *,
         body: bool = False,
     ) -> UploadedDocument | None:
-        query = select(UploadedDocument).where(UploadedDocument.id == document_id)
+        query = select(UploadedDocument).where(
+            UploadedDocument.id == document_id,
+            UploadedDocument.expires_at > datetime.now(UTC),
+        )
         if not body:
             query = query.options(*_BODY_COLUMNS)
         query = self._owned(query, org, user)
@@ -158,6 +161,7 @@ class UploadedDocumentRepository:
     ) -> list[DocumentMeta]:
         query = self._owned(
             select(UploadedDocument)
+            .where(UploadedDocument.expires_at > datetime.now(UTC))
             .options(*_BODY_COLUMNS)
             .order_by(UploadedDocument.created_at.desc())
             .limit(max(1, min(limit, MAX_LIST))),
@@ -178,7 +182,15 @@ class UploadedDocumentRepository:
         return True
 
     async def purge_expired(self, now: datetime) -> int:
-        """Delete every expired document across all owners."""
+        """Delete every expired document across all owners.
+
+        On Postgres the row policy admits this only when the transaction says
+        it is the sweep, and then only for expired rows.
+        """
+        if self._session.get_bind().dialect.name == "postgresql":
+            await self._session.execute(
+                text("SELECT set_config('app.purge_expired', 'on', true)")
+            )
         result = await self._session.execute(
             delete(UploadedDocument).where(UploadedDocument.expires_at <= now)
         )
