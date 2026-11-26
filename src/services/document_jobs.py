@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, TypeVar
 
 from sqlalchemy import Table, func, select, text, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
@@ -233,7 +233,7 @@ async def _fail(
                 completed_at=datetime.now(UTC),
             )
             await session.commit()
-    except Exception as exc:
+    except (SQLAlchemyError, OSError) as exc:
         logger.warning(
             "document_job_fail_write", job_id=str(job_id), error_type=type(exc).__name__
         )
@@ -338,17 +338,18 @@ async def run_job(
             await _finish(
                 session_factory, table, job_id, organization_id, result, persist
             )
-    except asyncio.CancelledError:
-        await fail(expected="running", reason="interrupted")
-        raise
-    except Exception as exc:
+    except (asyncio.CancelledError, Exception) as exc:
+        cancelled = isinstance(exc, asyncio.CancelledError)
+        reason = "interrupted" if cancelled else "internal_error"
         logger.warning(
             "document_job_failed",
             job_id=str(job_id),
-            reason="internal_error",
+            reason=reason,
             error_type=type(exc).__name__,
         )
-        await fail(expected="running", reason="internal_error")
+        await fail(expected="running", reason=reason)
+        if cancelled:
+            raise
 
 
 async def cancel_all(tasks: set[asyncio.Task[None]]) -> None:
