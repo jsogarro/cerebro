@@ -260,3 +260,58 @@ async def test_legacy_service_uses_shared_mapper_but_forces_thompson_off(
     assert service.masr_router.adaptive_routing_enabled is False
     await service._cleanup_components()
     assert client.closed is True
+
+
+class _FailingClose(FakeRedis):
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+
+    async def aclose(self) -> None:
+        raise self.error
+
+
+@pytest.mark.asyncio
+async def test_partial_init_close_failure_does_not_mask_the_original_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.ai_brain.router import factory as factory_module
+
+    def fail(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("router construction failed")
+
+    monkeypatch.setattr(factory_module, "create_masr_router", fail)
+
+    with pytest.raises(RuntimeError, match="router construction failed"):
+        await MASRRuntime.create(
+            _settings(ADAPTIVE_ROUTING_ENABLED=True),
+            redis_client_factory=lambda _: _FailingClose(ConnectionError("gone")),
+        )
+
+    with pytest.raises(AttributeError):
+        await MASRRuntime.create(
+            _settings(ADAPTIVE_ROUTING_ENABLED=True),
+            redis_client_factory=lambda _: _FailingClose(AttributeError("bug")),
+        )
+
+
+def test_legacy_service_health_reports_redis_errors_but_not_router_bugs() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from fastapi.testclient import TestClient
+
+    from src.ai_brain.router import masr_service as legacy_module
+
+    service = legacy_module.MASRService()
+    service.redis_client = MagicMock(ping=AsyncMock(side_effect=ConnectionError))
+    service.masr_router = None
+    body = TestClient(service.app).get("/health").json()
+    assert body["components"]["redis"] == "unhealthy"
+    assert body["status"] == "unhealthy"
+
+    service.redis_client = None
+    service.masr_router = MagicMock(
+        health_check=AsyncMock(side_effect=AttributeError("bug"))
+    )
+    with pytest.raises(AttributeError):
+        TestClient(service.app).get("/health")

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
+import httpx
 from structlog import get_logger
 
 from src.core.kernel import TypedRegistry
@@ -113,7 +114,7 @@ class ModelRouter:
 
                 logger.info("Initialized provider", provider_name=provider_name)
 
-            except Exception as e:
+            except (LookupError, ValueError, TypeError) as e:
                 logger.error(
                     "Failed to initialize provider",
                     provider_name=provider_name,
@@ -177,7 +178,7 @@ class ModelRouter:
                             self.success_count += 1
                             return response
 
-                    except Exception as e:
+                    except (ValueError, RuntimeError) as e:
                         logger.warning(
                             "Fallback provider failed",
                             provider_name=fallback_provider,
@@ -189,7 +190,7 @@ class ModelRouter:
             logger.error("All providers failed for request")
             return self._create_failure_response(request, "All providers failed")
 
-        except Exception as e:
+        except (ValueError, RuntimeError) as e:
             logger.error("Routing failed", error=str(e), exc_info=True)
             return self._create_failure_response(request, str(e))
 
@@ -204,7 +205,7 @@ class ModelRouter:
 
         health_status = await self._get_provider_health(provider_name)
         if not health_status.healthy:
-            raise Exception(f"Provider {provider_name} is unhealthy")
+            raise RuntimeError(f"Provider {provider_name} is unhealthy")
 
         # Generate response
         response = await provider.generate(request, model_name)
@@ -239,7 +240,7 @@ class ModelRouter:
         ]
 
         if not available_providers:
-            raise Exception("No healthy providers available")
+            raise RuntimeError("No healthy providers available")
 
         # Simple heuristic-based selection
         if request.complexity_score and request.complexity_score > 0.7:
@@ -293,7 +294,7 @@ class ModelRouter:
                     health_status = await provider.health_check()
                     self.registry.health_status[provider_name] = health_status
                     self.registry.last_health_check[provider_name] = now
-                except Exception as e:
+                except (httpx.HTTPError, RuntimeError, ValueError) as e:
                     logger.error(
                         "Health check failed",
                         provider_name=provider_name,
@@ -391,32 +392,27 @@ class ModelRouter:
     ) -> AsyncGenerator[str, None]:
         """Stream response using optimal provider."""
 
-        try:
-            # Determine routing if not provided
-            if not routing_decision:
-                routing_decision = await self._make_routing_decision(request)
+        # Determine routing if not provided
+        if not routing_decision:
+            routing_decision = await self._make_routing_decision(request)
 
-            # Extract routing information
-            primary_provider = routing_decision.get("primary_model", {}).get("provider")
-            primary_model = routing_decision.get("primary_model", {}).get("name")
+        # Extract routing information
+        primary_provider = routing_decision.get("primary_model", {}).get("provider")
+        primary_model = routing_decision.get("primary_model", {}).get("name")
 
-            provider = self.registry.providers.get(primary_provider)
-            if not provider:
-                yield f"Error: Provider {primary_provider} not available"
-                return
+        provider = self.registry.providers.get(primary_provider)
+        if not provider:
+            yield f"Error: Provider {primary_provider} not available"
+            return
 
-            health_status = await self._get_provider_health(primary_provider)
-            if not health_status.healthy:
-                yield f"Error: Provider {primary_provider} is unhealthy"
-                return
+        health_status = await self._get_provider_health(primary_provider)
+        if not health_status.healthy:
+            yield f"Error: Provider {primary_provider} is unhealthy"
+            return
 
-            # Stream response
-            async for chunk in provider.stream(request, primary_model):
-                yield chunk
-
-        except Exception as e:
-            logger.error("Streaming failed", error=str(e), exc_info=True)
-            yield f"Error: {e!s}"
+        # Stream response
+        async for chunk in provider.stream(request, primary_model):
+            yield chunk
 
     def add_provider(self, provider_name: str, provider_config: dict[str, Any]) -> None:
         """Dynamically add a new provider."""
@@ -465,7 +461,7 @@ class ModelRouter:
             if hasattr(provider, "close"):
                 try:
                     await provider.close()
-                except Exception as e:
+                except (OSError, RuntimeError, httpx.HTTPError) as e:
                     logger.warning("Error closing provider", error=str(e))
 
 

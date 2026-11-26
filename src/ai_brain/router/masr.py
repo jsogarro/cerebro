@@ -819,7 +819,7 @@ class MASRouter:
                 control_reason=control_reason,
                 state_revision=self._adaptive_snapshot.revision,
             )
-        except Exception as e:
+        except (ValueError, RuntimeError) as e:
             logger.warning(
                 f"adaptive_allocation_adjustment failed (graceful fallback): {e}"
             )
@@ -984,7 +984,7 @@ class MASRouter:
             base = self._adaptive_snapshot
             try:
                 next_snapshot = await self._apply_outcome_to_snapshot(base, evaluated)
-            except Exception as exc:
+            except (ValueError, RuntimeError) as exc:
                 logger.warning(
                     "adaptive_outcome_application_failed",
                     error=type(exc).__name__,

@@ -181,7 +181,14 @@ class DeepSeekProvider(BaseProvider):
 
             return await self._postprocess_response(model_response, request)
 
-        except Exception as e:
+        except (
+            httpx.HTTPError,
+            RuntimeError,
+            ValueError,
+            KeyError,
+            IndexError,
+            TypeError,
+        ) as e:
             logger.error("DeepSeek generation failed", error=str(e), exc_info=True)
             return self._create_error_response(request, e, "generation_error")
 
@@ -202,39 +209,34 @@ class DeepSeekProvider(BaseProvider):
         if not self.client:
             raise ValueError("HTTP client not initialized")
 
-        try:
-            async with self.client.stream(
-                "POST",
-                f"{self.api_endpoint}/chat/completions",
-                headers=self._get_headers(),
-                json=payload,
-            ) as response:
-                if response.status_code != 200:
-                    error_bytes = await response.aread()
-                    error_text = error_bytes.decode("utf-8")
-                    raise Exception(f"API error: {response.status_code} - {error_text}")
+        async with self.client.stream(
+            "POST",
+            f"{self.api_endpoint}/chat/completions",
+            headers=self._get_headers(),
+            json=payload,
+        ) as response:
+            if response.status_code != 200:
+                error_bytes = await response.aread()
+                error_text = error_bytes.decode("utf-8")
+                raise Exception(f"API error: {response.status_code} - {error_text}")
 
-                async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        data = line[6:]  # Remove "data: " prefix
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    data = line[6:]  # Remove "data: " prefix
 
-                        if data == "[DONE]":
-                            break
+                    if data == "[DONE]":
+                        break
 
-                        try:
-                            chunk = json.loads(data)
-                            delta = chunk.get("choices", [{}])[0].get("delta", {})
-                            content = delta.get("content", "")
+                    try:
+                        chunk = json.loads(data)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content", "")
 
-                            if content:
-                                yield content
+                        if content:
+                            yield content
 
-                        except json.JSONDecodeError:
-                            continue  # Skip invalid JSON chunks
-
-        except Exception as e:
-            logger.error("DeepSeek streaming failed", error=str(e), exc_info=True)
-            yield f"Error: {e!s}"
+                    except json.JSONDecodeError:
+                        continue  # Skip invalid JSON chunks
 
     def _build_request_payload(
         self, request: ModelRequest, model_name: str
@@ -298,7 +300,7 @@ class DeepSeekProvider(BaseProvider):
         if response.status_code != 200:
             error_bytes = await response.aread()
             error_detail = error_bytes.decode("utf-8")
-            raise Exception(
+            raise RuntimeError(
                 f"DeepSeek API error: {response.status_code} - {error_detail}"
             )
 
@@ -318,7 +320,7 @@ class DeepSeekProvider(BaseProvider):
         # Extract response content
         choices = response_data.get("choices", [])
         if not choices:
-            raise Exception("No response choices returned")
+            raise RuntimeError("No response choices returned")
 
         content = choices[0].get("message", {}).get("content", "")
         finish_reason = choices[0].get("finish_reason", "completed")
@@ -404,34 +406,27 @@ class DeepSeekProvider(BaseProvider):
     async def health_check(self) -> "ProviderHealthStatus":
         """Perform DeepSeek-specific health check."""
 
-        try:
-            # Test with a simple mathematical reasoning task
-            test_request = ModelRequest(
-                prompt="What is 2 + 2? Explain your reasoning.",
-                max_tokens=50,
-                timeout_seconds=15,
-            )
+        # Test with a simple mathematical reasoning task
+        test_request = ModelRequest(
+            prompt="What is 2 + 2? Explain your reasoning.",
+            max_tokens=50,
+            timeout_seconds=15,
+        )
 
-            start_time = datetime.now()
-            response = await self.generate(test_request)
-            latency = (datetime.now() - start_time).total_seconds() * 1000
+        start_time = datetime.now()
+        response = await self.generate(test_request)
+        latency = (datetime.now() - start_time).total_seconds() * 1000
 
-            self.health_status.healthy = response.success
-            self.health_status.last_check = datetime.now()
-            self.health_status.avg_latency_ms = latency
+        self.health_status.healthy = response.success
+        self.health_status.last_check = datetime.now()
+        self.health_status.avg_latency_ms = latency
 
-            # DeepSeek-specific health indicators
-            if response.success:
-                if "4" in response.content and len(response.content) > 10:
-                    self.health_status.api_status = "operational"
-                else:
-                    self.health_status.api_status = "degraded"
-
-        except Exception as e:
-            logger.error("DeepSeek health check failed", error=str(e), exc_info=True)
-            self.health_status.healthy = False
-            self.health_status.last_error = str(e)
-            self.health_status.api_status = "error"
+        # DeepSeek-specific health indicators
+        if response.success:
+            if "4" in response.content and len(response.content) > 10:
+                self.health_status.api_status = "operational"
+            else:
+                self.health_status.api_status = "degraded"
 
         return self.health_status
 

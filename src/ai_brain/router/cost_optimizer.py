@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
+import yaml  # type: ignore[import-untyped]
 from structlog import get_logger
 
 if TYPE_CHECKING:
@@ -172,7 +173,7 @@ class CostOptimizer:
             logger.info(f"Loaded {len(self.models)} models from configuration")
             return True
 
-        except Exception as e:
+        except (OSError, ValueError, yaml.YAMLError, RuntimeError) as e:
             logger.error(f"Failed to load models from configuration: {e}")
             # Fallback to legacy models
             self.models = self._initialize_models_legacy()

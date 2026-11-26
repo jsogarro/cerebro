@@ -218,7 +218,7 @@ class MASRRuntime:
             if redis_client is not None:
                 try:
                     await redis_client.aclose()
-                except BaseException as close_exc:
+                except (redis.RedisError, OSError) as close_exc:
                     logger.warning(
                         "masr_partial_redis_close_failed",
                         error=type(close_exc).__name__,
