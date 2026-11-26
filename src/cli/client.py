@@ -73,7 +73,6 @@ class ResearchAPIClient:
             },
         )
 
-        # Add authentication if available
         if config.auth_token:
             self.client.headers["Authorization"] = f"Bearer {config.auth_token}"
         elif config.api_key:
@@ -230,7 +229,6 @@ class ResearchAPIClient:
         return [ResearchProject(**p) for p in projects_data]
 
     async def get_project_progress(self, project_id: UUID) -> ResearchProgress:
-        """Get project progress."""
         response = await self._request(
             "GET",
             f"/api/v1/research/projects/{project_id}/progress",
@@ -249,7 +247,6 @@ class ResearchAPIClient:
         project_id: UUID,
         scope: dict[str, Any],
     ) -> ResearchProject:
-        """Refine project scope."""
         response = await self._request(
             "POST",
             f"/api/v1/research/projects/{project_id}/refine",
@@ -258,7 +255,6 @@ class ResearchAPIClient:
         return ResearchProject(**response.json())
 
     async def get_project_results(self, project_id: UUID) -> dict[str, Any]:
-        """Get project results."""
         response = await self._request(
             "GET",
             f"/api/v1/research/projects/{project_id}/results",

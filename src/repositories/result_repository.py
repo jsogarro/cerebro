@@ -248,7 +248,6 @@ class ResultRepository(BaseRepository[ResearchResult]):
         Returns:
             Number of duplicates merged
         """
-        # Get all results for project
         results = await self.get_by_project(project_id)
 
         # Group by source_id and result_type

@@ -355,7 +355,6 @@ class Settings(BaseSettings):
     @classmethod
     def validate_secret_key(cls, v: str, info: Any) -> str:
         """Ensure SECRET_KEY is set properly in production."""
-        # Get environment from raw values
         env = info.data.get("ENVIRONMENT", "development")
 
         if env == "production" and v == "MUST_SET_IN_ENV":
@@ -379,7 +378,6 @@ class Settings(BaseSettings):
         env = info.data.get("ENVIRONMENT", "development")
 
         if env == "production":
-            # Check for common default credentials
             dangerous_patterns = [
                 "research:research123",
                 "postgres:postgres",
@@ -603,7 +601,6 @@ class Settings(BaseSettings):
         return self.AI_BRAIN_MODE == "research_only"
 
 
-# Create settings instance
 settings = Settings()
 
 

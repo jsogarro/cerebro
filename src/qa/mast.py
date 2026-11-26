@@ -191,7 +191,6 @@ class MASTLabeler:
         if incomplete_label:
             labels.append(incomplete_label)
 
-        # Compute overall confidence and detected modes
         detected_modes = [label.mode for label in labels]
         overall_confidence = max((label.confidence for label in labels), default=0.0)
 

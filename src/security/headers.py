@@ -219,8 +219,6 @@ class SecurityHeadersMiddleware:
         # Process request
         response: Response = await call_next(request)
 
-        # Add security headers
-
         # Content Security Policy
         if self.csp_enabled:
             csp_header = self._generate_csp_header(nonce)
@@ -271,7 +269,6 @@ class SecurityHeadersMiddleware:
             if header in response.headers:
                 del response.headers[header]
 
-        # Add custom headers
         for header, value in self.custom_headers.items():
             response.headers[header] = value
 

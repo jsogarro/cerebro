@@ -129,7 +129,6 @@ class MCPClient:
             )
 
             if result["success"] and result.get("entities"):
-                # Build graph from extracted entities
                 entities = [
                     {"id": str(i), "text": e["text"], "type": e["type"]}
                     for i, e in enumerate(result["entities"])

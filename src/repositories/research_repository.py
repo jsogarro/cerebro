@@ -295,7 +295,6 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         if user_id:
             base_query = base_query.where(ResearchProject.user_id == user_id)
 
-        # Get counts by status
         status_counts = {}
         for status in ProjectStatus:
             count_query = select(func.count(ResearchProject.id)).where(
@@ -312,7 +311,6 @@ class ResearchRepository(BaseRepository[ResearchProject]):
             result = await self.session.execute(count_query)
             status_counts[status.value] = result.scalar() or 0
 
-        # Get average quality score
         avg_query = select(func.avg(ResearchProject.quality_score)).where(
             and_(
                 ResearchProject.deleted_at.is_(None),
@@ -327,7 +325,6 @@ class ResearchRepository(BaseRepository[ResearchProject]):
         result = await self.session.execute(avg_query)
         avg_quality = result.scalar() or 0.0
 
-        # Get total count
         total_query = select(func.count(ResearchProject.id)).where(
             and_(
                 ResearchProject.deleted_at.is_(None),

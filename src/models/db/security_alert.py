@@ -80,8 +80,6 @@ class AlertSeverity(StrEnum):
 
 
 class AlertStatus(StrEnum):
-    """Alert status."""
-
     NEW = "new"
     ACKNOWLEDGED = "acknowledged"
     INVESTIGATING = "investigating"
@@ -349,7 +347,6 @@ class SecurityAlert(BaseModel):
         Returns:
             SecurityAlert instance
         """
-        # Calculate risk score based on type and severity
         risk_score = cls._calculate_risk_score(alert_type, severity)
 
         # Determine if escalation is needed
@@ -392,7 +389,6 @@ class SecurityAlert(BaseModel):
             AlertSeverity.CRITICAL: 100,
         }
 
-        # Type multipliers
         type_multipliers = {
             AlertType.SYSTEM_BREACH: 1.5,
             AlertType.DATA_EXFILTRATION: 1.4,

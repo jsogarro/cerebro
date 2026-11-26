@@ -80,12 +80,10 @@ class VersionPerformance:
     ) -> None:
         """Update performance metrics with new data point."""
 
-        # Update usage counts
         self.total_uses += 1
         if success:
             self.successful_uses += 1
 
-        # Update success rate
         self.success_rate = self.successful_uses / self.total_uses
 
         # Update quality metrics (exponential moving average)
@@ -101,7 +99,6 @@ class VersionPerformance:
             self.min_quality = min(self.min_quality, quality_score)
             self.max_quality = max(self.max_quality, quality_score)
 
-        # Update performance metrics
         self.avg_response_time_ms = int(
             (self.avg_response_time_ms * (self.total_uses - 1) + response_time_ms)
             / self.total_uses
@@ -114,7 +111,6 @@ class VersionPerformance:
             self.avg_cost_per_use * (self.total_uses - 1) + cost
         ) / self.total_uses
 
-        # Update temporal data
         now = datetime.now()
         if not self.first_used:
             self.first_used = now
@@ -218,7 +214,6 @@ class PromptVersionManager:
         version = template.metadata.version
         version_key = f"{template_name}:{version}"
 
-        # Initialize version tracking
         if template_name not in self.versions:
             self.versions[template_name] = {}
 
@@ -226,7 +221,6 @@ class PromptVersionManager:
         self.version_performance[version_key] = VersionPerformance()
         self.version_status[version_key] = version_status
 
-        # Set as champion if it's the first version
         if len(self.versions[template_name]) == 1:
             self.version_status[version_key] = VersionStatus.CHAMPION
             template.metadata.champion_version = True
@@ -249,12 +243,10 @@ class PromptVersionManager:
         test_config = test_config or self.default_ab_config
         test_name = f"{template_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-        # Update test config
         test_config.test_name = test_name
         test_config.champion_version = champion_version
         test_config.challenger_version = challenger_version
 
-        # Update version statuses
         champion_key = f"{template_name}:{champion_version}"
         challenger_key = f"{template_name}:{challenger_version}"
 
@@ -286,12 +278,10 @@ class PromptVersionManager:
         if version_key not in self.version_performance:
             self.version_performance[version_key] = VersionPerformance()
 
-        # Update performance metrics
         self.version_performance[version_key].update(
             success, quality_score, response_time_ms, token_usage, cost
         )
 
-        # Check if any A/B tests should be updated
         await self._update_ab_tests(template_name, version, success, quality_score)
 
         return True
@@ -317,7 +307,6 @@ class PromptVersionManager:
     ) -> tuple[str | None, float]:
         """Get version to use based on A/B test configuration."""
 
-        # Check if template is in active A/B test
         for _test_name, test_config in self.active_ab_tests.items():
             if template_name in test_config.test_name:
                 # Random assignment based on traffic split
@@ -359,7 +348,6 @@ class PromptVersionManager:
         if not champion_perf or not challenger_perf:
             return
 
-        # Check if we have enough samples
         total_samples = champion_perf.total_uses + challenger_perf.total_uses
 
         if total_samples >= test_config.min_sample_size:
@@ -417,7 +405,6 @@ class PromptVersionManager:
             winner = None
             recommendation = "No significant difference detected"
 
-        # Create test result
         test_result = ABTestResult(
             test_config=test_config,
             status=ABTestStatus.COMPLETED,
@@ -444,11 +431,9 @@ class PromptVersionManager:
         champion_key = f"{template_name}:{test_config.champion_version}"
         challenger_key = f"{template_name}:{test_config.challenger_version}"
 
-        # Update statuses
         self.version_status[champion_key] = VersionStatus.RETIRED
         self.version_status[challenger_key] = VersionStatus.CHAMPION
 
-        # Update template metadata
         if (
             template_name in self.versions
             and test_config.challenger_version in self.versions[template_name]

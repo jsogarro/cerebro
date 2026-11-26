@@ -46,7 +46,6 @@ def cli(
     ctx: Context, api_url: str | None, format: str, verbose: bool, no_color: bool
 ) -> None:
     """Research Platform CLI - Manage research projects from the command line."""
-    # Update config with command line options
     if api_url:
         config.api_url = api_url
 
@@ -59,7 +58,6 @@ def cli(
     if no_color:
         config.color = False
 
-    # Create formatter
     formatter = OutputFormatter(
         format_type=config.output_format,
         color=config.color,
@@ -100,7 +98,6 @@ def config_command(
                     click.echo(f"  {field_name}: {field_value}")
 
     elif action == "set":
-        # Set configuration value
         if not key or not value:
             click.echo("Usage: research-cli config set <key> <value>")
             raise Exit(1)
@@ -109,13 +106,10 @@ def config_command(
             click.echo(f"Unknown configuration key: {key}")
             raise Exit(1)
 
-        # Update configuration
         try:
-            # Handle boolean values
             value_to_set: Any
             if key in ["verbose", "color"]:
                 value_to_set = value.lower() in ["true", "1", "yes"]
-            # Handle integer values
             elif key in ["api_timeout", "max_retries"]:
                 value_to_set = int(value)
             else:
@@ -128,7 +122,6 @@ def config_command(
             raise Exit(1) from e
 
     elif action == "save":
-        # Save configuration to file
         try:
             cli_config.save_to_file()
             click.echo("Configuration saved to ~/.research-cli.env")
@@ -151,11 +144,9 @@ def health_check(ctx: Context) -> None:
     async def _check_health() -> None:
         async with ResearchAPIClient(verbose=verbose) as client:
             try:
-                # Check health
                 health = await client.health_check()
                 print_success(f"API is healthy: {health['status']}")
 
-                # Check readiness
                 ready = await client.readiness_check()
                 print_success(f"API is ready: {ready['status']}")
 
@@ -175,7 +166,6 @@ def health_check(ctx: Context) -> None:
     asyncio.run(_check_health())
 
 
-# Add command groups
 cli.add_command(agents_group)
 cli.add_command(projects_group)
 

@@ -73,7 +73,6 @@ def create_project(
     verbose = ctx.obj["verbose"]
 
     async def _create_single_project(project_data: dict[str, Any]) -> ResearchProject:
-        """Create a single project."""
         async with ResearchAPIClient(verbose=verbose) as client:
             try:
                 with create_spinner("Creating research project..."):
@@ -250,13 +249,11 @@ def get_progress(
     verbose = ctx.obj["verbose"]
     console = Console()
 
-    # Validate options
     if watch and stream:
         print_error("Cannot use both --watch and --stream options. Choose one.")
         raise Exit(1)
 
     async def _get_progress_once() -> ResearchProgress:
-        """Get progress once."""
         async with ResearchAPIClient(verbose=verbose) as client:
             try:
                 progress = await client.get_project_progress(project_id)
@@ -320,7 +317,6 @@ def get_progress(
                     try:
                         progress = await client.get_project_progress(project_id)
 
-                        # Create progress display
                         output = formatter.format_progress(progress)
                         live.update(
                             Panel(
@@ -334,7 +330,6 @@ def get_progress(
                             )
                         )
 
-                        # Check if completed
                         if progress.progress_percentage >= 100:
                             print_success("Project completed!")
                             break
@@ -444,7 +439,6 @@ def refine_scope(
     formatter = ctx.obj["formatter"]
     verbose = ctx.obj["verbose"]
 
-    # Build scope dict
     scope_dict = parse_key_value_pairs(list(scope)) if scope else {}
 
     if max_sources:

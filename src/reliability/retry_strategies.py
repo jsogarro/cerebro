@@ -74,20 +74,16 @@ class RetryPolicy:
         Returns:
             True if should retry, False otherwise
         """
-        # Check retry budget if configured
         if self.retry_budget and not self.retry_budget.can_retry():
             logger.warning("retry_budget_exhausted")
             return False
 
-        # Check max attempts
         if attempt >= self.max_attempts:
             return False
 
-        # Check non-retryable exceptions first
         if isinstance(exception, self.non_retryable_exceptions):
             return False
 
-        # Check retryable exceptions
         return isinstance(exception, self.retryable_exceptions)
 
     def get_delay(self, attempt: int) -> float:
@@ -105,7 +101,6 @@ class RetryPolicy:
             self.initial_delay * (self.exponential_base**attempt), self.max_delay
         )
 
-        # Add jitter if enabled
         if self.jitter:
             delay = delay * (0.5 + random.random())
 
@@ -125,8 +120,6 @@ class CircuitBreakerConfig:
 
 @dataclass
 class CircuitBreakerMetrics:
-    """Circuit breaker metrics."""
-
     total_calls: int = 0
     successful_calls: int = 0
     failed_calls: int = 0
@@ -230,7 +223,6 @@ class CircuitBreaker:
         """
         probe = False
         async with self._lock:
-            # Check if we should transition from OPEN to HALF_OPEN
             if await self._should_attempt_reset():
                 await self._transition_to(CircuitState.HALF_OPEN)
 
@@ -262,7 +254,6 @@ class CircuitBreaker:
             return result
 
         except Exception as e:
-            # Check if exception should be counted as failure
             if not isinstance(e, self.config.exclude_exceptions):
                 await self._on_failure()
             raise
@@ -359,7 +350,6 @@ class ExponentialBackoff:
             except Exception as e:
                 last_exception = e
 
-                # Check if should retry
                 if not self.policy.should_retry(e, attempt + 1):
                     logger.error(
                         "non_retryable_exception",
@@ -368,7 +358,6 @@ class ExponentialBackoff:
                     )
                     raise
 
-                # Calculate delay
                 if attempt < self.policy.max_attempts - 1:
                     delay = self.policy.get_delay(attempt)
                     logger.warning(
@@ -443,12 +432,10 @@ class BulkheadExecutor:
         Raises:
             Exception: If queue is full or execution times out
         """
-        # Check queue size
         if self._queue.full():
             self._total_rejected += 1
             raise Exception(f"Bulkhead '{self.name}' queue is full")
 
-        # Add to queue
         await self._queue.put(True)
 
         try:

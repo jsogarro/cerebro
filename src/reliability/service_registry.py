@@ -44,8 +44,6 @@ class LoadBalancingStrategy(Enum):
 
 @dataclass
 class ServiceMetadata:
-    """Service metadata."""
-
     name: str
     version: str
     instance_id: str
@@ -273,7 +271,6 @@ class ServiceRegistry:
             instance = self._services[service_name][instance_id]
             instance.last_heartbeat = datetime.now(UTC)
 
-            # Update in Redis
             if self._redis_client:
                 key = f"{self._registry_prefix}{service_name}:{instance_id}"
                 await self._redis_client.setex(
@@ -298,7 +295,6 @@ class ServiceRegistry:
             instance = self._services[service_name][instance_id]
             instance.status = status
 
-            # Update in Redis
             if self._redis_client:
                 key = f"{self._registry_prefix}{service_name}:{instance_id}"
                 await self._redis_client.setex(
@@ -325,14 +321,12 @@ class ServiceRegistry:
         Returns:
             Service instance or None
         """
-        # Check memory first
         if (
             service_name in self._services
             and instance_id in self._services[service_name]
         ):
             return self._services[service_name][instance_id]
 
-        # Check Redis
         if self._redis_client:
             key = f"{self._registry_prefix}{service_name}:{instance_id}"
             data = await self._redis_client.get(key)
@@ -361,11 +355,9 @@ class ServiceRegistry:
         """
         instances: list[ServiceInstance] = []
 
-        # Get from memory
         if service_name in self._services:
             instances.extend(self._services[service_name].values())
 
-        # Get from Redis
         if self._redis_client:
             pattern = f"{self._registry_prefix}{service_name}:*"
             keys = await self._redis_client.keys(pattern)
@@ -375,7 +367,6 @@ class ServiceRegistry:
                 if data:
                     instance = ServiceInstance.from_dict(deserialize_from_cache(data))
 
-                    # Check if not already in list
                     if not any(
                         i.metadata.instance_id == instance.metadata.instance_id
                         for i in instances
@@ -404,7 +395,6 @@ class ServiceRegistry:
 
         for service_name, instances in self._services.items():
             for instance_id, instance in instances.items():
-                # Check if heartbeat expired
                 if (current_time - instance.last_heartbeat).total_seconds() > self._ttl:
                     expired.append((service_name, instance_id))
 
@@ -461,7 +451,6 @@ class ServiceDiscovery:
         Returns:
             Selected service instance or None
         """
-        # Get healthy instances
         instances = await self._registry.get_healthy_instances(service_name)
 
         if not instances:
@@ -584,7 +573,6 @@ class ServiceDiscovery:
             # Would use HTTP client pool here
             url = f"{instance.url}{endpoint}"
 
-            # Import httpx dynamically
             import httpx
 
             async with httpx.AsyncClient() as client:
@@ -655,13 +643,11 @@ class LoadBalancer:
 
         for attempt in range(max_retries):
             try:
-                # Get an instance excluding failed ones
                 instance = await self._get_instance()
 
                 if not instance:
                     raise Exception(f"No available instances for {self.service_name}")
 
-                # Call the service
                 result = await self._discovery.call_service(
                     self.service_name, endpoint, method, self._strategy, **kwargs
                 )

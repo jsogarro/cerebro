@@ -113,17 +113,15 @@ class EpisodicMemoryService:
         event_data: dict[str, Any],
         query_text: str | None = None,
     ) -> EpisodicEvent:
-        """Record an event."""
         import uuid
 
-        event = EpisodicEvent(
+        return EpisodicEvent(
             id=str(uuid.uuid4()),
             user_id=user_id,
             event_type=event_type,
             event_data=event_data,
             query_text=query_text,
         )
-        return event
 
     async def get_recent_context(
         self, user_id: str, limit: int = 20

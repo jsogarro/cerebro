@@ -133,7 +133,6 @@ class RegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password_strength(cls, v: str) -> str:
-        """Validate password strength."""
         if len(v) < 12:
             raise ValueError("Password must be at least 12 characters long")
 
@@ -218,7 +217,6 @@ class PasswordResetConfirm(BaseModel):
     @field_validator("new_password")
     @classmethod
     def validate_password_strength(cls, v: str) -> str:
-        """Validate password strength."""
         if len(v) < 12:
             raise ValueError("Password must be at least 12 characters long")
 
@@ -264,7 +262,6 @@ class ChangePasswordRequest(BaseModel):
     @field_validator("new_password")
     @classmethod
     def validate_password_strength(cls, v: str) -> str:
-        """Validate password strength."""
         if len(v) < 12:
             raise ValueError("Password must be at least 12 characters long")
 
