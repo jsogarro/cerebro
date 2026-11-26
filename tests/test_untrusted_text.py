@@ -40,3 +40,28 @@ def test_plain_text_is_untouched() -> None:
 
 def test_removes_variation_selector_supplement_payloads() -> None:
     assert strip_invisible(f"a{chr(0xE0101)}b") == ("ab", 1)
+
+
+def test_removes_basic_variation_selector_payloads_but_keeps_emoji_presentation() -> (
+    None
+):
+    vs0, vs15, vs16 = chr(0xFE00), chr(0xFE0E), chr(0xFE0F)
+    assert strip_invisible(f"a{vs0}b{vs15}c") == ("abc", 2)
+    heart = chr(0x2764)
+    assert strip_invisible(f"{heart}{vs16}") == (f"{heart}{vs16}", 0)
+    assert strip_invisible(f"a{vs16}") == ("a", 1)
+    assert strip_invisible(f"{heart}{vs16}{vs16}") == (f"{heart}{vs16}", 1)
+
+
+def test_removes_control_and_blank_filler_characters_but_keeps_whitespace() -> None:
+    assert strip_invisible("a\x1b[2Jb\x07\x7f\x9bc") == ("a[2Jbc", 4)
+    assert strip_invisible("a\tb\r\nc") == ("a\tb\r\nc", 0)
+    fillers = [0x034F, 0x115F, 0x17B4, 0x180B, 0x2800, 0x3164, 0xFFA0, 0x2028]
+    assert strip_invisible("a" + "".join(map(chr, fillers)) + "b") == (
+        "ab",
+        len(fillers),
+    )
+
+
+def test_removes_private_use_and_unassigned_code_points() -> None:
+    assert strip_invisible(f"a{chr(0xE000)}{chr(0xF0000)}{chr(0x0378)}b") == ("ab", 3)

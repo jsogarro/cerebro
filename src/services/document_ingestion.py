@@ -7,6 +7,7 @@ It writes no usage-ledger row: the caller reserves quota before parsing.
 
 import asyncio
 import json
+import signal
 import sys
 import unicodedata
 import uuid
@@ -47,9 +48,9 @@ __all__ = [
     "sniff_media_type",
 ]
 
-_CHILD_ENV: Final = {"PATH": "/usr/bin:/bin", "PYTHONHASHSEED": "0", "LANG": "C.UTF-8"}
+_CHILD_ENV: Final = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
 _STDOUT_SLACK = 1 << 20
-_EXTRACT_SLOTS = asyncio.Semaphore(2)
+_EXTRACT_SLOTS = asyncio.Semaphore(1)
 _DECLARED_TYPES = {
     "application/pdf": "pdf",
     "text/markdown": "markdown",
@@ -116,10 +117,6 @@ def sniff_media_type(raw: bytes, declared: str) -> str:
     return wanted
 
 
-def _child_env(test_env: dict[str, str] | None) -> dict[str, str]:
-    return {**_CHILD_ENV, **(test_env or {})}
-
-
 async def _feed(stdin: asyncio.StreamWriter, data: bytes) -> None:
     try:
         stdin.write(data)
@@ -129,44 +126,54 @@ async def _feed(stdin: asyncio.StreamWriter, data: bytes) -> None:
         pass
 
 
-async def _run_child(data: bytes, env: dict[str, str], args: list[str]) -> bytes:
-    async with _EXTRACT_SLOTS:
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-I",
-            "-m",
-            _child.__name__,
-            *args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            env=env,
-        )
-        try:
-            return await asyncio.wait_for(
-                _exchange(proc, data), settings.DOCUMENT_EXTRACT_TIMEOUT_S
-            )
-        except TimeoutError:
-            raise DocumentIngestionError("extraction_timeout") from None
-        finally:
-            if proc.returncode is None:
-                proc.kill()
-            await proc.wait()
-
-
-async def _exchange(proc: asyncio.subprocess.Process, data: bytes) -> bytes:
+async def _exchange(
+    proc: asyncio.subprocess.Process, data: bytes, max_out: int
+) -> bytes:
     stdout = cast(asyncio.StreamReader, proc.stdout)
-    cap = settings.DOCUMENT_MAX_CHARS * 6 + _STDOUT_SLACK
     feeder = asyncio.create_task(_feed(cast(asyncio.StreamWriter, proc.stdin), data))
     out = bytearray()
     try:
         while chunk := await stdout.read(65536):
             out += chunk
-            if len(out) > cap:
-                raise DocumentIngestionError("malformed_pdf")
+            if len(out) > max_out:
+                raise DocumentIngestionError("output_too_large")
     finally:
         feeder.cancel()
     return bytes(out)
+
+
+def _raise_for_exit(returncode: int | None) -> None:
+    if returncode == _child.EXIT_MEMORY:
+        raise DocumentIngestionError("extraction_resource_limit")
+    if returncode == -signal.SIGXCPU:
+        raise DocumentIngestionError("extraction_cpu_limit")
+
+
+async def _run_child(
+    argv_tail: list[str], data: bytes, *, timeout: float, max_out: int
+) -> bytes:
+    """Run one child to completion; always kill and reap it."""
+    async with _EXTRACT_SLOTS:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            *argv_tail,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            env=_CHILD_ENV,
+        )
+        try:
+            async with asyncio.timeout(timeout):
+                out = await _exchange(proc, data, max_out)
+                await proc.wait()
+        except TimeoutError:
+            raise DocumentIngestionError("extraction_timeout") from None
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+            await asyncio.shield(proc.wait())
+    _raise_for_exit(proc.returncode)
+    return out
 
 
 def _verify_reply(reply: Any) -> tuple[ExtractedText, int]:
@@ -182,6 +189,11 @@ def _verify_reply(reply: Any) -> tuple[ExtractedText, int]:
         or reply["text_sha256"] != snapshot_digest(text.encode("utf-8"))
     ):
         raise ValueError("child reply failed verification")
+    if (
+        len(reply["pages"]) > settings.DOCUMENT_MAX_PAGES
+        or strip_invisible(text)[0] != text
+    ):
+        raise ValueError("child reply broke the extraction limits")
     spans: list[PageSpan] = []
     previous_end = 0
     for number, span in enumerate(reply["pages"], start=1):
@@ -215,14 +227,20 @@ def _parse_reply(raw_reply: bytes) -> tuple[ExtractedText, int]:
         raise DocumentIngestionError("malformed_pdf") from None
 
 
-async def extract_pdf_sandboxed(
-    data: bytes, *, _test_child_env: dict[str, str] | None = None
-) -> tuple[ExtractedText, int]:
+async def extract_pdf_sandboxed(data: bytes) -> tuple[ExtractedText, int]:
     """Extract a PDF in a child process; return the text and removed-char count."""
     raw_reply = await _run_child(
+        [
+            "-I",
+            "-B",
+            "-m",
+            _child.__name__,
+            str(settings.DOCUMENT_MAX_PAGES),
+            str(settings.DOCUMENT_MAX_CHARS),
+        ],
         data,
-        _child_env(_test_child_env),
-        [str(settings.DOCUMENT_MAX_PAGES), str(settings.DOCUMENT_MAX_CHARS)],
+        timeout=settings.DOCUMENT_EXTRACT_TIMEOUT_S,
+        max_out=settings.DOCUMENT_MAX_CHARS * 6 + _STDOUT_SLACK,
     )
     extracted, removed = _parse_reply(raw_reply)
     if extracted.source_sha256 != snapshot_digest(data):
@@ -231,10 +249,11 @@ async def extract_pdf_sandboxed(
 
 
 def _extract_text(raw: bytes) -> tuple[ExtractedText, int]:
-    text, removed = strip_invisible(raw.decode("utf-8"))
-    text = _normalize(text)
-    if len(text) > settings.DOCUMENT_MAX_CHARS:
+    decoded = raw.decode("utf-8")
+    if len(decoded) > settings.DOCUMENT_MAX_CHARS:
         raise DocumentIngestionError("too_much_text")
+    text, removed = strip_invisible(decoded)
+    text = _normalize(text)
     if not text:
         raise DocumentIngestionError("no_text")
     return (
@@ -254,25 +273,23 @@ def _clean_filename(filename: str) -> str:
     return name.strip()[:_MAX_FILENAME_CHARS] or "document"
 
 
-def _check_authors(authors: list[str]) -> None:
-    if len(authors) > _MAX_AUTHORS or any(len(a) > _MAX_AUTHOR_CHARS for a in authors):
+def _clean_authors(authors: list[str]) -> list[str]:
+    if len(authors) > _MAX_AUTHORS or not all(
+        isinstance(a, str) and len(a) <= _MAX_AUTHOR_CHARS for a in authors
+    ):
         raise DocumentIngestionError("invalid_authors")
+    return [strip_invisible(a)[0] for a in authors]
 
 
 async def _extract(
     raw: bytes,
     declared_media_type: str,
-    declared_authors: list[str],
-    test_child_env: dict[str, str] | None,
 ) -> tuple[str, ExtractedText, int, str]:
     if len(raw) > settings.DOCUMENT_MAX_BYTES:
         raise DocumentIngestionError("too_large")
     media_type = sniff_media_type(raw, declared_media_type)
-    _check_authors(declared_authors)
     if media_type == "pdf":
-        extracted, removed = await extract_pdf_sandboxed(
-            raw, _test_child_env=test_child_env
-        )
+        extracted, removed = await extract_pdf_sandboxed(raw)
         return media_type, extracted, removed, extractor_pin().version
     extracted, removed = await asyncio.to_thread(_extract_text, raw)
     return media_type, extracted, removed, f"text-utf8/normalizer-{NORMALIZER_VERSION}"
@@ -287,14 +304,14 @@ async def ingest(
     organization_id: uuid.UUID,
     user_id: uuid.UUID,
     session: AsyncSession,
-    _test_child_env: dict[str, str] | None = None,
 ) -> UploadedDocument:
     """Validate, extract, encrypt and store one upload for its owner."""
     cipher = document_cipher()
     started = datetime.now(UTC)
     try:
+        authors = _clean_authors(declared_authors)
         media_type, extracted, removed, version = await _extract(
-            raw, declared_media_type, declared_authors, _test_child_env
+            raw, declared_media_type
         )
     except DocumentIngestionError as error:
         logger.warning("document_rejected", code=error.code, size=len(raw))
@@ -308,7 +325,7 @@ async def ingest(
         extracted=extracted,
         extractor_version=version,
         invisible_chars_removed=removed,
-        declared_authors=declared_authors,
+        declared_authors=authors,
         expires_at=started + timedelta(days=settings.DOCUMENT_RETENTION_DAYS),
         page_count=len(extracted.pages) if media_type == "pdf" else None,
     )

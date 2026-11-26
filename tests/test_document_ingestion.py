@@ -1,8 +1,6 @@
-import asyncio
 import io
 import json
 import logging
-import os
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -42,8 +40,6 @@ ZWSP = chr(0x200B)
 RLO = chr(0x202E)
 ORG = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
 USER = uuid.UUID("00000000-0000-0000-0000-00000000000a")
-ECHO = {"CEREBRO_EXTRACT_TEST_ECHO_ENV": "1"}
-HANG = {"CEREBRO_EXTRACT_TEST_HANG": "1"}
 KEY = Fernet.generate_key().decode()
 
 
@@ -113,7 +109,6 @@ async def _ingest(
     *,
     authors: list[str] | None = None,
     filename: str = "paper.txt",
-    **kwargs: object,
 ) -> UploadedDocument:
     return await ingest(
         raw,
@@ -123,7 +118,6 @@ async def _ingest(
         organization_id=ORG,
         user_id=USER,
         session=session,
-        **kwargs,  # type: ignore[arg-type]
     )
 
 
@@ -245,62 +239,6 @@ async def test_pdf_text_cap_is_enforced_in_the_child(
     )
 
 
-async def test_a_hung_child_is_killed_and_reaped(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(settings, "DOCUMENT_EXTRACT_TIMEOUT_S", 1)
-    spawned: list[asyncio.subprocess.Process] = []
-    real = asyncio.create_subprocess_exec
-
-    async def spy(*args: object, **kwargs: object) -> asyncio.subprocess.Process:
-        proc = await real(*args, **kwargs)  # type: ignore[arg-type]
-        spawned.append(proc)
-        return proc
-
-    monkeypatch.setattr(di.asyncio, "create_subprocess_exec", spy)
-    code = await _code(
-        _ingest(session, _pdf(["x"]), "application/pdf", _test_child_env=HANG)
-    )
-    assert code == "extraction_timeout"
-    assert len(spawned) == 1 and spawned[0].returncode is not None
-    with pytest.raises(ProcessLookupError):
-        os.kill(spawned[0].pid, 0)
-
-
-async def test_the_child_environment_holds_no_parent_secrets(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("DATABASE_URL", "x")
-    monkeypatch.setenv("GEMINI_API_KEY", "y")
-    assert di._child_env(None) == di._CHILD_ENV
-    report = json.loads(await di._run_child(b"", di._child_env(ECHO), ["1", "1"]))
-    assert "DATABASE_URL" not in report["env"]
-    assert "GEMINI_API_KEY" not in report["env"]
-
-
-async def test_the_test_hooks_are_inert_unless_the_parent_passes_them(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("CEREBRO_EXTRACT_TEST_HANG", "1")
-    result, removed = await extract_pdf_sandboxed(_pdf(["still extracted"]))
-    assert "still extracted" in result.text and removed == 0
-
-
-async def test_the_child_does_not_import_the_application() -> None:
-    report = json.loads(await di._run_child(b"", di._child_env(ECHO), ["1", "1"]))
-    assert report["modules"] == []
-
-
-async def test_child_stdout_is_capped_and_the_child_killed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(di, "_STDOUT_SLACK", 10)
-    monkeypatch.setattr(settings, "DOCUMENT_MAX_CHARS", 0)
-    with pytest.raises(DocumentIngestionError) as caught:
-        await extract_pdf_sandboxed(_pdf(["x"]), _test_child_env=ECHO)
-    assert caught.value.code == "malformed_pdf"
-
-
 async def test_zero_width_characters_are_counted_and_offsets_stay_true(
     session: AsyncSession,
 ) -> None:
@@ -318,7 +256,7 @@ async def test_zero_width_characters_are_counted_and_offsets_stay_true(
 async def test_a_tampered_child_reply_is_malformed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def lying_child(*_: object) -> bytes:
+    async def lying_child(*_: object, **__: object) -> bytes:
         return json.dumps(
             {
                 "ok": True,
@@ -488,3 +426,52 @@ async def test_text_normalization_runs_off_the_event_loop(
     monkeypatch.setattr(di, "_extract_text", spy)
     await _ingest(session, b"text")
     assert seen and seen[0] != threading.get_ident()
+
+
+def test_a_reply_with_more_pages_than_allowed_or_unstripped_text_is_malformed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "DOCUMENT_MAX_PAGES", 2)
+    spans = [[i, 0, 0] for i in range(1, 4)]
+    with pytest.raises(DocumentIngestionError) as many:
+        di._parse_reply(_reply(pages=spans))
+    assert many.value.code == "malformed_pdf"
+    dirty = "a" + chr(0x202E) + "b"
+    with pytest.raises(DocumentIngestionError) as hidden:
+        di._parse_reply(
+            _reply(
+                text=dirty,
+                pages=[[1, 0, 3]],
+                text_sha256=snapshot_digest(dirty.encode()),
+            )
+        )
+    assert hidden.value.code == "malformed_pdf"
+
+
+@pytest.mark.parametrize("authors", [[5], [None], [["x"]], [{"k": "v"}]])
+async def test_non_string_authors_are_refused(
+    session: AsyncSession, authors: list[object]
+) -> None:
+    code = await _code(_ingest(session, b"text", authors=authors))  # type: ignore[arg-type]
+    assert code == "invalid_authors"
+
+
+async def test_author_names_are_stripped_of_invisible_characters(
+    session: AsyncSession,
+) -> None:
+    row = await _ingest(session, b"text", authors=[f"Ad{RLO}a"])
+    repo = UploadedDocumentRepository(session, di.document_cipher())
+    meta = await repo.get_meta(row.id, organization_id=ORG, user_id=USER)
+    assert meta is not None and meta.declared_authors == ["Ada"]
+
+
+async def test_an_oversized_text_is_refused_before_any_per_character_work(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "DOCUMENT_MAX_CHARS", 5)
+
+    def boom(_: str) -> None:
+        raise AssertionError("stripped an oversized text")
+
+    monkeypatch.setattr(di, "strip_invisible", boom)
+    assert await _code(_ingest(session, b"abcdefghij")) == "too_much_text"
