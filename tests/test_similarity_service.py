@@ -133,9 +133,7 @@ async def test_candidates_beyond_the_char_budget_are_skipped_and_recorded(
     target = await make_document(factory)
     await make_document(factory, text=other_text("aa"))
     await make_document(factory, text=other_text("bb"))
-    monkeypatch.setattr(
-        service, "MAX_TOTAL_CANDIDATE_CHARS", len(other_text("aa")) + 10
-    )
+    monkeypatch.setattr(service, "CANDIDATE_CHAR_BUDGET", len(other_text("aa")) + 10)
     _, view = await run_check(factory, target, options={"own_uploads": True})
     row = view.coverage["sources_searched"]["own_upload"]
     assert row["skipped_budget"] == 1 and row["candidates"] == 1

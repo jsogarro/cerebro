@@ -46,6 +46,7 @@ from src.api.routes import (
     reports,
     research,
     run_stream,
+    similarity_checks,
     supervisor_api,
     talkhier_api,
     users,
@@ -65,6 +66,7 @@ from src.security.security_headers import SecurityHeadersMiddleware
 from src.services.critique_service import CRITIQUE_PER_WORKER_CONCURRENCY
 from src.services.document_ingestion import require_document_key, run_purge_loop
 from src.services.document_jobs import cancel_all
+from src.services.similarity_service import SIMILARITY_PER_WORKER_CONCURRENCY
 
 logger = get_logger()
 
@@ -324,6 +326,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.critique_semaphore = asyncio.Semaphore(
             CRITIQUE_PER_WORKER_CONCURRENCY
         )
+        app.state.similarity_semaphore = asyncio.Semaphore(
+            SIMILARITY_PER_WORKER_CONCURRENCY
+        )
         resources.push_async_callback(cancel_all, app.state.document_jobs)
 
         audit_logger = AuditLogger(session_factory=durable_session_factory)
@@ -532,6 +537,7 @@ app.include_router(research.router, prefix="/api/v1", tags=["research"])
 app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
 app.include_router(documents.router, prefix="/api/v1")
 app.include_router(critiques.router, prefix="/api/v1")
+app.include_router(similarity_checks.router, prefix="/api/v1")
 # Agent Framework APIs (Research-Informed)
 app.include_router(
     query_api.router, tags=["intelligent-query"]

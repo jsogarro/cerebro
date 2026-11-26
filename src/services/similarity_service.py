@@ -53,6 +53,8 @@ SIMILARITY_PER_WORKER_CONCURRENCY = 1
 SIMILARITY_PER_USER_DAILY = 10
 SIMILARITY_PER_ORG_CONCURRENT = 2
 SIMILARITY_OPEN_SOURCE_GLOBAL_DAILY = 100
+# 04's total, shared so admission and the runner cannot disagree.
+CANDIDATE_CHAR_BUDGET = MAX_TOTAL_CANDIDATE_CHARS
 MAX_COMPARISON_IDS = 10
 MAX_OWN_UPLOADS = 10
 MAX_TITLE_CHARS = 200
@@ -164,7 +166,7 @@ class _Sources:
     loaded: dict[str, int] = field(default_factory=dict)
 
     def fits(self, chars: int) -> bool:
-        return self.total_chars + chars <= MAX_TOTAL_CANDIDATE_CHARS
+        return self.total_chars + chars <= CANDIDATE_CHAR_BUDGET
 
     def add(self, candidate: Candidate, origin: str | None = None) -> None:
         self.candidates.append(candidate)

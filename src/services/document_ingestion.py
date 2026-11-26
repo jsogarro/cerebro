@@ -89,7 +89,11 @@ class DocumentIngestionError(Exception):
 
 def require_document_key(config: Settings) -> None:
     """Refuse to start with a document feature on and no usable key."""
-    if config.DOCUMENT_UPLOADS_ENABLED or config.DOCUMENT_CRITIQUE_ENABLED:
+    if (
+        config.DOCUMENT_UPLOADS_ENABLED
+        or config.DOCUMENT_CRITIQUE_ENABLED
+        or config.SIMILARITY_CHECKS_ENABLED
+    ):
         key = config.DOCUMENT_ENCRYPTION_KEY.strip()
         if not key:
             raise DocumentEncryptionUnavailable(
