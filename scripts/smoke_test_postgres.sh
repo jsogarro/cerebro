@@ -41,7 +41,7 @@ echo ""
 # 0. Check that docker-compose stack is running
 # ------------------------------------------------------------------
 echo "Checking docker-compose stack..."
-if ! docker compose ps | grep -q research-api; then
+if ! docker compose ps --services --status running | grep -qx api; then
     echo -e "  ${RED}ERROR: docker-compose stack not running${NC}"
     echo "  Run 'docker compose up -d' first"
     exit 1
@@ -218,12 +218,13 @@ else
 fi
 
 # ------------------------------------------------------------------
-# 11. Intelligent query (public)
+# 11. Intelligent query
 # ------------------------------------------------------------------
 STATUS=$(python3 -c "
 import httpx
 r = httpx.post('${BASE}/api/v1/query/research',
-    json={'query': 'AI safety research overview', 'domains': ['AI']}, timeout=30)
+    json={'query': 'AI safety research overview', 'domains': ['AI']},
+    headers={'Authorization': 'Bearer ${TOKEN}'}, timeout=30)
 print(r.status_code)
 ")
 check "POST /api/v1/query/research" 200 "$STATUS"

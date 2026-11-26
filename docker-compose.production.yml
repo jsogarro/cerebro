@@ -31,11 +31,6 @@ services:
       - MASR_QUALITY_THRESHOLD=0.85
       
       # Performance settings
-      - GUNICORN_WORKERS=4
-      - GUNICORN_WORKER_CLASS=uvicorn.workers.UvicornWorker
-      - GUNICORN_MAX_REQUESTS=1000
-      - GUNICORN_MAX_REQUESTS_JITTER=50
-      
     depends_on:
       postgres:
         condition: service_healthy
@@ -175,10 +170,8 @@ services:
     volumes:
       - postgres_data_prod:/var/lib/postgresql/data
       - ./docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql
-      - ./docker/postgresql.conf:/etc/postgresql/postgresql.conf
     command: >
       postgres
-      -c config_file=/etc/postgresql/postgresql.conf
       -c log_statement=all
       -c log_min_duration_statement=1000
     healthcheck:
@@ -208,8 +201,7 @@ services:
       - "6379:6379"
     volumes:
       - redis_data_prod:/data
-      - ./docker/redis.conf:/etc/redis/redis.conf
-    command: redis-server /etc/redis/redis.conf --requirepass ${REDIS_PASSWORD}
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     healthcheck:
       test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
@@ -262,8 +254,6 @@ services:
       - "443:443"
     volumes:
       - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./docker/ssl:/etc/nginx/ssl:ro
       - nginx_logs:/var/log/nginx
     depends_on:
       - api
@@ -295,7 +285,6 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -326,7 +315,6 @@ services:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
       - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
@@ -384,9 +372,3 @@ secrets:
     file: ${JWT_PRIVATE_KEY_FILE:?JWT_PRIVATE_KEY_FILE must point to the production RSA private PEM}
   jwt_public_key:
     file: ${JWT_PUBLIC_KEY_FILE:?JWT_PUBLIC_KEY_FILE must point to the matching production RSA public PEM}
-  db_password:
-    file: ./secrets/db_password.txt
-  redis_password:
-    file: ./secrets/redis_password.txt
-  gemini_api_key:
-    file: ./secrets/gemini_api_key.txt

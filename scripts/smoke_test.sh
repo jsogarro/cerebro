@@ -213,12 +213,13 @@ else
 fi
 
 # ------------------------------------------------------------------
-# 9. Intelligent query (public)
+# 9. Intelligent query
 # ------------------------------------------------------------------
 STATUS=$(python3 -c "
 import httpx
 r = httpx.post('${BASE}/api/v1/query/research',
-    json={'query': 'AI safety research overview', 'domains': ['AI']}, timeout=30)
+    json={'query': 'AI safety research overview', 'domains': ['AI']},
+    headers={'Authorization': 'Bearer ${TOKEN}'}, timeout=30)
 print(r.status_code)
 ")
 check "POST /api/v1/query/research" 200 "$STATUS"
