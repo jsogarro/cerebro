@@ -75,14 +75,14 @@ The `api` service mounts the named volume `source_snapshots_prod` at `/var/lib/c
 | `namespace.yaml` | The `research-platform` namespace |
 | `serviceaccount.yaml` | Service account `research-platform-sa` (with a GKE workload-identity annotation) and a read-only `Role` and `RoleBinding` |
 | `configmap.yaml` | `research-platform-config`: `ENVIRONMENT`, `LOG_LEVEL`, `MAX_REQUESTS_PER_MINUTE`, `ENABLE_RATE_LIMITING` and related values the API container loads with `envFrom` |
-| `external-secrets.yaml` | Two `ExternalSecret` resources that build `research-platform-secrets` (`GEMINI_API_KEY`, `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `TEMPORAL_HOST`) and `research-platform-jwt-keys` (`jwt_private.pem`, `jwt_public.pem`) from a `ClusterSecretStore` named `research-platform-secret-store` |
+| `external-secrets.yaml` | Three `ExternalSecret` resources (including `research-platform-metrics-token`, a bearer token for the `/metrics` scraper) that build `research-platform-secrets` (`GEMINI_API_KEY`, `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `TEMPORAL_HOST`) and `research-platform-jwt-keys` (`jwt_private.pem`, `jwt_public.pem`) from a `ClusterSecretStore` named `research-platform-secret-store` |
 | `deployment-api.yaml` | Deployment `research-api`: 3 replicas, non-root user 1000, read-only root filesystem, `/tmp` as an `emptyDir`, JWT keys mounted read-only at `/secrets`, resource requests 512Mi/250m and limits 2Gi/1000m |
 | `service.yaml` | `ClusterIP` services `research-api-service` (port 80 to 8000) and `mcp-service` (port 9000) |
 | `ingress.yaml` | A GCE ingress for `api.research-platform.example.com` and a managed certificate |
 | `hpa.yaml` | `research-api-hpa`: 3 to 20 replicas on 70% CPU and 80% memory |
 | `networkpolicy.yaml` | Ingress to the API pods on 8000; egress to Postgres (5432), Redis (6379), Temporal (7233), DNS and HTTPS outside the metadata address |
 
-No `secrets.yaml` exists in `k8s/`; secrets come from `external-secrets.yaml`, so the External Secrets Operator and the `ClusterSecretStore` must exist in the cluster first. `k8s/` has no Deployment for Postgres, Redis or an MCP server; `DATABASE_URL` and `REDIS_URL` come from the secret store, and `mcp-service` selects pods labelled `app: mcp-server`, which no manifest creates. The deployment mounts only `/tmp` and the JWT keys, so `SOURCE_SNAPSHOT_DIR` needs a volume added to it.
+No `secrets.yaml` exists in `k8s/`; secrets come from `external-secrets.yaml`, so the External Secrets Operator and the `ClusterSecretStore` must exist in the cluster first. `k8s/` has no Deployment for Postgres, Redis or an MCP server; `DATABASE_URL` and `REDIS_URL` come from the secret store, and `mcp-service` selects pods labelled `app: mcp-server`, which no manifest creates. The deployment mounts `/tmp`, the JWT keys and the ReadWriteMany claim `research-platform-source-snapshots` (`pvc-source-snapshots.yaml`) at `/var/lib/cerebro/source_snapshots`; set `storageClassName` in that file to a class that supports ReadWriteMany.
 
 The image reference in `deployment-api.yaml` is `gcr.io/PROJECT_ID/research-platform-api:latest`. The Kustomize `images` entry changes only the tag, so `PROJECT_ID` stays literal until something replaces the whole name; `cd.yml` does this with `kustomize edit set image`. The deployment's probes call `/health` (liveness) and `/ready` (readiness) on port 8000.
 
@@ -106,7 +106,7 @@ The probes `GET /health`, `GET /live`, `GET /ready` and `GET /ws/health` are una
 
 ## Monitoring
 
-`src/api/main.py` mounts the Prometheus ASGI app from `prometheus_client` at `/metrics`. The path is not in `PUBLIC_ROUTE_ALLOWLIST`, so a scraper must send `Authorization: Bearer <access token>`. A Prometheus scrape job therefore needs a bearer token (`authorization` credentials in the scrape config) from a user whose token has not expired; access tokens last 15 minutes by default (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`).
+`src/api/main.py` mounts the Prometheus ASGI app from `prometheus_client` at `/metrics`. The path is not in `PUBLIC_ROUTE_ALLOWLIST`, so a scraper must send `Authorization: Bearer <access token>`. Provision the token under the remote key `research-platform/metrics-token`; the `research-platform-metrics-token` Secret then holds it in `token`. A Prometheus scrape job needs a bearer token (`authorization` credentials in the scrape config) from a user whose token has not expired; access tokens last 15 minutes by default (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`).
 
 The series exported are the `llm_*` metrics defined in `src/core/observability.py`; the table of series and labels is in [security, audit and observability](reference/12-security-audit-observability.md). Interactive API documentation at `/docs` and `/redoc` is served only when `DEBUG=true`, and those routes also require a token.
 

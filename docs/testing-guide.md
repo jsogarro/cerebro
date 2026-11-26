@@ -103,7 +103,7 @@ There is no API-key factory.
 
 - `.github/workflows/ci.yml` runs `pytest --cov=src --cov-report=xml --cov-report=html --cov-report=term --ignore=tests/e2e`, then `coverage report --fail-under=25`.
 - `.github/workflows/integration-tests.yml` runs `pytest tests/integration/ --cov=src ... --cov-fail-under=25`.
-- Do not use `scripts/run_integration_tests.sh`; run the pytest commands in [Running tests](#running-tests). The script uses `COVERAGE_THRESHOLD=80`. It starts `tests/integration/docker-compose.test.yml` with the legacy `docker-compose` binary, waits for Postgres and Redis, then runs the migrations against port 5433 and runs `pytest tests/integration` with that threshold.
+- Do not use `scripts/run_integration_tests.sh`; run the pytest commands in [Running tests](#running-tests). The script uses `COVERAGE_THRESHOLD=25`, as CI does. It starts `tests/integration/docker-compose.test.yml` with the legacy `docker-compose` binary, waits for Postgres and Redis, then runs the migrations against port 5433 and runs `pytest tests/integration` with that threshold.
 
 ## Load tests
 

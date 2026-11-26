@@ -1,0 +1,13 @@
+# Source snapshots are written by every API replica and read back by digest,
+# so the volume must be shared (ReadWriteMany).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: research-platform-source-snapshots
+spec:
+  accessModes:
+  - ReadWriteMany
+  # storageClassName: <an RWX class, e.g. filestore-rwx>
+  resources:
+    requests:
+      storage: 10Gi

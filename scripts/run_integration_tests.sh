@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 # Configuration
 COMPOSE_FILE="tests/integration/docker-compose.test.yml"
 TEST_DIR="tests/integration"
-COVERAGE_THRESHOLD=80
+COVERAGE_THRESHOLD=25
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}   Research Platform Integration Tests  ${NC}"

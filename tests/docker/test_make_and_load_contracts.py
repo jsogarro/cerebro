@@ -104,3 +104,20 @@ def test_production_api_persists_source_snapshots_on_a_volume() -> None:
     mounts = {v.split(":")[1]: v.split(":")[0] for v in api["volumes"]}
     volume = mounts[directory.group(1)]
     assert volume in compose["volumes"]
+
+
+def test_kubernetes_api_mounts_a_shared_claim_at_the_snapshot_directory() -> None:
+    dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    directory = re.search(r"^ENV SOURCE_SNAPSHOT_DIR=(\S+)$", dockerfile, re.M)
+    assert directory
+    deployment = yaml.safe_load((REPO_ROOT / "k8s/deployment-api.yaml").read_text())
+    spec = deployment["spec"]["template"]["spec"]
+    mount = next(
+        m
+        for m in spec["containers"][0]["volumeMounts"]
+        if m["mountPath"] == directory.group(1)
+    )
+    volume = next(v for v in spec["volumes"] if v["name"] == mount["name"])
+    claim = yaml.safe_load((REPO_ROOT / "k8s/pvc-source-snapshots.yaml").read_text())
+    assert volume["persistentVolumeClaim"]["claimName"] == claim["metadata"]["name"]
+    assert claim["spec"]["accessModes"] == ["ReadWriteMany"]

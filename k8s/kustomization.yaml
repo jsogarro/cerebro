@@ -12,6 +12,7 @@ resources:
   # Secrets Operator. Deployments still reference the same Secret name
   # (`research-platform-secrets`).
   - external-secrets.yaml
+  - pvc-source-snapshots.yaml
   - deployment-api.yaml
   - service.yaml
   - ingress.yaml
