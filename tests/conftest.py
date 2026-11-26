@@ -15,7 +15,6 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-# Set test environment
 os.environ["CEREBRO_DISABLE_DOTENV"] = "true"
 os.environ["ENVIRONMENT"] = "test"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
@@ -187,17 +186,14 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """Create a test database session."""
-    # Create test engine
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
         echo=False,
         future=True,
     )
 
-    # Create session factory
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    # Create tables - import models to register them
     import src.models.db.research_project
     import src.models.db.research_result
     import src.models.db.workflow_checkpoint  # noqa: F401

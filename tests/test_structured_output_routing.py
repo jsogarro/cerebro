@@ -395,7 +395,6 @@ class TestSchemaInstructionsGeneration:
 
         assert "JSON" in instructions
         assert "schema" in instructions
-        # Check that schema fields are included
         assert "message" in instructions
         assert "count" in instructions
 

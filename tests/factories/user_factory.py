@@ -122,10 +122,8 @@ class TestUserGenerator:
 
     @staticmethod
     def create_organization_users(org_name: str = "Test Org") -> list[User]:
-        """Create users for an organization."""
         users = []
 
-        # Create admin
         admin = UserFactory.create_admin(
             username=f"{org_name.lower().replace(' ', '_')}_admin",
             email=f"admin@{org_name.lower().replace(' ', '')}.com",
@@ -133,7 +131,6 @@ class TestUserGenerator:
         )
         users.append(admin)
 
-        # Create researchers
         for i in range(3):
             researcher = UserFactory.create_researcher(
                 username=f"{org_name.lower().replace(' ', '_')}_researcher_{i}",
@@ -142,7 +139,6 @@ class TestUserGenerator:
             )
             users.append(researcher)
 
-        # Create viewers
         for i in range(2):
             viewer = UserFactory.create_viewer(
                 username=f"{org_name.lower().replace(' ', '_')}_viewer_{i}",

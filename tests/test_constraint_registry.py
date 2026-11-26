@@ -552,8 +552,6 @@ class TestRound2Remediations:
 
 
 class TestConstraintRegistryIntegration:
-    """Integration tests for ConstraintRegistry."""
-
     def test_full_session_workflow(self):
         """Full session: extract from user query, inject into compacted context."""
         registry = ConstraintRegistry(

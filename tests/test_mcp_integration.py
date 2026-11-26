@@ -31,7 +31,6 @@ class TestMCPServer:
     """Test MCP server functionality."""
 
     def test_server_initialization(self):
-        """Test server initialization."""
         config = MCPServerConfig(name="Test Server")
         server = MCPServer(config)
 
@@ -39,7 +38,6 @@ class TestMCPServer:
         assert server.registry is not None
 
     def test_tool_registration(self):
-        """Test tool registration."""
         server = MCPServer()
         tool = AcademicSearchTool()
 
@@ -226,7 +224,6 @@ class TestMCPClient:
 
     @pytest.mark.asyncio
     async def test_client_health_check(self):
-        """Test client health check."""
         client = MCPClient()
 
         health = await client.health_check()
@@ -250,11 +247,9 @@ class TestToolRegistry:
         registry.register(tool)
         assert "search_academic" in registry.list_tools()
 
-        # Get tool
         retrieved = registry.get_tool("search_academic")
         assert retrieved is not None
 
-        # Get metadata
         metadata = registry.get_metadata("search_academic")
         assert metadata.name == "search_academic"
 

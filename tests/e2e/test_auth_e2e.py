@@ -142,7 +142,6 @@ class TestAuthE2E:
                 f"First registration failed: {response1.status_code} - {response1.text}"
             )
 
-            # Try to register with same email
             response2 = await client.post(
                 "/api/v1/auth/register",
                 json={
@@ -178,7 +177,6 @@ class TestAuthE2E:
             )
             assert register_response.status_code == 201
 
-            # Try to login with wrong password
             response = await client.post(
                 "/api/v1/auth/login",
                 json={

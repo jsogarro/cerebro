@@ -40,7 +40,6 @@ class TestTransactionManagement:
         user = UserFactory()
         project = ResearchProjectFactory(user_id=user.id)
 
-        # Add to session
         db_session.add(user)
         db_session.add(project)
 
@@ -172,7 +171,6 @@ class TestComplexQueries:
 
     @pytest.mark.asyncio
     async def test_aggregation_queries(self, db_session: AsyncSession) -> None:
-        """Test aggregation queries."""
         seeder = TestDataSeeder(db_session)
         await seeder.seed_complete_dataset()
 
@@ -216,8 +214,7 @@ class TestComplexQueries:
         )
     )
     @pytest.mark.asyncio
-    async def test_subquery_operations(self, db_session: AsyncSession) -> None:
-        """Test subquery operations."""
+    async def test_subquery_operations(self, db_session: AsyncSession) -> None: ...
 
     @pytest.mark.asyncio
     async def test_window_functions(self, db_session: AsyncSession) -> None:
@@ -294,13 +291,11 @@ class TestDatabaseConstraints:
 
     @pytest.mark.asyncio
     async def test_check_constraints(self, db_session: AsyncSession) -> None:
-        """Test check constraints."""
         # Test invalid enum values
         user = UserFactory()
         db_session.add(user)
         await db_session.commit()
 
-        # Try to set invalid role
         stmt = select(User).where(User.id == user.id)
         result = await db_session.execute(stmt)
         user = result.scalar_one()

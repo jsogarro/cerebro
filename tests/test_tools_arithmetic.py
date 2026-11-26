@@ -38,7 +38,6 @@ class TestArithmeticTool:
 
     @pytest.mark.asyncio
     async def test_floor_division(self, arithmetic_tool):
-        """Test floor division."""
         result = await arithmetic_tool.execute({"expression": "7 // 2"})
         assert result.success is True
         assert result.value["result"] == 3.0

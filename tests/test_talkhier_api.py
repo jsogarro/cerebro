@@ -295,8 +295,6 @@ class TestTalkHierSessionCoordinator:
 
 
 class TestTalkHierSessionService:
-    """Test TalkHier session service"""
-
     @pytest.fixture
     def session_service(self) -> TalkHierSessionService:
         """Create session service instance"""
@@ -348,7 +346,6 @@ class TestTalkHierSessionService:
         self, session_service: TalkHierSessionService
     ) -> None:
         """Test refinement round execution"""
-        # Create a session first
         session_id = "test-session-123"
         session = TalkHierSession(
             session_id=session_id,
@@ -397,7 +394,6 @@ class TestTalkHierSessionService:
         self, session_service: TalkHierSessionService
     ) -> None:
         """Test consensus checking"""
-        # Create session
         session_id = "test-session-456"
         session = TalkHierSession(
             session_id=session_id,
@@ -419,7 +415,6 @@ class TestTalkHierSessionService:
         )
         session_service.sessions[session_id] = session
 
-        # Check consensus
         request = ConsensusCheckRequest(
             round_results=[
                 {"agent": "agent1", "confidence": 0.85, "content": "Result 1"},
@@ -448,7 +443,6 @@ class TestTalkHierSessionService:
     @pytest.mark.asyncio
     async def test_close_session(self, session_service: TalkHierSessionService) -> None:
         """Test session closure"""
-        # Create session
         session_id = "test-session-789"
         session = TalkHierSession(
             session_id=session_id,

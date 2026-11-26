@@ -187,7 +187,6 @@ class TestGeminiService:
 
         result = await service.generate_research_plan(query)
 
-        # Check that cache was accessed
         assert redis_client.get.called
         assert result["cached"] is True
         # Model should not be called since we got cached result

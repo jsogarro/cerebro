@@ -55,7 +55,6 @@ class TestQueryDecomposer:
         assert result.coordination_complexity > 0
 
     def test_analytics_domain_detection(self, decomposer):
-        """Test analytics domain detection."""
         query = "Analyze data trends and statistics for quarterly metrics"
         result = decomposer.decompose_query(query)
 
@@ -64,7 +63,6 @@ class TestQueryDecomposer:
         assert "Analyze data and trends" in result.domain_subqueries["analytics"]
 
     def test_finance_domain_detection(self, decomposer):
-        """Test finance domain detection."""
         query = "Perform DCF valuation and portfolio analysis"
         result = decomposer.decompose_query(query)
 

@@ -84,7 +84,6 @@ def _no_live_provider_routing(monkeypatch):
 
 @pytest.fixture
 def mock_gemini_service():
-    """Mock Gemini service."""
     service = MagicMock()
     service.generate_content = AsyncMock(
         return_value="Analysis: The data shows a clear upward trend."
@@ -121,7 +120,6 @@ class TestWorkerWithTools:
 
         await agent.execute(task)
 
-        # Check that generate_content was called with tool info
         assert mock_gemini_service.generate_content.called
         prompt = mock_gemini_service.generate_content.call_args[0][0]
         assert "Available tools:" in prompt
@@ -150,7 +148,6 @@ class TestWorkerWithTools:
 
         await agent.execute(task)
 
-        # Check that generate_content was called without tool info
         prompt = mock_gemini_service.generate_content.call_args[0][0]
         assert "Available tools:" not in prompt
 

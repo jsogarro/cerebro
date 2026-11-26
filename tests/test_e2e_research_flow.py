@@ -57,7 +57,6 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncClient:
 
     monkeypatch.setattr(config_mod, "settings", config_mod.Settings())
 
-    # Initialize DB
     await init_db(database_url=_TEST_DB_URL)
 
     from src.models.db.research_project import ResearchProject as DBProject
@@ -238,7 +237,6 @@ class TestResearchFlow:
     @pytest.mark.asyncio
     async def test_get_research_project(self, client: AsyncClient) -> None:
         """Test retrieving a created project by ID."""
-        # Create first
         payload = {
             "title": "Test Project",
             "query": {"text": "Test query for retrieval", "domains": ["CS"]},
@@ -248,7 +246,6 @@ class TestResearchFlow:
         assert create_r.status_code == 201
         pid = create_r.json()["id"]
 
-        # Get
         r = await client.get(f"/api/v1/research/projects/{pid}")
         assert r.status_code == 200
         data = r.json()
@@ -259,7 +256,6 @@ class TestResearchFlow:
     @pytest.mark.asyncio
     async def test_list_research_projects(self, client: AsyncClient) -> None:
         """Test listing projects returns created ones."""
-        # Create a project
         payload = {
             "title": "Listed Project",
             "query": {"text": "Test query for listing", "domains": ["Math"]},
@@ -279,7 +275,6 @@ class TestResearchFlow:
     @pytest.mark.asyncio
     async def test_get_research_progress(self, client: AsyncClient) -> None:
         """Test progress endpoint returns valid structure."""
-        # Create
         payload = {
             "title": "Progress Project",
             "query": {"text": "Test query for progress", "domains": ["Physics"]},

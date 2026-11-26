@@ -224,7 +224,6 @@ def docker_test_environment(services: list[str] | None = None):
     manager = DockerTestManager()
 
     try:
-        # Create network
         manager.create_network()
 
         # Start requested services

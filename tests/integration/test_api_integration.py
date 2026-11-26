@@ -129,8 +129,6 @@ class TestAuthenticationFlow:
     async def test_token_refresh_flow(
         self, authenticated_client: AsyncClient, async_client: AsyncClient
     ) -> None:
-        """Test token refresh flow."""
-        # Get initial tokens
         login_response = await async_client.post(
             "/api/v1/auth/login",
             json={"email": "test@example.com", "password": "Test123!@#"},
@@ -168,8 +166,6 @@ class TestAuthenticationFlow:
     async def test_password_reset_flow(
         self, async_client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        """Test password reset flow."""
-        # Create user
         user = UserFactory()
         db_session.add(user)
         await db_session.commit()
@@ -210,7 +206,6 @@ class TestAuthenticationFlow:
     async def test_oauth_authentication_flow(
         self, async_client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        """Test OAuth authentication flow."""
         # Initiate OAuth flow
         await async_client.get("/api/v1/auth/oauth/google")
 
@@ -246,7 +241,6 @@ class TestAuthorizationAndRBAC:
         """Test role-based access control."""
         auth_manager = TestAuthManager()
 
-        # Create users with different roles
         admin_user = UserFactory.create_admin()
         researcher_user = UserFactory.create_researcher()
         viewer_user = UserFactory.create_viewer()
@@ -254,7 +248,6 @@ class TestAuthorizationAndRBAC:
         db_session.add_all([admin_user, researcher_user, viewer_user])
         await db_session.commit()
 
-        # Create tokens for each user
         admin_token = auth_manager.create_access_token(
             admin_user.id, admin_user.email, "admin"
         )
@@ -298,12 +291,10 @@ class TestAuthorizationAndRBAC:
         db_session: AsyncSession,
     ) -> None:
         """Test resource ownership validation."""
-        # Create two users
         user1 = UserFactory()
         user2 = UserFactory()
         db_session.add_all([user1, user2])
 
-        # Create project for user1
         project = ResearchProjectFactory(user_id=user1.id)
         db_session.add(project)
         await db_session.commit()
@@ -427,7 +418,6 @@ class TestCompleteAPIWorkflow:
         self, authenticated_client: AsyncClient, db_session: AsyncSession
     ) -> None:
         """Test concurrent execution of multiple projects."""
-        # Create multiple projects
         projects = []
         for i in range(3):
             project_data = {
@@ -464,7 +454,6 @@ class TestCompleteAPIWorkflow:
             assert response.status_code == 200
             assert "workflow_id" in response.json()
 
-        # Check all projects are running
         for project in projects:
             status_response = await authenticated_client.get(
                 f"/api/v1/projects/{project['id']}/status"
@@ -480,7 +469,6 @@ class TestCompleteAPIWorkflow:
         self, authenticated_client: AsyncClient, db_session: AsyncSession
     ) -> None:
         """Test project cancellation workflow."""
-        # Create and start project
         project_data = {
             "title": "Cancellable Research",
             "description": "This will be cancelled",

@@ -53,7 +53,6 @@ def mock_gemini_service():
 
 @pytest.fixture
 def mock_cache_client():
-    """Mock cache client."""
     return MagicMock()
 
 

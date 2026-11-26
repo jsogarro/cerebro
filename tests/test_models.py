@@ -49,7 +49,6 @@ class TestResearchProjectModel:
         assert project.updated_at is not None
 
     def test_research_scope_configuration(self):
-        """Test research scope configuration."""
         # Arrange
         scope = ResearchScope(
             depth_level="exhaustive",
@@ -106,7 +105,6 @@ class TestResearchProjectModel:
         assert plan.estimated_total_duration_seconds == 5400
 
     def test_research_project_status_transitions(self):
-        """Test research project status transitions."""
         # Arrange
         query = ResearchQuery(
             text="Climate change impact on global food security",
@@ -188,7 +186,6 @@ class TestResearchProjectModel:
             ResearchQuery(text="Test query", domains=[])
 
     def test_agent_task_status_tracking(self):
-        """Test agent task status tracking."""
         # Arrange
         task = AgentTask(
             agent_type="literature_review",

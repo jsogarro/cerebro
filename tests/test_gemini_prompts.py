@@ -117,7 +117,6 @@ class TestAgentPrompts:
         assert "efficiency" in prompt.lower()
 
     def test_methodology_agent_prompt(self):
-        """Test Methodology Agent prompt."""
         from src.services.prompts.agent_prompts import generate_methodology_agent_prompt
 
         research_question = "How does AI affect job markets?"
@@ -130,7 +129,6 @@ class TestAgentPrompts:
         assert "quantitative" in prompt.lower()
 
     def test_synthesis_agent_prompt(self):
-        """Test Synthesis Agent prompt."""
         from src.services.prompts.agent_prompts import generate_synthesis_agent_prompt
 
         agent_outputs = {
@@ -146,7 +144,6 @@ class TestAgentPrompts:
         assert "Finding 1" in prompt
 
     def test_citation_agent_prompt(self):
-        """Test Citation Agent prompt."""
         from src.services.prompts.agent_prompts import generate_citation_agent_prompt
 
         sources = [
@@ -199,7 +196,6 @@ class TestValidationPrompts:
         assert "peer review" in prompt.lower()
 
     def test_consistency_checking_prompt(self):
-        """Test consistency checking prompt."""
         from src.services.prompts.validation_prompts import generate_consistency_prompt
 
         findings = [
@@ -251,13 +247,11 @@ class TestPromptUtils:
         assert result.count("\n") >= 3
 
     def test_prompt_length_validation(self):
-        """Test prompt length validation."""
         from src.services.prompts.base_prompts import validate_prompt_length
 
         short_prompt = "Short prompt"
         assert validate_prompt_length(short_prompt, max_tokens=1000) is True
 
-        # Create a very long prompt
         long_prompt = "word " * 10000
         assert validate_prompt_length(long_prompt, max_tokens=1000) is False
 
