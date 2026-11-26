@@ -444,3 +444,15 @@ async def test_a_run_that_never_started_releases_its_ledger_row(
     view = await read_check(factory, check_id)
     assert view.status == "failed"
     assert await count(factory, UsageLedger) == 0
+
+
+async def test_a_stored_excerpt_is_capped(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    long_passage = " ".join(f"long{i}" for i in range(600))
+    target = await make_document(factory, text=f"{TEXT} {long_passage}")
+    await make_document(factory, text=other_text("zz", long_passage))
+    _, view = await run_check(factory, target, options={"own_uploads": True})
+    match = max(view.matches, key=lambda m: m.tokens)
+    assert match.tokens >= 600
+    assert len(match.source_excerpt or "") == service.MAX_EXCERPT_CHARS

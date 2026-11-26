@@ -10,7 +10,6 @@ from src.repositories.similarity_repository import CheckView, MatchView
 from src.services.text_reuse import report
 from src.services.text_reuse.report import (
     DETECTION_LIMITS,
-    FOOTER,
     NOT_COVERED,
     render_report,
 )
@@ -107,9 +106,11 @@ def test_zero_matches_print_the_exact_sentence_with_coverage_directly_below():
 
 def test_the_fixed_footer_is_on_every_report():
     for text in (render_report(check(), DOC), render_report(check(match()), DOC)):
-        assert FOOTER in text
-    assert "does not show the text is unique" in FOOTER
-    assert "not a finding of misconduct" in FOOTER
+        assert text.rstrip().endswith(
+            "No match means none was found in the sources searched. It does not show "
+            "the text is unique. Similarity evidence is for human review; it is not a "
+            "finding of misconduct."
+        )
 
 
 @pytest.mark.parametrize("matches", [(), (match(),)])
