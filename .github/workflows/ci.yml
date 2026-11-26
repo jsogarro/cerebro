@@ -295,17 +295,6 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Install Playwright Browsers
-        # E2E tests need a running backend; until that's wired up in CI,
-        # keep playwright install + the E2E run non-blocking. Build + Lint
-        # remain hard gates.
-        if: false
-        run: npx playwright install --with-deps
-
-      - name: Run E2E Tests
-        if: false
-        run: npm run test:e2e
-
       - name: Build
         run: npm run build
 
