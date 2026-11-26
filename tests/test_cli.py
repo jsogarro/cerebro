@@ -251,7 +251,6 @@ class TestProjectCommands:
         self, mock_client_class, runner, sample_project, tmp_path
     ):
         """Test creating projects from file."""
-        # Create test file
         test_file = tmp_path / "test_projects.yaml"
         test_data = [
             {

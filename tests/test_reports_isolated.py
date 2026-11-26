@@ -24,7 +24,6 @@ class TestReportModels:
     """Test report API models."""
 
     def test_create_report_request_validation(self):
-        """Test CreateReportRequest validation."""
         # Valid request
         request = CreateReportRequest(
             title="Test Report",
@@ -62,7 +61,6 @@ class TestReportModels:
         assert request.formats == [ReportFormat.HTML, ReportFormat.MARKDOWN]
 
     def test_report_response_creation(self):
-        """Test ReportResponse creation."""
         report_id = uuid4()
 
         response = ReportResponse(

@@ -78,7 +78,6 @@ class TestWebSocketMessages:
         assert "Searching academic databases" in output
 
     def test_progress_update_model(self) -> None:
-        """Test ProgressUpdate model."""
         progress = ProgressUpdate(
             total_tasks=10,
             completed_tasks=6,
@@ -95,7 +94,6 @@ class TestWebSocketMessages:
         assert progress.current_agent == "synthesis_agent"
 
     def test_agent_update_model(self) -> None:
-        """Test AgentUpdate model."""
         agent_update = AgentUpdate(
             agent_type="literature_review",
             agent_id="agent_123",
@@ -141,7 +139,6 @@ class TestConnectionManager:
         assert client_id in connection_manager.connections
         assert len(connection_manager.connections) == 1
 
-        # Check connection info
         connection_info = connection_manager.get_connection_info(client_id)
         assert connection_info is not None
         assert connection_info.client_type == "cli"
@@ -168,7 +165,6 @@ class TestConnectionManager:
         assert project_id in connection_manager.project_subscriptions
         assert client_id in connection_manager.project_subscriptions[project_id]
 
-        # Check subscription
         connection = connection_manager.connections[client_id]
         assert connection.is_subscribed_to_project(project_id)
 
@@ -181,7 +177,6 @@ class TestConnectionManager:
     async def test_subscription_request_handling(
         self, connection_manager: ConnectionManager, mock_websocket: AsyncMock
     ) -> None:
-        """Test handling of subscription requests."""
         project_id = uuid4()
 
         # Connect client
@@ -257,7 +252,6 @@ class TestConnectionManager:
         client_id = await connection_manager.connect(mock_websocket)
         connection_manager.subscribe_to_project(client_id, project_id)
 
-        # Make websocket send fail
         mock_websocket.send_text.side_effect = Exception("Connection lost")
 
         # Broadcast message
@@ -287,7 +281,6 @@ class TestEventPublisher:
     async def test_progress_update_publishing(
         self, event_publisher: EventPublisher
     ) -> None:
-        """Test publishing progress updates."""
         project_id = uuid4()
 
         progress = ProgressUpdate(

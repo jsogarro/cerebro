@@ -13,8 +13,6 @@ from src.models.talkhier_api_models import (
 
 
 class TestTalkHierSessionManager:
-    """Test TalkHier session manager."""
-
     @pytest.fixture
     def session_manager(self) -> TalkHierSessionManager:
         """Create session manager instance."""
@@ -45,7 +43,6 @@ class TestTalkHierSessionManager:
     async def test_update_round_metrics(
         self, session_manager: TalkHierSessionManager
     ) -> None:
-        """Test round metrics update."""
         session_id = "test-session-002"
 
         await session_manager.register_session(session_id, {})

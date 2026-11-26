@@ -51,7 +51,6 @@ class TestResearchProjectE2E:
         headers = {"Authorization": f"Bearer {token}"}
 
         async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
-            # Create a research project
             create_response = await client.post(
                 "/api/v1/research/projects",
                 headers=headers,
@@ -76,14 +75,12 @@ class TestResearchProjectE2E:
             )
             assert project_id is not None
 
-            # Get the project
             get_response = await client.get(
                 f"/api/v1/research/projects/{project_id}",
                 headers=headers,
             )
             assert get_response.status_code == 200
 
-            # Check progress (poll a couple times)
             for _ in range(3):
                 progress_response = await client.get(
                     f"/api/v1/research/projects/{project_id}/progress",
@@ -93,7 +90,6 @@ class TestResearchProjectE2E:
                     break
                 await asyncio.sleep(1)
 
-            # Try to get results (might be empty/not ready yet)
             results_response = await client.get(
                 f"/api/v1/research/projects/{project_id}/results",
                 headers=headers,

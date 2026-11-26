@@ -74,7 +74,6 @@ class TestDatabaseManager:
             raise RuntimeError("Database not initialized")
 
         async with self.engine.begin() as conn:
-            # Get all table names
             inspector = inspect(self.engine.sync_engine)
             tables = inspector.get_table_names()
 
@@ -333,7 +332,6 @@ class DatabaseSnapshot:
         snapshot_data = {}
 
         async with self.engine.begin() as conn:
-            # Get all tables
             inspector = inspect(self.engine.sync_engine)
             tables = inspector.get_table_names()
 
@@ -367,7 +365,6 @@ class DatabaseSnapshot:
             # Restore data
             for table, rows in snapshot_data.items():
                 if rows:
-                    # Build insert statement
                     columns = rows[0].keys()
                     placeholders = ", ".join(f":{col}" for col in columns)
                     insert_sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})"

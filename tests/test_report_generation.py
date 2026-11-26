@@ -184,7 +184,6 @@ class TestReportIntegration:
         assert response.page_count == 0
 
     def test_report_quality_validation(self, temp_environment: ReportSettings) -> None:
-        """Test report quality validation."""
         ReportGenerator(temp_environment)
 
         report = Report(

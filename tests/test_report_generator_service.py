@@ -164,7 +164,6 @@ class TestReportGenerator:
     async def test_citation_processing(
         self, temp_settings: ReportSettings, mock_input_data: dict[str, Any]
     ) -> None:
-        """Test citation processing."""
         generator = ReportGenerator(temp_settings)
 
         report = Report(

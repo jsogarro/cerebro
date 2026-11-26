@@ -98,7 +98,6 @@ class TestAgentAPI:
 
     @pytest.fixture
     def mock_agent_execution_service(self) -> Mock:
-        """Mock agent execution service."""
         service = Mock(spec=AgentExecutionService)
 
         # Mock successful agent execution response

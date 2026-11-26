@@ -41,7 +41,6 @@ from src.models.db.research_result import ResearchResult  # noqa: F401
 from src.models.db.user import User
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint  # noqa: F401
 
-# Initialize Faker for test data generation
 fake = Faker()
 
 
@@ -130,7 +129,6 @@ async def test_engine(postgres_container) -> AsyncEngine:
         max_overflow=20,
     )
 
-    # Create all tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -176,12 +174,11 @@ async def jwt_service(redis_client) -> JWTService:
     """Create JWT service for testing with in-memory keys and test Redis."""
     # Create JWT service with test Redis and in-memory keys (no file paths)
     # This avoids the "/secrets" read-only filesystem issue
-    service = JWTService(
+    return JWTService(
         redis_client=redis_client,
         private_key_path=None,  # Generate in-memory
         public_key_path=None,  # Generate in-memory
     )
-    return service
 
 
 @pytest_asyncio.fixture
@@ -195,12 +192,10 @@ async def authenticated_client(
     )
     from src.models.db.session import get_session
 
-    # Create session for user creation
     async_session = sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
 
-    # Create test user with predictable UUID for tests to reference
     password_service = PasswordService()
 
     test_user = User(
@@ -319,12 +314,10 @@ async def admin_client(
     )
     from src.models.db.session import get_session
 
-    # Create session for user creation
     async_session = sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
 
-    # Create admin user with predictable UUID for tests to reference
     password_service = PasswordService()
 
     admin_user = User(
@@ -504,7 +497,6 @@ async def seed_test_data(db_session: AsyncSession):
     """Seed database with test data."""
     password_service = PasswordService()
 
-    # Create test users
     users = []
     for i in range(5):
         user = User(
@@ -521,7 +513,6 @@ async def seed_test_data(db_session: AsyncSession):
         users.append(user)
         db_session.add(user)
 
-    # Create test projects
     projects = []
     for i in range(10):
         project = ResearchProject(

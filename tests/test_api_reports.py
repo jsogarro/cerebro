@@ -161,7 +161,6 @@ class TestReportsAPI:
             assert data["generation_status"] == "pending"
 
     def test_get_report_endpoint(self, client: TestClient) -> None:
-        """Test get report endpoint."""
         report_id = uuid4()
 
         # Mock database report
@@ -228,7 +227,6 @@ class TestReportsAPI:
             assert "not found" in response.json()["error"]["message"]
 
     def test_download_report_endpoint(self, client: TestClient) -> None:
-        """Test download report endpoint."""
         report_id = uuid4()
         format_type = "html"
 
@@ -282,7 +280,6 @@ class TestReportsAPI:
             assert response.status_code == 404
 
     def test_list_reports_endpoint(self, client: TestClient) -> None:
-        """Test list reports endpoint."""
         user_id = AUTH_USER_ID
 
         # Mock reports
@@ -348,7 +345,6 @@ class TestReportsAPI:
             assert data["has_more"] is False
 
     def test_search_reports_endpoint(self, client: TestClient) -> None:
-        """Test search reports endpoint."""
         search_request = {
             "search_term": "AI education",
             "user_id": str(AUTH_USER_ID),
@@ -401,7 +397,6 @@ class TestReportsAPI:
             assert data["reports"][0]["title"] == "AI in Education Report"
 
     def test_get_statistics_endpoint(self, client: TestClient) -> None:
-        """Test get statistics endpoint."""
         mock_stats = {
             "total_reports": 50,
             "status_counts": {"completed": 45, "failed": 3, "generating": 2},
@@ -444,7 +439,6 @@ class TestReportsAPI:
             assert data["storage_statistics"]["total_storage_mb"] == 125.5
 
     def test_delete_report_endpoint(self, client: TestClient) -> None:
-        """Test delete report endpoint."""
         report_id = uuid4()
 
         with patch("src.api.routes.reports.get_report_services") as mock_services:

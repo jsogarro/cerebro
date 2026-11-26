@@ -67,14 +67,13 @@ def mock_checkpoint_repository():
 @pytest.fixture
 def execution_service_with_checkpoint(mock_session_factory):
     """Create DirectExecutionService with mocked checkpoint dependencies."""
-    service = DirectExecutionService(
+    return DirectExecutionService(
         masr_router=AsyncMock(),
         supervisor_bridge=AsyncMock(),
         supervisor_factory=AsyncMock(),
         event_publisher=AsyncMock(),
         session_factory=mock_session_factory,
     )
-    return service
 
 
 @pytest.mark.asyncio

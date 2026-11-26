@@ -10,8 +10,6 @@ from src.models.talkhier_api_models import InteractiveMessage, MessageRole
 
 
 class TestTalkHierWebSocketHandler:
-    """Test TalkHier WebSocket handler."""
-
     @pytest.fixture
     def websocket_handler(self) -> TalkHierWebSocketHandler:
         """Create WebSocket handler instance."""
@@ -68,7 +66,6 @@ class TestTalkHierWebSocketHandler:
     async def test_interactive_session_management(
         self, websocket_handler: TalkHierWebSocketHandler
     ) -> None:
-        """Test interactive session management."""
         session_id = "interactive-session"
         connection_id = "conn-789"
         websocket = AsyncMock(spec=WebSocket)
@@ -99,7 +96,6 @@ class TestTalkHierWebSocketHandler:
     async def test_coordination_monitoring(
         self, websocket_handler: TalkHierWebSocketHandler
     ) -> None:
-        """Test coordination monitoring."""
         coordination_id = "coord-123"
         connection_id = "monitor-001"
         websocket = AsyncMock(spec=WebSocket)

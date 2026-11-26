@@ -64,7 +64,6 @@ class TestReportModels:
         assert viz.data["x"] == [1, 2, 3]
 
     def test_report_section_creation(self) -> None:
-        """Test report section creation."""
         section = ReportSection(
             title="Introduction",
             content="This is the introduction content.",
@@ -132,7 +131,6 @@ class TestReportConfiguration:
     """Test report configuration and settings."""
 
     def test_report_settings_creation(self) -> None:
-        """Test report settings creation."""
         settings = create_report_settings()
 
         assert settings.report_storage_path
@@ -142,7 +140,6 @@ class TestReportConfiguration:
         assert settings.max_report_size_mb > 0
 
     def test_report_configuration_validation(self) -> None:
-        """Test report configuration validation."""
         config = ReportConfiguration(
             format=ReportFormat.PDF,
             type=ReportType.ACADEMIC_PAPER,
