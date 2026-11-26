@@ -51,14 +51,14 @@ class FinancialAnalysisAgent(_FinanceAgentBase):
         if not isinstance(values, dict) or not values:
             return None
 
-        try:
-            from src.agents.tools.finance_math import financial_ratios
+        from src.agents.tools.finance_math import financial_ratios
 
+        try:
             result = financial_ratios(values)
-            return {"ratios": result.model_dump()}
-        except Exception:
-            # Silently fail on bad/missing inputs
+        except (TypeError, ValueError):
+            # Non-numeric inputs: leave the answer to the model.
             return None
+        return {"ratios": result.model_dump()}
 
     def _build_prompt(self, query: str, task: AgentTask) -> str:
         return (

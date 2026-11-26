@@ -547,51 +547,45 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             self.log_warning("MCP integration not available for statistical analysis")
             return self._fallback_statistical_analysis(input_data)
 
-        # Reject a malformed shape here, outside the try below: that handler
-        # answers with fabricated stand-in content, and a bad input must fail.
+        # A malformed shape must fail, not fall back to stand-in content.
         comparison_data = input_data.get("comparison_data", {})
         criteria = input_data.get("criteria", [])
         series = self._correlation_series(comparison_data, criteria)
 
-        try:
-            tests_performed = []
-            descriptive_stats: dict[str, Any] = {}
-            correlation_analysis: dict[str, Any] = {}
+        tests_performed = []
+        descriptive_stats: dict[str, Any] = {}
+        correlation_analysis: dict[str, Any] = {}
 
-            if comparison_data:
-                descriptive_result = await self.mcp_integration.analyze_statistics(
-                    operation="descriptive",
-                    data=list(comparison_data.values()),
-                    identity=ToolCallIdentity.from_agent_task(task),
-                )
-                if descriptive_result.get("success"):
-                    tests_performed.append("descriptive_statistics")
-                    descriptive_stats = descriptive_result.get("analysis", {})
+        if comparison_data:
+            descriptive_result = await self.mcp_integration.analyze_statistics(
+                operation="descriptive",
+                data=list(comparison_data.values()),
+                identity=ToolCallIdentity.from_agent_task(task),
+            )
+            if descriptive_result.get("success"):
+                tests_performed.append("descriptive_statistics")
+                descriptive_stats = descriptive_result.get("analysis", {})
 
-            if series:
-                x, y = series
-                correlation_result = await self.mcp_integration.analyze_statistics(
-                    operation="correlation",
-                    x=x,
-                    y=y,
-                    identity=ToolCallIdentity.from_agent_task(task),
-                )
-                # A degraded result carries stand-in content; keep none of it.
-                if correlation_result.get("success"):
-                    tests_performed.append("correlation_analysis")
-                    correlation_analysis = correlation_result.get("analysis", {})
+        if series:
+            x, y = series
+            correlation_result = await self.mcp_integration.analyze_statistics(
+                operation="correlation",
+                x=x,
+                y=y,
+                identity=ToolCallIdentity.from_agent_task(task),
+            )
+            # A degraded result carries stand-in content; keep none of it.
+            if correlation_result.get("success"):
+                tests_performed.append("correlation_analysis")
+                correlation_analysis = correlation_result.get("analysis", {})
 
-            return {
-                "success": True,
-                "tests_performed": tests_performed,
-                "descriptive_stats": descriptive_stats,
-                "correlation_analysis": correlation_analysis,
-                "data_quality": "high" if comparison_data else "limited",
-            }
-
-        except Exception as e:
-            self.log_error(f"MCP statistical analysis failed: {e}")
-            return self._fallback_statistical_analysis(input_data)
+        return {
+            "success": True,
+            "tests_performed": tests_performed,
+            "descriptive_stats": descriptive_stats,
+            "correlation_analysis": correlation_analysis,
+            "data_quality": "high" if comparison_data else "limited",
+        }
 
     async def _build_comparison_knowledge_graph(
         self,
@@ -624,25 +618,20 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             if abstract:
                 text_for_analysis += f" {abstract[:200]}"  # First 200 chars
 
-        try:
-            result = await self.mcp_integration.build_knowledge_graph(
-                text=text_for_analysis, identity=ToolCallIdentity.from_agent_task(task)
+        result = await self.mcp_integration.build_knowledge_graph(
+            text=text_for_analysis, identity=ToolCallIdentity.from_agent_task(task)
+        )
+
+        if result.get("success"):
+            entities = result.get("entities", [])
+            self.log_info(
+                f"Built comparison knowledge graph with {len(entities)} entities"
             )
+            return dict(result)
 
-            if result.get("success"):
-                entities = result.get("entities", [])
-                self.log_info(
-                    f"Built comparison knowledge graph with {len(entities)} entities"
-                )
-                return dict(result)
-            else:
-                raise Exception(
-                    f"Knowledge graph building failed: {result.get('error')}"
-                )
-
-        except Exception as e:
-            self.log_error(f"Comparison knowledge graph building failed: {e}")
-            return {"success": False, "error": str(e)}
+        error = result.get("error")
+        self.log_error(f"Comparison knowledge graph building failed: {error}")
+        return {"success": False, "error": str(error)}
 
     def _generate_cache_key(self, task: AgentTask) -> str:
         """
@@ -767,7 +756,7 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
             return dict(analysis)
 
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             self.log_error(f"Gemini analysis with MCP data failed: {e}")
             return self._generate_mock_analysis_with_mcp(
                 input_data, research_data, statistical_data

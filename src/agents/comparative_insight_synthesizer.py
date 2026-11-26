@@ -167,25 +167,22 @@ class ComparativeInsightSynthesizer:
             for source in methodology_sources
         ]
 
-        try:
-            format_citations: Callable[..., Awaitable[dict[str, Any]]] = (
-                mcp_integration.format_citations
-            )
-            result = await format_citations(sources=citation_sources, style="APA")
+        format_citations: Callable[..., Awaitable[dict[str, Any]]] = (
+            mcp_integration.format_citations
+        )
+        result = await format_citations(sources=citation_sources, style="APA")
 
-            if result.get("success"):
-                log_info(f"Generated {len(citation_sources)} methodology citations")
-                return {
-                    "success": True,
-                    "citations": result.get("formatted_citations", []),
-                    "methodology_count": len(citation_sources),
-                }
+        if result.get("success"):
+            log_info(f"Generated {len(citation_sources)} methodology citations")
+            return {
+                "success": True,
+                "citations": result.get("formatted_citations", []),
+                "methodology_count": len(citation_sources),
+            }
 
-            raise Exception(f"Citation formatting failed: {result.get('error')}")
-
-        except Exception as exc:
-            log_error(f"Methodology citation generation failed: {exc}")
-            return {"success": False, "error": str(exc)}
+        error = result.get("error")
+        log_error(f"Methodology citation generation failed: {error}")
+        return {"success": False, "error": str(error)}
 
     def summarize_research_findings(self, research_data: dict[str, Any]) -> str:
         """Summarize research findings for Gemini analysis."""

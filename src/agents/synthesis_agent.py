@@ -54,18 +54,11 @@ class SynthesisAgent(LLMWorkerAgentBase):
             # Generate synthesis using structured output
             from src.agents.schemas import SynthesisSchema
 
-            try:
-                prompt = self._build_prompt(agent_outputs)
-                schema_result = await self._generate_structured_with_routing(
-                    prompt, SynthesisSchema, task=task
-                )
-                synthesis = schema_result.model_dump()
-            except Exception as e:
-                # Fallback for testing without configured LLM
-                self.log_warning(
-                    f"Structured generation failed: {e}, using mock fallback"
-                )
-                synthesis = self._generate_mock_synthesis(agent_outputs)
+            prompt = self._build_prompt(agent_outputs)
+            schema_result = await self._generate_structured_with_routing(
+                prompt, SynthesisSchema, task=task
+            )
+            synthesis = schema_result.model_dump()
 
             confidence = self._calculate_confidence(synthesis, agent_outputs)
 
@@ -179,17 +172,3 @@ Your task:
 6. Provide a confidence_assessment of the synthesis quality
 
 Return your synthesis as structured JSON."""
-
-    def _generate_mock_synthesis(self, agent_outputs: dict[str, Any]) -> dict[str, Any]:
-        """Generate mock synthesis for testing."""
-        return {
-            "integrated_findings": [
-                f"Integrated finding from {len(agent_outputs)} agents",
-                "Cross-validated conclusion",
-            ],
-            "cross_agent_patterns": ["Pattern identified across agents"],
-            "conflict_resolutions": ["Resolved conflicting findings"],
-            "meta_insights": ["Higher-order insight from synthesis"],
-            "comprehensive_narrative": "Complete synthesis narrative combining all agent outputs...",
-            "confidence_assessment": "High confidence based on convergent findings",
-        }

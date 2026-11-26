@@ -334,14 +334,7 @@ class TestLiteratureReviewAgent:
 
     @pytest.mark.asyncio
     async def test_gemini_error_handling(self):
-        """Test graceful degradation when Gemini service errors out.
-
-        The structured-output flow swallows individual call failures inside
-        _search_sources_structured / _analyze_sources_structured (returning
-        empty lists / dicts). The agent then proceeds with the fallback
-        analysis. Verify the agent stays alive and reports zero sources
-        rather than propagating the error.
-        """
+        """A failing model call is reported as a failed task, not as zero sources."""
         from src.agents.literature_review_agent import LiteratureReviewAgent
 
         mock_gemini = AsyncMock()
@@ -360,10 +353,8 @@ class TestLiteratureReviewAgent:
 
         result = await agent.execute(task)
 
-        # Production swallows source-search errors and returns empty sources
-        assert result.status == "success"
-        assert result.output["sources_found"] == []
-        assert result.confidence < 0.7
+        assert result.status == "failed"
+        assert result.output["error"] == "Gemini API error"
 
     @pytest.mark.asyncio
     async def test_depth_level_handling(self):
