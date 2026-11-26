@@ -5,10 +5,7 @@ This module provides LaTeX generation from report data,
 following functional programming principles with pure transformation functions.
 """
 
-import os
 import re
-import subprocess
-import tempfile
 from typing import Any
 
 from structlog import get_logger
@@ -48,24 +45,10 @@ class LaTeXExporter:
             ["geometry", "graphicx", "hyperref", "cite", "amsmath", "amsfonts"],
         )
 
-        self.pdflatex_available = self._check_pdflatex_availability()
-
-    def _check_pdflatex_availability(self) -> bool:
-        """Check if pdflatex is available for PDF compilation."""
-        try:
-            result = subprocess.run(
-                ["pdflatex", "--version"], capture_output=True, text=True, timeout=10
-            )
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            logger.warning("pdflatex not available - LaTeX compilation to PDF disabled")
-            return False
-
     def export_to_latex(
         self,
         report: Report,
         include_bibliography: bool = True,
-        compile_to_pdf: bool = False,
     ) -> ReportOutput:
         """
         Export report to LaTeX format.
@@ -73,7 +56,6 @@ class LaTeXExporter:
         Args:
             report: Report object to export
             include_bibliography: Whether to include bibliography
-            compile_to_pdf: Whether to compile LaTeX to PDF
 
         Returns:
             ReportOutput with LaTeX content
@@ -84,26 +66,14 @@ class LaTeXExporter:
             # Generate LaTeX content
             latex_content = self._generate_latex_document(report, include_bibliography)
 
-            # Compile to PDF if requested and available
-            if compile_to_pdf and self.pdflatex_available:
-                pdf_bytes = self._compile_latex_to_pdf(latex_content)
-                return ReportOutput(
-                    format=ReportFormat.PDF,
-                    content=pdf_bytes,
-                    file_path=None,
-                    file_size=len(pdf_bytes),
-                    mime_type="application/pdf",
-                    encoding="binary",
-                )
-            else:
-                return ReportOutput(
-                    format=ReportFormat.LATEX,
-                    content=latex_content,
-                    file_path=None,
-                    file_size=len(latex_content.encode("utf-8")),
-                    mime_type="application/x-latex",
-                    encoding="utf-8",
-                )
+            return ReportOutput(
+                format=ReportFormat.LATEX,
+                content=latex_content,
+                file_path=None,
+                file_size=len(latex_content.encode("utf-8")),
+                mime_type="application/x-latex",
+                encoding="utf-8",
+            )
 
         except Exception as e:
             logger.error(f"LaTeX export failed: {e}")
@@ -521,51 +491,6 @@ class LaTeXExporter:
             abstract_text = " ".join(words[:200]) + "..."
 
         return self._convert_markdown_to_latex(abstract_text)
-
-    def _compile_latex_to_pdf(self, latex_content: str) -> bytes:
-        """Compile LaTeX content to PDF using pdflatex."""
-        if not self.pdflatex_available:
-            raise LaTeXExportError("pdflatex not available for compilation")
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Write LaTeX file
-            tex_file = os.path.join(temp_dir, "document.tex")
-            with open(tex_file, "w", encoding="utf-8") as f:
-                f.write(latex_content)
-
-            # Compile with pdflatex (run twice for cross-references)
-            for run in range(2):
-                try:
-                    result = subprocess.run(
-                        [
-                            "pdflatex",
-                            "-interaction=nonstopmode",
-                            "-output-directory",
-                            temp_dir,
-                            tex_file,
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=60,
-                    )
-
-                    if result.returncode != 0:
-                        logger.error(
-                            f"pdflatex compilation failed:\n{result.stdout}\n{result.stderr}"
-                        )
-                        if run == 0:  # Try once more
-                            continue
-                        raise LaTeXExportError(f"pdflatex failed: {result.stderr}")
-
-                except subprocess.TimeoutExpired:
-                    raise LaTeXExportError("pdflatex compilation timed out") from None
-
-            pdf_file = os.path.join(temp_dir, "document.pdf")
-            if not os.path.exists(pdf_file):
-                raise LaTeXExportError("PDF file was not generated")
-
-            with open(pdf_file, "rb") as f:
-                return f.read()
 
     def validate_latex_content(self, latex_content: str) -> list[str]:
         """Validate LaTeX content and return warnings."""

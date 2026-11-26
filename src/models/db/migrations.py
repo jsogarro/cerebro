@@ -4,7 +4,6 @@ Database migration utilities.
 Provides utilities for managing Alembic migrations programmatically.
 """
 
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -260,69 +259,11 @@ async def check_migration_status() -> dict[str, Any]:
     return manager.check_migration_status()
 
 
-# CLI commands for migrations
-def run_migration_command(args: list[str]) -> int:
-    """
-    Run migration command via subprocess.
-
-    Args:
-        args: Command arguments
-
-    Returns:
-        Exit code
-    """
-    cmd = ["alembic", *args]
-    logger.info("running_migration_command", command=cmd)
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.stdout:
-        logger.info("migration_output", output=result.stdout)
-
-    if result.stderr and result.returncode != 0:
-        logger.error("migration_error", error=result.stderr)
-
-    return result.returncode
-
-
-def upgrade(revision: str = "head") -> int:
-    """Run upgrade command."""
-    return run_migration_command(["upgrade", revision])
-
-
-def downgrade(revision: str = "-1") -> int:
-    """Run downgrade command."""
-    return run_migration_command(["downgrade", revision])
-
-
-def current() -> int:
-    """Show current revision."""
-    return run_migration_command(["current"])
-
-
-def history() -> int:
-    """Show migration history."""
-    return run_migration_command(["history"])
-
-
-def create_revision(message: str, autogenerate: bool = True) -> int:
-    """Create new revision."""
-    args = ["revision", "-m", message]
-    if autogenerate:
-        args.insert(1, "--autogenerate")
-    return run_migration_command(args)
-
-
 __all__ = [
     "MigrationManager",
     "check_migration_status",
-    "create_revision",
-    "current",
-    "downgrade",
     "get_current_revision",
     "get_migration_manager",
-    "history",
     "rollback_migration",
     "run_migrations",
-    "upgrade",
 ]
