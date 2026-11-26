@@ -25,6 +25,8 @@ TENANT_TABLES = ("document_critiques", "critique_findings")
 
 
 def _enable_tenant_rls() -> None:
+    # NULLIF: after a transaction that set the tenant ends, the setting reads back
+    # as '' and a bare ::uuid cast would fail every later query.
     for table in TENANT_TABLES:
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         op.execute(
@@ -32,7 +34,8 @@ def _enable_tenant_rls() -> None:
             CREATE POLICY tenant_isolation_{table}
             ON {table}
             USING (
-                organization_id = current_setting('app.current_org_id', true)::uuid
+                organization_id
+                = NULLIF(current_setting('app.current_org_id', true), '')::uuid
             )
             """
         )
