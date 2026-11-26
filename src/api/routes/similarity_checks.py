@@ -57,7 +57,8 @@ router = APIRouter(tags=["similarity"])
 
 NO_STORE = "no-store"
 # One check can use most of its deadline (retrieval plus matching), so a longer queue
-# behind the one-at-a-time semaphore would fail with deadline_exceeded before it ran.
+# behind the one-at-a-time semaphore would usually fail with deadline_exceeded before it
+# ran; the deadline counts queueing time.
 MAX_QUEUED_PER_WORKER = 2
 
 
@@ -357,7 +358,9 @@ def _reserve_worker_slot(state: Any) -> Iterator[None]:
         state.similarity_reserved -= 1
 
 
-async def _admit(scope: Scope, *, open_sources: bool) -> uuid.UUID:
+async def _admit(
+    scope: Scope, *, open_sources: bool
+) -> tuple[uuid.UUID, uuid.UUID | None]:
     """Quota, only through the shared guard; a refusal raises so nothing is written."""
     ids = scope.ids
     try:
@@ -370,8 +373,9 @@ async def _admit(scope: Scope, *, open_sources: bool) -> uuid.UUID:
             limits=service.SIMILARITY_LIMITS,
             count_active=active_similarity_checks,
         )
+        open_sources_id = None
         if open_sources:
-            await admit(
+            open_sources_id = await admit(
                 scope.session,
                 kind="similarity_open_sources",
                 organization_id=ids.organization_id,
@@ -382,7 +386,7 @@ async def _admit(scope: Scope, *, open_sources: bool) -> uuid.UUID:
             )
     except QuotaExceeded as exc:
         raise _error(status.HTTP_429_TOO_MANY_REQUESTS, exc.code) from None
-    return ledger_id
+    return ledger_id, open_sources_id
 
 
 @router.post(
@@ -416,7 +420,7 @@ async def _schedule(
     open_sources: bool,
 ) -> CheckAccepted:
     ids = scope.ids
-    ledger_id = await _admit(scope, open_sources=open_sources)
+    ledger_id, open_sources_ledger_id = await _admit(scope, open_sources=open_sources)
     options = {
         "own_uploads": body.own_uploads,
         "comparison_document_ids": [
@@ -437,37 +441,49 @@ async def _schedule(
             ),
             consent_text_sha256=service.consent_sha256() if open_sources else None,
             ledger_id=ledger_id,
+            open_sources_ledger_id=open_sources_ledger_id,
         )
     )
     job = service.CheckJob(
         row.id, document_id, ids.organization_id, ids.user_id, options
     )
     created_at = row.created_at
-    # The task must find the committed row, so commit before scheduling it.
-    await scope.session.commit()
 
-    task = asyncio.create_task(
-        run_job(
-            table=SIMILARITY_CHECKS,
-            job_id=job.check_id,
-            organization_id=ids.organization_id,
-            created_at=created_at,
-            deadline_s=SIMILARITY_DEADLINE_S,
-            session_factory=runner.session_factory,
-            semaphore=runner.state.similarity_semaphore,
-            work=service.make_work(
-                job, session_factory=runner.session_factory, retrieve=runner.retrieve
-            ),
-            persist=service.make_persist(
-                check_id=job.check_id,
+    def schedule() -> None:
+        task = asyncio.create_task(
+            run_job(
+                table=SIMILARITY_CHECKS,
+                job_id=job.check_id,
                 organization_id=ids.organization_id,
-                user_id=ids.user_id,
+                created_at=created_at,
+                deadline_s=SIMILARITY_DEADLINE_S,
+                session_factory=runner.session_factory,
+                semaphore=runner.state.similarity_semaphore,
+                work=service.make_work(
+                    job,
+                    session_factory=runner.session_factory,
+                    retrieve=runner.retrieve,
+                ),
+                persist=service.make_persist(
+                    check_id=job.check_id,
+                    organization_id=ids.organization_id,
+                    user_id=ids.user_id,
+                ),
             ),
-        ),
-        name=f"similarity:{job.check_id}",
+            name=f"similarity:{job.check_id}",
+        )
+        runner.state.document_jobs.add(task)
+        task.add_done_callback(runner.state.document_jobs.discard)
+
+    # The task must find the committed row, so it is scheduled when the commit finishes: a
+    # callback on the shielded commit, not code after the await. A client that disconnects
+    # mid-commit cancels this handler, but the commit still completes, and a committed row
+    # is never left without a task.
+    commit = asyncio.ensure_future(scope.session.commit())
+    commit.add_done_callback(
+        lambda done: None if done.cancelled() or done.exception() else schedule()
     )
-    runner.state.document_jobs.add(task)
-    task.add_done_callback(runner.state.document_jobs.discard)
+    await asyncio.shield(commit)
     return CheckAccepted(id=job.check_id, status="queued")
 
 
@@ -544,6 +560,7 @@ async def get_report(check_id: uuid.UUID, scope: ScopeDep) -> Response:
         headers={
             "Content-Disposition": f'attachment; filename="similarity-{check_id}.txt"',
             "Cache-Control": NO_STORE,
+            "X-Content-Type-Options": "nosniff",
         },
     )
 

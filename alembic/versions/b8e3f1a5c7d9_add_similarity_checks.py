@@ -54,6 +54,7 @@ def upgrade() -> None:
         sa.Column("consent_text_version", sa.String(50), nullable=True),
         sa.Column("consent_text_sha256", sa.String(64), nullable=True),
         sa.Column("ledger_id", sa.UUID(), nullable=True),
+        sa.Column("open_sources_ledger_id", sa.UUID(), nullable=True),
         sa.Column("coverage", sa.JSON(), nullable=False),
         sa.Column("policy_versions", sa.JSON(), nullable=False),
         sa.Column(

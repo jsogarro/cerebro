@@ -158,7 +158,12 @@ async def client_fixture(
 async def drain() -> None:
     jobs = list(app.state.document_jobs)
     if jobs:
-        await asyncio.wait_for(asyncio.gather(*jobs, return_exceptions=True), 10)
+        results = await asyncio.wait_for(
+            asyncio.gather(*jobs, return_exceptions=True), 10
+        )
+        crashed = [r for r in results if isinstance(r, Exception)]
+        if crashed:
+            raise crashed[0]
 
 
 def checks_url(document_id: uuid.UUID) -> str:
@@ -561,6 +566,7 @@ async def test_deleting_a_running_check_cancels_its_task_and_keeps_the_quota_spe
     assert (
         await client.delete(f"/api/v1/similarity-checks/{check_id}")
     ).status_code == 204
+    # The route must await the cancelled task before it answers, so this holds on return.
     assert retrieval.cancelled is True
     assert (
         await client.get(f"/api/v1/similarity-checks/{check_id}")
@@ -814,3 +820,29 @@ async def test_the_consent_mismatch_preview_is_built_off_the_event_loop(
     body = {"open_sources": consent(consent_text_version="old")}
     assert (await start(client, document_id, body)).status_code == 409
     assert seen == [False]
+
+
+async def test_the_report_forbids_content_sniffing(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    document_id = await make_document(factory)
+    check_id = await run_to_end(client, document_id)
+    report = await client.get(f"/api/v1/similarity-checks/{check_id}/report")
+    assert report.headers["x-content-type-options"] == "nosniff"
+
+
+async def test_a_committed_check_always_gets_its_task_even_if_the_client_leaves(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    document_id = await make_document(factory)
+    request = asyncio.create_task(start(client, document_id))
+    await asyncio.sleep(0)
+    request.cancel()
+    await asyncio.gather(request, return_exceptions=True)
+    await asyncio.sleep(0.5)
+    await drain()
+    async with factory() as session:
+        statuses = (
+            (await session.execute(select(SimilarityCheck.status))).scalars().all()
+        )
+    assert "queued" not in statuses

@@ -398,3 +398,17 @@ def test_a_check_that_searched_nothing_says_so_before_the_coverage_block():
         check(sources_searched={}, partial_reasons=["failed_sources"]), DOC
     )
     assert "No source was searched successfully" in text
+
+
+def test_an_unavailable_uploaded_source_says_so_instead_of_naming_a_licence():
+    gone = match(
+        from_user_upload=True,
+        source_origin="comparison",
+        source_id=str(uuid.uuid4()),
+        source_title="x.pdf",
+        source_excerpt=None,
+        source_licence={"identifier": None, "declared_by": "undeclared"},
+    )
+    text = render_report(check(gone), DOC)
+    assert "excerpt withheld: the uploaded document is no longer available" in text
+    assert "licence" not in text.split("Matches", 1)[1]

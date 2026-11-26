@@ -660,3 +660,68 @@ async def test_deleting_a_check_locks_its_row(
         )
         await session.commit()
     assert seen[-1] is not None
+
+
+async def test_a_stale_queued_check_also_releases_its_open_source_ledger_row(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    target = await make_document(factory)
+    async with factory() as session:
+        primary = await admit(
+            session,
+            kind="similarity_check",
+            organization_id=ORG_A,
+            user_id=USER_A,
+            units=1,
+            limits=JobLimits(),
+            count_active=active_similarity_checks,
+        )
+        secondary = await admit(
+            session,
+            kind="similarity_open_sources",
+            organization_id=ORG_A,
+            user_id=USER_A,
+            units=1,
+            limits=JobLimits(),
+            count_active=active_similarity_checks,
+        )
+        row = await SimilarityRepository(session, document_cipher()).create(
+            NewCheck(
+                target,
+                ORG_A,
+                USER_A,
+                {},
+                {},
+                ledger_id=primary,
+                open_sources_ledger_id=secondary,
+            )
+        )
+        row.created_at = datetime.now(UTC) - timedelta(
+            seconds=SIMILARITY_DEADLINE_S + 600
+        )
+        await session.commit()
+        check_id = row.id
+    assert await count(factory, UsageLedger) == 2
+    await read_check(factory, check_id)
+    assert await count(factory, UsageLedger) == 0
+
+
+async def test_an_excerpt_of_an_expired_source_document_is_no_longer_served(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    from src.models.db.uploaded_document import UploadedDocument
+
+    target = await make_document(factory)
+    source = await make_document(factory, text=other_text("zz"), filename="old.txt")
+    check_id, view = await run_check(
+        factory, target, options={"comparison_document_ids": [str(source)]}
+    )
+    assert view.matches[0].source_excerpt == SHARED
+    async with factory() as session:
+        row = await session.get(UploadedDocument, source)
+        assert row is not None
+        row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        await session.commit()
+    after = await read_check(factory, check_id)
+    assert after.matches[0].source_excerpt is None
+    assert "old.txt" not in after.matches[0].source_title

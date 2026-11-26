@@ -67,6 +67,11 @@ class SimilarityCheck(Base):
     consent_text_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # The usage_ledger row this run was admitted under, released if it never starts.
     ledger_id: Mapped[uuid.UUID | None] = mapped_column(UUID(), nullable=True)
+    # The second ledger row of an open-sources check, released with the first when the
+    # run never starts.
+    open_sources_ledger_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(), nullable=True
+    )
     coverage: Mapped[dict[str, object]] = mapped_column(
         JSON, nullable=False, default=dict
     )

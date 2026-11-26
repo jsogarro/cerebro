@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
 
-from sqlalchemy import Select, case, func, select
+from sqlalchemy import Select, case, delete, func, select
 from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +29,7 @@ from src.models.db.similarity_check import (
     SimilarityCheck,
     SimilarityMatch,
 )
+from src.models.db.uploaded_document import UploadedDocument, UsageLedger
 from src.repositories.tenant_scope import normalize_organization_id, scope_to_owner
 from src.repositories.uploaded_document_repository import UndecryptableDocumentError
 from src.services.document_jobs import flip_if_stale, is_stale, stale_cutoff
@@ -85,6 +86,7 @@ class NewCheck:
     consent_text_version: str | None = None
     consent_text_sha256: str | None = None
     ledger_id: uuid.UUID | None = None
+    open_sources_ledger_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -199,6 +201,7 @@ class SimilarityRepository:
             consent_text_version=new.consent_text_version,
             consent_text_sha256=new.consent_text_sha256,
             ledger_id=new.ledger_id,
+            open_sources_ledger_id=new.open_sources_ledger_id,
             coverage={},
             policy_versions=new.policy_versions,
             created_at=datetime.now(UTC),
@@ -274,9 +277,17 @@ class SimilarityRepository:
         if is_stale(
             row.status, row.created_at, SIMILARITY_DEADLINE_S, datetime.now(UTC)
         ):
-            await flip_if_stale(
+            was_queued = row.status == "queued"
+            flipped = await flip_if_stale(
                 self._session, SIMILARITY_CHECKS, row, SIMILARITY_DEADLINE_S
             )
+            if flipped and was_queued and row.open_sources_ledger_id is not None:
+                # The shared guard releases the first ledger row; this is the second.
+                await self._session.execute(
+                    delete(UsageLedger).where(
+                        UsageLedger.id == row.open_sources_ledger_id
+                    )
+                )
             # Refresh even when the flip lost the race: the job may have just finished.
             try:
                 await self._session.refresh(row)
@@ -285,7 +296,8 @@ class SimilarityRepository:
                 return None
         return row
 
-    def _match(self, row: SimilarityMatch) -> MatchView:
+    def _match(self, row: SimilarityMatch, live: set[uuid.UUID]) -> MatchView:
+        gone = row.source_document_id is not None and row.source_document_id not in live
         return MatchView(
             id=row.id,
             kind=row.kind,
@@ -298,7 +310,9 @@ class SimilarityRepository:
             source_origin=row.source_origin,
             source_document_id=row.source_document_id,
             source_id=row.source_id,
-            source_title=self._decrypt(row.source_title_enc),
+            source_title=(
+                "(expired document)" if gone else self._decrypt(row.source_title_enc)
+            ),
             source_year=row.source_year,
             source_licence=row.source_licence,
             source_text_kind=row.source_text_kind,
@@ -306,7 +320,7 @@ class SimilarityRepository:
             src_end=row.src_end,
             source_excerpt=(
                 self._decrypt(row.source_excerpt_enc)
-                if row.source_excerpt_enc
+                if row.source_excerpt_enc and not gone
                 else None
             ),
             normalizations_applied=tuple(row.normalizations_applied),
@@ -319,8 +333,9 @@ class SimilarityRepository:
         row: SimilarityCheck,
         matches: Sequence[SimilarityMatch] = (),
         total: int = 0,
+        live: set[uuid.UUID] | None = None,
     ) -> CheckView:
-        decoded = [self._match(m) for m in matches]
+        decoded = [self._match(m, live or set()) for m in matches]
         return CheckView(
             id=row.id,
             document_id=row.document_id,
@@ -337,6 +352,30 @@ class SimilarityRepository:
             matches=tuple(decoded),
             match_total=total,
         )
+
+    async def _live_sources(
+        self,
+        matches: Sequence[SimilarityMatch],
+        organization_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> set[uuid.UUID]:
+        """Source documents still readable; an expired one is purged later, not yet gone."""
+        wanted = {m.source_document_id for m in matches if m.source_document_id}
+        if not wanted:
+            return set()
+        rows = await self._session.execute(
+            scope_to_owner(
+                select(UploadedDocument.id).where(
+                    UploadedDocument.id.in_(wanted),
+                    UploadedDocument.expires_at > datetime.now(UTC),
+                ),
+                org_column=UploadedDocument.organization_id,
+                user_column=UploadedDocument.user_id,
+                organization_id=organization_id,
+                user_id=user_id,
+            )
+        )
+        return set(rows.scalars())
 
     async def get(
         self,
@@ -403,7 +442,8 @@ class SimilarityRepository:
                 ).scalars()
             )
         try:
-            return self._view(row, matches, total)
+            live = await self._live_sources(matches, organization_id, user_id)
+            return self._view(row, matches, total, live)
         except UndecryptableDocumentError:
             # A key rotated away reads as missing, like an undecryptable document.
             return None

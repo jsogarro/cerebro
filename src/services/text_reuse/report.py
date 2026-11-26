@@ -139,6 +139,10 @@ def _match_lines(number: int, m: MatchView, text: str) -> list[str]:
             lines.append(f"   Link: {link}")
     if m.source_excerpt:
         lines.append(f'   Source excerpt: "{_one_line(m.source_excerpt)}"')
+    elif m.from_user_upload:
+        lines.append(
+            "   excerpt withheld: the uploaded document is no longer available"
+        )
     else:
         lines.append(
             f"   excerpt withheld: source licence {_licence_label(m)} does not "

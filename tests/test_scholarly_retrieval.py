@@ -928,11 +928,13 @@ async def test_a_client_that_follows_redirects_is_refused(clock):
             )
 
 
-async def test_the_spacing_sleep_never_outlasts_the_deadline(httpx_mock, run, clock):
+async def test_the_full_spacing_is_kept_even_when_the_deadline_is_near(
+    httpx_mock, run, clock
+):
     search_ok(httpx_mock, work())
     await run(budget=RetrievalBudget(max_queries=1, deadline_s=0.2))
     slept = [seconds for kind, _, seconds in clock.log if kind == "sleep"]
-    assert slept and max(slept) <= 0.2
+    assert slept == [0.5]
 
 
 async def test_full_text_fetched_from_arxiv_never_inherits_the_openalex_licence(
