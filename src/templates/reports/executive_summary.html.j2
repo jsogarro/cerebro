@@ -290,7 +290,7 @@
     <div class="highlight-card">
         <h3><span class="highlight-icon">🎯</span> Key Results</h3>
         <div class="metric-box">
-            <span class="metric-number">{{ sum(section.subsections | length for section in report.sections if section.title == "Key Findings") or "Multiple" }}</span>
+            <span class="metric-number">{{ report.sections | selectattr("title", "equalto", "Key Findings") | map(attribute="subsections") | map("length") | sum or "Multiple" }}</span>
             <span class="metric-label">Key Findings</span>
         </div>
         <p>Strategic insights with actionable recommendations</p>

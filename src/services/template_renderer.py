@@ -265,6 +265,17 @@ class TemplateRenderer:
     def _sanitize_rendered_html(self, html: str) -> str:
         """Remove unsafe HTML before templates mark rendered markdown as safe."""
 
+        # Stripping a tag can splice its neighbours into a new one
+        # (`<<b>img>` -> `<img>`), so repeat until the output is stable.
+        sanitized = html
+        while True:
+            cleaned = self._strip_unsafe_html_once(sanitized)
+            if cleaned == sanitized:
+                return cleaned
+            sanitized = cleaned
+
+    @staticmethod
+    def _strip_unsafe_html_once(html: str) -> str:
         sanitized = re.sub(
             r"<(script|style)[^>]*>.*?</\1>",
             "",
