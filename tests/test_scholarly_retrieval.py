@@ -856,7 +856,7 @@ async def test_bytes_received_is_the_body_length(httpx_mock, run, events):
 
 
 async def test_results_must_be_a_list(httpx_mock, run):
-    httpx_mock.add_response(url=OPENALEX, json={"results": {"a": 1}})
+    httpx_mock.add_response(url=OPENALEX, json={"results": {"a": 1, "b": 2}})
     res = await run(budget=RetrievalBudget(max_queries=1))
     assert res.openalex.failures == {"parse_error": 1}
 
