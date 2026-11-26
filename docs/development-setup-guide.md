@@ -8,7 +8,7 @@ How to install the dependencies, configure the environment, run the stack, authe
 |---|---|---|
 | Python | 3.11 or newer | `pyproject.toml` (`requires-python = ">=3.11"`); `.python-version` pins `3.11`; the CI test job runs 3.11, 3.12 and 3.13; the `Dockerfile` and `docker/Dockerfile.masr` use Python 3.13 |
 | uv | any recent release | `make install` runs `uv pip install`; CI installs uv 0.13.7 (`UV_VERSION` in `ci.yml`) and runs `uv pip install --system` |
-| Docker with Compose v2 | `docker compose` | `scripts/compose.sh` calls `docker compose`; a few Make targets call the legacy `docker-compose` binary (see [Make targets](#make-targets)) |
+| Docker with Compose v2 | `docker compose` | `scripts/compose.sh` and the Make targets call `docker compose` |
 | Node.js | 20 | `NODE_VERSION: "20"` in `.github/workflows/ci.yml` and `FROM node:20-alpine` in `cerebro/web/Dockerfile`; `cerebro/web/package.json` declares no `engines` field |
 | make | any | `Makefile` |
 | tmux | any | `scripts/smoke_test.sh` boots the API in a tmux session |
@@ -184,7 +184,7 @@ make quality                      # make format lint type-check
 - `make format` runs `black src tests` (rewrites files); `make lint` runs `ruff check src tests`; `make type-check` runs `mypy src`; `make quality-fix` runs `format` and `lint-fix`. CI and pre-commit format with `ruff format`, not `black`.
 - `[tool.ruff]` sets `fix = true`, so `ruff check` rewrites fixable findings in place. Add `--no-fix` to only report.
 - Pre-commit hooks (`.pre-commit-config.yaml`): `ruff` with `--fix --exit-non-zero-on-fix`, `ruff-format`, `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `check-added-large-files` (`--maxkb=500`), `check-merge-conflict` and `detect-private-key`.
-- Pre-commit pins ruff `v0.8.0`, while the `dev` extra declares `ruff>=0.8.0` and CI installs it unpinned, so CI uses the newest release. To reproduce CI findings run `uvx ruff@latest check src tests`.
+- Pre-commit pins ruff `v0.17.6`; the `dev` extra declares `ruff>=0.8.0` and CI installs it unpinned, so CI uses the newest release and the hook can lag behind it. Bump the pin in `.pre-commit-config.yaml` when it does. To reproduce CI findings run `uvx ruff@latest check src tests`.
 - Web: `cd cerebro/web && npm run lint && npm run build` (`build` is `tsc -b && vite build`).
 
 ## Make targets
@@ -205,32 +205,23 @@ Targets whose recipes reference only files and services that exist:
 | `db-backup` | `pg_dump -U research research_db` inside `postgres` into `backups/backup_<timestamp>.sql` |
 | `db-shell` | `psql -U research -d research_db` inside `postgres` |
 | `test`, `test-unit`, `test-integration`, `test-e2e`, `test-coverage` | `pytest`, `pytest tests/unit -v`, `pytest tests/integration -v`, `pytest tests/e2e -v`, `pytest --cov=src --cov-report=html --cov-report=term` |
-| `test-docker` | `docker-compose -f tests/integration/docker-compose.test.yml up --build --abort-on-container-exit`; the file defines only `postgres` and `redis`, so no tests run |
+| `test-docker` | `docker compose -f tests/integration/docker-compose.test.yml up --build --abort-on-container-exit`; the file defines only `postgres` and `redis`, so no tests run |
 | `lint`, `lint-fix`, `format`, `format-check`, `type-check`, `quality`, `quality-fix` | see [Code quality](#code-quality); `format-check` runs `black --check src tests` |
 | `cli-health`, `cli-projects`, `cli-test` | `research-cli health`, `research-cli projects list`, `research-cli projects create --title "Test Project" --query "Test query" --domains "test"` |
 | `masr-health` | `python -c` that constructs `MASRouter()` from `src/ai_brain/router/masr.py` and prints `health_check()` |
 | `load-test` | `locust -f tests/load/locustfile.py --host=http://localhost:8000` (see the [testing guide](testing-guide.md#load-tests)) |
-| `k8s-namespace`, `k8s-config`, `k8s-deploy`, `k8s-status`, `k8s-logs`, `k8s-clean` | `kubectl` against `k8s/namespace.yaml`, `k8s/configmap.yaml`, `k8s/` (kustomize, which does not build, so `k8s-deploy` and `k8s-clean` fail) and namespace `cerebro` |
+| `k8s-namespace`, `k8s-config`, `k8s-deploy`, `k8s-status`, `k8s-logs`, `k8s-clean` | `kubectl` against `k8s/namespace.yaml`, `k8s/configmap.yaml`, `k8s/` (kustomize) and namespace `research-platform`; `k8s-logs` follows `deployment/research-api` |
 | `logs-api`, `logs-masr`, `logs-all` | `./scripts/compose.sh logs -f` for `api`, `masr-router` (with the `legacy-masr-service` profile) and all services |
 | `clean`, `clean-docker` | delete `__pycache__`, `*.pyc` and tool caches; `docker system prune -f`, `docker volume prune -f`, `docker network prune -f` |
 | `dev-workflow`, `ci-workflow`, `quick-test`, `quick-format` | `make format lint type-check test`; `make quality test test-docker`; `pytest tests/unit -x -v`; `black src tests && ruff check --fix src tests` |
-| `docker-login`, `docker-push-dev`, `docker-push-prod` | `docker login` with `DOCKER_REGISTRY_TOKEN` and `DOCKER_REGISTRY`; `docker-compose build` and `push` for the dev and production files |
-| `version` | prints Python, Docker, `docker-compose` and `kubectl` versions |
-| `backup-all` | `make db-backup`, `docker-compose exec redis redis-cli --rdb ...` and `cp -r src` into `backups/<date>/` |
-
-The targets `test-docker`, `docker-push-*`, `backup-all`, `version`, `metrics` and `status` call the legacy `docker-compose` binary instead of `docker compose`.
+| `docker-login`, `docker-push-dev`, `docker-push-prod` | `docker login` with `DOCKER_REGISTRY_TOKEN` and `DOCKER_REGISTRY`; `docker compose build` and `push` for the dev and production files |
+| `version` | prints Python, Docker, `docker compose` and `kubectl` versions |
+| `backup-all` | `make db-backup`, then a Redis RDB dump (`redis-cli --rdb` inside `redis`, copied out with `compose.sh cp`) into `backups/<date>/` |
 
 ### Targets that reference missing files
 
 | Target | What is missing |
 |---|---|
-| `masr-test` | `examples/masr_supervisor_integration_test.py`; `examples/` holds three Markdown files |
-| `hierarchical-test` | `examples/hierarchical_agent_example.py` |
-| `perf-test` | the `tests/performance/` directory |
-| `benchmark` | `tests/benchmarks/run_benchmarks.py`; there is no `tests/benchmarks/` directory |
-| `k8s-secrets` | `k8s/secrets.yaml`; `k8s/` holds `external-secrets.yaml` and no `secrets.yaml` |
-| `logs-worker` | a `worker` service; `docker-compose.yml` defines none |
-| `metrics` | a `prometheus` service in `docker-compose.yml`; only `docker-compose.production.yml` defines one |
 | `setup`, `env-help` | a Temporal service. They print `Temporal UI: http://localhost:8080` and `TEMPORAL_HOST=localhost:7233`; `docker-compose.yml` defines no Temporal service |
 | `status` | a published MCP port. It curls `http://localhost:9000/health`; the `mcp-server` service publishes no host port |
 

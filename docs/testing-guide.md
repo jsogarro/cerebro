@@ -103,7 +103,7 @@ There is no API-key factory.
 
 - `.github/workflows/ci.yml` runs `pytest --cov=src --cov-report=xml --cov-report=html --cov-report=term --ignore=tests/e2e`, then `coverage report --fail-under=25`.
 - `.github/workflows/integration-tests.yml` runs `pytest tests/integration/ --cov=src ... --cov-fail-under=25`.
-- Do not use `scripts/run_integration_tests.sh`; run the pytest commands in [Running tests](#running-tests). The script uses `COVERAGE_THRESHOLD=80`. It starts `tests/integration/docker-compose.test.yml` with the legacy `docker-compose` binary and then waits up to 60 times, two seconds apart, for a `temporal` service that the compose file does not define. It then runs the migrations against port 5433 and runs `pytest tests/integration` with that threshold.
+- Do not use `scripts/run_integration_tests.sh`; run the pytest commands in [Running tests](#running-tests). The script uses `COVERAGE_THRESHOLD=80`. It starts `tests/integration/docker-compose.test.yml` with the legacy `docker-compose` binary, waits for Postgres and Redis, then runs the migrations against port 5433 and runs `pytest tests/integration` with that threshold.
 
 ## Load tests
 
@@ -111,12 +111,7 @@ There is no API-key factory.
 make load-test     # locust -f tests/load/locustfile.py --host=http://localhost:8000
 ```
 
-`tests/load/locustfile.py` defines `ResearchPlatformUser`, `AdminUser` and `WebSocketUser`, and the `QuickLoadTest`, `SustainedLoadTest` and `SpikeLoadTest` subclasses. Its requests do not match the mounted API:
-
-- `ResearchPlatformUser` posts to `/api/v1/auth/register` without `confirm_password` and `accept_terms`, which `RegisterRequest` requires, and reads `access_token` from the top level of the response, where `AuthResponse` nests it under `tokens`.
-- Its project tasks call `/api/v1/projects...`; the projects routes are mounted at `/api/v1/research/projects` (`src/api/routes/research.py`). Its profile task sends `PATCH /api/v1/auth/me`, and the auth router defines only `GET /me`.
-- `AdminUser` calls `/api/v1/admin/users`, `/api/v1/admin/stats` and `/api/v1/admin/audit-logs`; the API mounts no `/admin` routes.
-- `WebSocketUser` sends `GET /ws/ping`; `src/api/routes/websocket.py` defines no `/ws/ping`.
+`tests/load/locustfile.py` defines `ResearchPlatformUser` and `WebSocketUser`, and the `QuickLoadTest`, `SustainedLoadTest` and `SpikeLoadTest` subclasses. A contract test in `tests/docker/test_make_and_load_contracts.py` fails when any request in the file does not match a mounted route and method. The project-creation task depends on an execution authority being available (see the [development setup guide](development-setup-guide.md)); on a fresh install it receives `422`.
 
 ## Web end-to-end tests
 

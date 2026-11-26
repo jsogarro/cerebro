@@ -28,7 +28,7 @@ The blacklist, user-revocation and refresh keys are security state: restore Redi
 - `REPORT_STORAGE_PATH` (default `./reports`): generated report files.
 - The JWT key pair at `JWT_PRIVATE_KEY_PATH` and `JWT_PUBLIC_KEY_PATH` (default `/secrets/jwt_private.pem` and `/secrets/jwt_public.pem`). The pair signs and verifies tokens; replacing it invalidates every issued token.
 
-In the development compose file, `source_snapshots` is a named volume mounted at `/var/lib/cerebro/source_snapshots`. See [deployment and monitoring](deployment-monitoring-guide.md) for the production file, which declares no volume for these paths.
+In the development compose file, `source_snapshots` is a named volume mounted at `/var/lib/cerebro/source_snapshots`. In the production compose file the `source_snapshots_prod` volume is mounted at the same path, which the production image sets as the default `SOURCE_SNAPSHOT_DIR`. The Kubernetes manifests declare no volume for it; see [deployment and monitoring](deployment-monitoring-guide.md).
 
 ## Back up Postgres
 
@@ -102,8 +102,8 @@ The recipe, as written in `Makefile`:
 backup-all:
 	@mkdir -p backups/$$(date +%Y%m%d)
 	make db-backup
-	docker-compose exec redis redis-cli --rdb backups/$$(date +%Y%m%d)/redis_backup.rdb
-	cp -r src backups/$$(date +%Y%m%d)/
+	./scripts/compose.sh exec redis redis-cli --rdb /tmp/redis_backup.rdb
+	./scripts/compose.sh cp redis:/tmp/redis_backup.rdb backups/$$(date +%Y%m%d)/redis_backup.rdb
 	@echo "Full system backup created in backups/$$(date +%Y%m%d)/"
 ```
 
@@ -111,9 +111,7 @@ The target:
 
 - creates a dated directory on the host;
 - runs `make db-backup`, which writes to `backups/`, not the dated directory;
-- runs `redis-cli --rdb` inside the Redis container with a relative path, so the file is written inside the container, not to the host directory;
-- copies the `src` directory;
-- uses the `docker-compose` command rather than `docker compose`;
+- dumps Redis inside the container and copies the file to the dated directory;
 - does not copy snapshots, reports or keys.
 
 Use the commands above for a complete backup.

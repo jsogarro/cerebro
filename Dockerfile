@@ -96,6 +96,11 @@ COPY alembic.ini .
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Source snapshots outlive the container: the directory is created owned by
+# `app` so a named volume mounted here inherits writable ownership.
+ENV SOURCE_SNAPSHOT_DIR=/var/lib/cerebro/source_snapshots
+RUN mkdir -p "$SOURCE_SNAPSHOT_DIR" && chown app:app "$SOURCE_SNAPSHOT_DIR"
+
 # Change ownership
 RUN chown -R app:app /app
 

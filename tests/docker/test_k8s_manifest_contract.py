@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 from src.core.config import settings
@@ -75,3 +78,25 @@ def test_no_manifest_targets_the_removed_worker() -> None:
     text = "\n".join(p.read_text() for p in K8S.glob("*.yaml"))
     assert "research-worker" not in text
     assert "research-platform-worker" not in text
+
+
+def test_configmap_leaves_its_namespace_to_the_kustomization() -> None:
+    # configMapGenerator(behavior: merge) matches the base ConfigMap by
+    # name and namespace; an explicit namespace here makes it unmatchable.
+    (configmap,) = _docs(K8S / "configmap.yaml")
+    assert "namespace" not in configmap["metadata"]
+
+
+@pytest.mark.skipif(shutil.which("kubectl") is None, reason="kubectl not installed")
+def test_kustomization_builds() -> None:
+    result = subprocess.run(
+        ["kubectl", "kustomize", str(K8S)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    rendered = list(yaml.safe_load_all(result.stdout))
+    config = next(d for d in rendered if d and d["kind"] == "ConfigMap")
+    assert config["metadata"]["namespace"] == "research-platform"
+    assert config["data"]["ENVIRONMENT"] == "production"

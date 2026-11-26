@@ -34,7 +34,7 @@ The `production` stage declares a healthcheck that runs `curl -f http://localhos
 
 Both runnable stages use `docker/entrypoint.sh` as the entrypoint. It runs `alembic upgrade head` and, if that fails, prints the exit status and exits with it, so the container never starts the application against an unmigrated schema. It exits with status 64 when no command is supplied. Otherwise it `exec`s the command.
 
-Build locally with `docker compose build` (development stage, `docker-compose.yml`) or `make prod-build` (production stage). No workflow in this repository pushes images to a registry.
+Build locally with `docker compose build` (development stage, `docker-compose.yml`) or `make prod-build` (production stage). The `build-image` job of `cd.yml` pushes the API image to `gcr.io`.
 
 ## Docker Compose (production file)
 
@@ -64,7 +64,7 @@ Several files the production compose file mounts are not in the repository: `doc
 
 `docker/nginx/nginx.conf` rate-limits `/api/` (10 requests per second per client address, burst 20) and `/ws` (5 per second, burst 10), proxies `/api/` and `/ws` to `api:8000`, answers `/health` with a fixed `200 healthy` that never reaches the API, serves `/docs` from its own static root (404 there, so FastAPI's `/docs` is not reachable through the proxy even with `DEBUG=true`) and sends everything else to `web:8080`. The `/ws` location keeps connections open for up to 86400 seconds.
 
-The `api` service has no `volumes` entry. `SOURCE_SNAPSHOT_DIR` (default `data/source_snapshots`, resolved against the working directory) holds source files that evidence rows cite by digest, and the application expects it on a persistent volume. With `read_only: true`, mount a writable volume at that path and set `SOURCE_SNAPSHOT_DIR` to it.
+The `api` service mounts the named volume `source_snapshots_prod` at `/var/lib/cerebro/source_snapshots`. The production image sets that path as the default `SOURCE_SNAPSHOT_DIR` and creates it owned by the `app` user, so the volume is writable under `read_only: true` and the snapshots survive container replacement.
 
 ## Kubernetes
 
@@ -86,18 +86,19 @@ No `secrets.yaml` exists in `k8s/`; secrets come from `external-secrets.yaml`, s
 
 The image reference in `deployment-api.yaml` is `gcr.io/PROJECT_ID/research-platform-api:latest`. The Kustomize `images` entry changes only the tag, so `PROJECT_ID` stays literal until something replaces the whole name; `cd.yml` does this with `kustomize edit set image`. The deployment's probes call `/health` (liveness) and `/ready` (readiness) on port 8000.
 
-Make targets `k8s-namespace` and `k8s-config` apply files that exist. `k8s-deploy` and `k8s-clean` fail because the kustomization does not build. `k8s-secrets` applies `k8s/secrets.yaml`, which does not exist. `k8s-status` and `k8s-logs` use the namespace `cerebro` and the deployment name `cerebro-api`, which match nothing in the manifests. Use `kubectl -n research-platform get pods,services,ingress` and `kubectl -n research-platform logs -f deployment/research-api` instead.
+Make targets `k8s-namespace`, `k8s-config`, `k8s-deploy` and `k8s-clean` apply or delete files that exist, and `k8s-status` and `k8s-logs` use the namespace `research-platform` and `deployment/research-api`. `kubectl kustomize k8s` builds; CI runs it.
 
 ## Continuous deployment
 
 `.github/workflows/cd.yml` runs on tags matching `v*`, pushes to `develop` and manual dispatch (inputs `environment`, `skip_tests`). The `determine-environment` job maps a manual dispatch to its input, `develop` to `staging` and a `v*` tag to `production`.
 
-1. `pre-deployment-checks` (skipped when `skip_tests` is `true`) installs the project, runs `pytest tests/test_api.py::TestHealthEndpoints` and runs `kustomize build k8s/`, which fails (see [Kubernetes](#kubernetes)).
-2. `deploy-staging` authenticates to Google Cloud with `GCP_SA_KEY`, fetches GKE credentials, runs `kustomize edit set image` for `research-platform-api` and `research-platform-web` under `gcr.io/<GCP_PROJECT_ID>/`, applies the result, waits for `deployment/research-api` to roll out, then requests `/health` and `/ready` through the ingress address.
-3. `deploy-production` runs only for a `refs/tags/v*` ref. It reads the selector of a Service named `research-platform-active`, deploys with a `color` label of the opposite colour, runs `curl` against `/health` and `/ready` inside the new pod, patches `research-platform-active` to the new colour and creates a GitHub release.
-4. `rollback` runs when `deploy-production` fails and patches `research-platform-active` back to the colour recorded in the `last-stable-version` annotation.
+1. `pre-deployment-checks` (skipped when `skip_tests` is `true`) installs the project, runs `pytest tests/test_api.py::TestHealthEndpoints` and runs `kustomize build k8s/`.
+2. `build-image` builds the `production` target of the `Dockerfile` and pushes it to `gcr.io/<GCP_PROJECT_ID>/research-platform-api`, tagged with the Git tag (or the commit SHA outside a tag).
+3. `deploy-staging` authenticates to Google Cloud with `GCP_SA_KEY`, fetches GKE credentials, runs `kustomize edit set image` for `research-platform-api`, applies the result, waits for `deployment/research-api` to roll out, then requests `/health` and `/ready` through the ingress address.
+4. `deploy-production` runs only for a `refs/tags/v*` ref. It applies the same way, waits for the rollout, requests `/health` and `/ready` through the ingress address and creates a GitHub release.
+5. `rollback` runs when `deploy-production` fails and runs `kubectl rollout undo deployment/research-api`.
 
-The workflow tags images with the Git tag (or commit SHA for staging) but contains no step that builds or pushes them, and no manifest in `k8s/` defines `research-platform-active`. The production verification step requests `/metrics` without an `Authorization` header, which the authentication middleware rejects (see [monitoring](#monitoring)).
+No manifest in `k8s/` deploys a web image, so the workflow builds none. The verification steps do not request `/metrics`, which needs a bearer token (see [monitoring](#monitoring)).
 
 ## Health and readiness
 

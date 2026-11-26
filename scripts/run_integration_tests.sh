@@ -65,17 +65,6 @@ for i in {1..30}; do
     sleep 1
 done
 
-# Wait for Temporal
-echo -n "Waiting for Temporal..."
-for i in {1..60}; do
-    if docker-compose -f $COMPOSE_FILE exec -T temporal tctl --address temporal:7233 namespace list > /dev/null 2>&1; then
-        echo -e " ${GREEN}Ready${NC}"
-        break
-    fi
-    echo -n "."
-    sleep 2
-done
-
 # Run database migrations
 echo -e "\n${YELLOW}Running database migrations...${NC}"
 export DATABASE_URL="postgresql://test_user:test_password@localhost:5433/test_research_db"

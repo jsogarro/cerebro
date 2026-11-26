@@ -49,6 +49,8 @@ class ResearchPlatformUser(HttpUser):
             "email": self.email,
             "username": f"user_{uuid.uuid4().hex[:8]}",
             "password": self.password,
+            "confirm_password": self.password,
+            "accept_terms": True,
             "full_name": "Load Test User",
         }
 
@@ -58,7 +60,7 @@ class ResearchPlatformUser(HttpUser):
             if response.status_code == 201:
                 data = response.json()
                 self.user_id = data["user"]["id"]
-                self.access_token = data["access_token"]
+                self.access_token = data["tokens"]["access_token"]
                 response.success()
             else:
                 response.failure(f"Registration failed: {response.text}")
@@ -71,7 +73,9 @@ class ResearchPlatformUser(HttpUser):
             return
 
         with self.client.get(
-            "/api/v1/projects", headers=self._auth_headers(), catch_response=True
+            "/api/v1/research/projects",
+            headers=self._auth_headers(),
+            catch_response=True,
         ) as response:
             if response.status_code == 200:
                 response.success()
@@ -85,6 +89,7 @@ class ResearchPlatformUser(HttpUser):
             return
 
         project_data = {
+            "user_id": self.user_id,
             "title": f"Load Test Project {datetime.now().isoformat()}",
             "description": "Automated load testing project",
             "query": {
@@ -99,7 +104,7 @@ class ResearchPlatformUser(HttpUser):
         }
 
         with self.client.post(
-            "/api/v1/projects",
+            "/api/v1/research/projects",
             json=project_data,
             headers=self._auth_headers(),
             catch_response=True,
@@ -120,7 +125,7 @@ class ResearchPlatformUser(HttpUser):
         project_id = random.choice(self.project_ids)
 
         with self.client.get(
-            f"/api/v1/projects/{project_id}",
+            f"/api/v1/research/projects/{project_id}",
             headers=self._auth_headers(),
             catch_response=True,
         ) as response:
@@ -138,7 +143,7 @@ class ResearchPlatformUser(HttpUser):
         project_id = random.choice(self.project_ids)
 
         with self.client.get(
-            f"/api/v1/projects/{project_id}/status",
+            f"/api/v1/research/projects/{project_id}/progress",
             headers=self._auth_headers(),
             catch_response=True,
         ) as response:
@@ -146,28 +151,6 @@ class ResearchPlatformUser(HttpUser):
                 response.success()
             else:
                 response.failure(f"Failed to get status: {response.status_code}")
-
-    @task(1)
-    def start_project_workflow(self):
-        """Start research workflow for a project."""
-        if not self.access_token or not self.project_ids:
-            return
-
-        # Only start workflow for projects not yet started
-        project_id = random.choice(self.project_ids)
-
-        with self.client.post(
-            f"/api/v1/projects/{project_id}/start",
-            headers=self._auth_headers(),
-            catch_response=True,
-        ) as response:
-            if response.status_code in [200, 202]:
-                response.success()
-            elif response.status_code == 409:
-                # Already started, that's OK
-                response.success()
-            else:
-                response.failure(f"Failed to start workflow: {response.status_code}")
 
     @task(3)
     def get_project_results(self):
@@ -178,7 +161,7 @@ class ResearchPlatformUser(HttpUser):
         project_id = random.choice(self.project_ids)
 
         with self.client.get(
-            f"/api/v1/projects/{project_id}/results",
+            f"/api/v1/research/projects/{project_id}/results",
             headers=self._auth_headers(),
             catch_response=True,
         ) as response:
@@ -188,23 +171,20 @@ class ResearchPlatformUser(HttpUser):
                 response.failure(f"Failed to get results: {response.status_code}")
 
     @task(1)
-    def update_profile(self):
-        """Update user profile."""
+    def get_profile(self):
+        """Fetch the current user's profile."""
         if not self.access_token:
             return
 
-        profile_data = {"full_name": f"Updated User {random.randint(1, 1000)}"}
-
-        with self.client.patch(
+        with self.client.get(
             "/api/v1/auth/me",
-            json=profile_data,
             headers=self._auth_headers(),
             catch_response=True,
         ) as response:
             if response.status_code == 200:
                 response.success()
             else:
-                response.failure(f"Failed to update profile: {response.status_code}")
+                response.failure(f"Failed to get profile: {response.status_code}")
 
     @task(1)
     def health_check(self):
@@ -223,45 +203,6 @@ class ResearchPlatformUser(HttpUser):
         }
 
 
-class AdminUser(HttpUser):
-    """Simulates an admin user with different behavior patterns."""
-
-    wait_time = between(2, 5)  # Admins operate more slowly
-
-    def on_start(self):
-        """Admin login."""
-        login_data = {"email": "admin@example.com", "password": "AdminPass123!@#"}
-
-        response = self.client.post("/api/v1/auth/login", json=login_data)
-        if response.status_code == 200:
-            self.access_token = response.json()["access_token"]
-        else:
-            raise Exception("Admin login failed")
-
-    @task(3)
-    def list_all_users(self):
-        """List all users (admin only)."""
-        self.client.get(
-            "/api/v1/admin/users",
-            headers={"Authorization": f"Bearer {self.access_token}"},
-        )
-
-    @task(2)
-    def view_system_stats(self):
-        """View system statistics."""
-        self.client.get(
-            "/api/v1/admin/stats",
-            headers={"Authorization": f"Bearer {self.access_token}"},
-        )
-
-    @task(1)
-    def review_audit_logs(self):
-        self.client.get(
-            "/api/v1/admin/audit-logs",
-            headers={"Authorization": f"Bearer {self.access_token}"},
-        )
-
-
 class WebSocketUser(HttpUser):
     """Simulates WebSocket connections for real-time updates."""
 
@@ -274,9 +215,9 @@ class WebSocketUser(HttpUser):
         pass
 
     @task
-    def simulate_websocket_ping(self):
-        """Simulate WebSocket ping/pong."""
-        self.client.get("/ws/ping")
+    def websocket_health(self):
+        """Poll the WebSocket service health route."""
+        self.client.get("/ws/health")
 
 
 # Event handlers for reporting

@@ -69,4 +69,4 @@ The environment variables `GEMINI_RATE_LIMIT`, `GEMINI_RATE_PERIOD`, `GEMINI_MAX
 
 The `llm_*` Prometheus series on `/metrics` (`llm_call_duration_seconds`, `llm_tokens_total`, `llm_cost_usd_total`, `llm_request_cost_drift_ratio`, `llm_cost_drift_events_total`) show model latency, token use and cost for calls made through the provider package; `GeminiService` calls, the default client, are not recorded. `/metrics` requires a bearer token; see [security, audit and observability](reference/12-security-audit-observability.md) and [deployment and monitoring](deployment-monitoring-guide.md).
 
-`make load-test` starts Locust with `tests/load/locustfile.py` against `http://localhost:8000`. Several of its requests do not match the mounted API, so its output is not meaningful until they are corrected; the [testing guide](testing-guide.md#load-tests) lists each mismatch.
+`make load-test` starts Locust with `tests/load/locustfile.py` against `http://localhost:8000`; see the [testing guide](testing-guide.md#load-tests).
