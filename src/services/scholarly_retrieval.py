@@ -496,6 +496,70 @@ def _keys(c: Candidate) -> list[tuple[str, str]]:
 # -- retrieval ---------------------------------------------------------------
 
 
+class _Pool:
+    """Candidates deduplicated across DOI, arXiv id and OpenAlex id, with hit counts."""
+
+    def __init__(self) -> None:
+        self.found: dict[tuple[str, str], Candidate] = {}
+        self.hits: Counter[tuple[str, str]] = Counter()
+        self.alias: dict[tuple[str, str], tuple[str, str]] = {}
+
+    def add(self, candidate: Candidate) -> None:
+        keys = _keys(candidate)
+        primary = next((self.alias[k] for k in keys if k in self.alias), keys[0])
+        existing = self.found.setdefault(primary, candidate)
+        if candidate.arxiv_id and not existing.arxiv_id:
+            self.found[primary] = replace(existing, arxiv_id=candidate.arxiv_id)
+        self.alias.update({k: primary for k in keys if k not in self.alias})
+        self.hits[primary] += 1
+
+    def top(self) -> list[Candidate]:
+        ranked = sorted(
+            self.found,
+            key=lambda k: (-self.hits[k], -(self.found[k].year or 0), k),
+        )
+        return [self.found[k] for k in ranked[:MAX_CANDIDATES]]
+
+
+async def _search(
+    session: _Session, terms: tuple[str, ...], coverage: SourceCoverage
+) -> list[Any] | None:
+    """Run one OpenAlex query; None means stop (deadline), [] means nothing usable."""
+    params: dict[str, Any] = {
+        "search": " ".join(terms),
+        "per-page": _PER_PAGE,
+        "select": _SELECT,
+    }
+    if settings.OPENALEX_API_KEY:
+        params["api_key"] = settings.OPENALEX_API_KEY
+    reply = await session.get(
+        _Request(
+            OPENALEX_HOST,
+            f"https://{OPENALEX_HOST}/works",
+            params,
+            MAX_JSON_BYTES,
+            "search",
+            len(terms),
+        )
+    )
+    if reply.failure == "deadline_reached":
+        coverage.deadline_reached = True
+        return None
+    coverage.queries_sent += reply.failure != "breaker_open"
+    if reply.body is None:
+        coverage.fail(reply.failure or "unknown")
+        return []
+    try:
+        results = json.loads(reply.body)["results"]
+        if not isinstance(results, list):
+            raise _ParseError("results is not a list")
+    except (ValueError, KeyError, TypeError, RecursionError):
+        coverage.fail("parse_error")
+        return []
+    coverage.responses_ok += 1
+    return results
+
+
 async def retrieve_candidates(
     document_text: str,
     *,
@@ -513,58 +577,18 @@ async def retrieve_candidates(
     )
     openalex.terms_dropped_non_ascii = plan.terms_dropped_non_ascii
 
-    found: dict[tuple[str, str], Candidate] = {}
-    hits: Counter[tuple[str, str]] = Counter()
-    alias: dict[tuple[str, str], tuple[str, str]] = {}
+    pool = _Pool()
     for terms in plan.queries:
-        params: dict[str, Any] = {
-            "search": " ".join(terms),
-            "per-page": _PER_PAGE,
-            "select": _SELECT,
-        }
-        if settings.OPENALEX_API_KEY:
-            params["api_key"] = settings.OPENALEX_API_KEY
-        reply = await session.get(
-            _Request(
-                OPENALEX_HOST,
-                f"https://{OPENALEX_HOST}/works",
-                params,
-                MAX_JSON_BYTES,
-                "search",
-                len(terms),
-            )
-        )
-        if reply.failure == "deadline_reached":
-            openalex.deadline_reached = True
+        records = await _search(session, terms, openalex)
+        if records is None:
             break
-        openalex.queries_sent += reply.failure != "breaker_open"
-        if reply.body is None:
-            openalex.fail(reply.failure or "unknown")
-            continue
-        try:
-            results = json.loads(reply.body)["results"]
-            if not isinstance(results, list):
-                raise _ParseError("results is not a list")
-        except (ValueError, KeyError, TypeError, RecursionError):
-            openalex.fail("parse_error")
-            continue
-        openalex.responses_ok += 1
-        for record in results:
+        for record in records:
             try:
-                candidate = _candidate(record)
+                pool.add(_candidate(record))
             except (ValueError, AttributeError, TypeError):
                 openalex.fail("parse_error")
-                continue
-            keys = _keys(candidate)
-            primary = next((alias[k] for k in keys if k in alias), keys[0])
-            existing = found.setdefault(primary, candidate)
-            if candidate.arxiv_id and not existing.arxiv_id:
-                found[primary] = replace(existing, arxiv_id=candidate.arxiv_id)
-            alias.update({k: primary for k in keys if k not in alias})
-            hits[primary] += 1
 
-    ranked = sorted(found, key=lambda k: (-hits[k], -(found[k].year or 0), k))
-    chosen = [found[k] for k in ranked[:MAX_CANDIDATES]]
+    chosen = pool.top()
     chosen = await _upgrade_to_full_text(chosen, budget, session, arxiv)
     openalex.candidates = len(chosen)
     openalex.abstract_only_count = sum(c.text_kind == "abstract" for c in chosen)

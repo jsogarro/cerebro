@@ -882,25 +882,25 @@ async def test_invisible_characters_are_stripped_from_abstracts_and_full_text(
     from src.core.acquisition.pdf_text import ExtractedText, PageSpan
 
     async def hidden(data):
-        text = "full​text\U000e0041"
+        text = "full\u200btext\U000e0041"
         return ExtractedText(text, (PageSpan(1, 0, len(text)),), "a" * 64, "b" * 64), 0
 
     monkeypatch.setattr(sr, "extract_pdf_sandboxed", hidden)
     search_ok(
         httpx_mock,
         work(
-            abstract=("abs​tract",),
+            abstract=("abs\u200btract",),
             locations=[{"landing_page_url": "https://arxiv.org/abs/2101.00001"}],
         ),
     )
     httpx_mock.add_response(url="https://arxiv.org/pdf/2101.00001", content=b"%PDF-x")
     (c,) = (await run(budget=RetrievalBudget(max_queries=1))).candidates
     assert c.text == "fulltext"
-    search_ok(httpx_mock, work(wid="W5", abstract=("abs​tract",)))
+    search_ok(httpx_mock, work(wid="W5", abstract=("abs\u200btract",)))
     (c2,) = (
         await run(budget=RetrievalBudget(max_queries=1, max_fulltext=0))
     ).candidates
-    assert "​" not in c2.text
+    assert "\u200b" not in c2.text
 
 
 def test_stopwords_are_never_sent():
