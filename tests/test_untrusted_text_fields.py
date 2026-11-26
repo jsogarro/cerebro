@@ -62,7 +62,7 @@ def test_each_pattern_matches_its_example_once(pattern: str, example: str) -> No
 
 
 def test_invisible_characters_are_stripped() -> None:
-    assert strip_invisible("a\u200bb\u202ec\U000e0041d") == "abcd"
+    assert strip_invisible("a\u200bb\u202ec\U000e0041d")[0] == "abcd"
     assert sanitize_model_field("a\u200bb", 10) == ("ab", True)
 
 

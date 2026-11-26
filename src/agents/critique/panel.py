@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 import secrets
+import unicodedata
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -267,6 +268,11 @@ def _ground_quote(
     return sliced, match.raw_start, match.raw_end, page
 
 
+def _without_format(text: str) -> str:
+    """Drop every Cf character, including the joiners and soft hyphen the sanitizer keeps."""
+    return "".join(c for c in text if unicodedata.category(c) != "Cf")
+
+
 def _ground_issue(
     item: Issue,
     role: Role,
@@ -290,11 +296,9 @@ def _ground_issue(
         spans.append(span)
     problem, p_removed = sanitize_model_field(item.problem, PROBLEM_MAX_CHARS)
     fix, f_removed = sanitize_model_field(item.fix, FIX_MAX_CHARS)
-    if (
-        delimiter in problem
-        or delimiter in fix
-        or delimiter in item.problem
-        or delimiter in item.fix
+    if any(
+        delimiter in _without_format(field)
+        for field in (problem, fix, item.problem, item.fix)
     ):
         return None, "delimiter_echo", 0
     if not problem:

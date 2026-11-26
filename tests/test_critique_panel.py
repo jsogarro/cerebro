@@ -296,6 +296,20 @@ class TestGrounding:
         r = only(asyncio.run(run_panel(DOC, model=Stub(handler))), "methods")
         assert r.issues == () and r.drops["delimiter_echo"] == 1
 
+    @pytest.mark.parametrize("joiner", ["\u200d", "\u200c", "\u00ad"])
+    def test_delimiter_split_by_a_kept_format_character_is_still_an_echo(
+        self, joiner: str
+    ) -> None:
+        def handler(prompt: str, n: int) -> ModelReply:
+            delim = re.search(r"<<<DOC-(\w+)", prompt).group(1)  # type: ignore[union-attr]
+            hidden = delim[:6] + joiner + delim[6:]
+            if role_of(prompt) == "methods":
+                return reply([issue(Q1, fix=f"see {hidden}")])
+            return reply([])
+
+        r = only(asyncio.run(run_panel(DOC, model=Stub(handler))), "methods")
+        assert r.issues == () and r.drops["delimiter_echo"] == 1
+
     def test_unknown_category_is_dropped(self) -> None:
         r = self.run([issue(Q1, category="free text invented by the model")])
         assert r.issues == () and r.drops["unsafe_field"] == 1

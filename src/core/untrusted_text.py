@@ -80,6 +80,7 @@ def strip_invisible(text: str) -> tuple[str, int]:
         previous = char
     return "".join(kept), flagged
 
+
 # Ordinary prose ("as follows:", "p < 0.05 and t > 2", "<p-value>") matches none of these.
 SANITIZE_PATTERNS = (
     r"</?(?:a|b|i|u|em|strong|span|div|p|br|hr|img|script|style|iframe|object|embed|svg|math|sup|sub|code|pre|table|tr|td|th|ul|ol|li|h[1-6]|link|meta|form|input|button)(?=[\s/>])[^<>\n]{0,200}>",
