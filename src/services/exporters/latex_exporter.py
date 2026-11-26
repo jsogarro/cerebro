@@ -36,8 +36,9 @@ _LATEX_ESCAPES = {
 }
 _LATEX_SPECIAL = re.compile("[" + re.escape("".join(_LATEX_ESCAPES)) + "]")
 # fullmatch, not match-with-$: "$" accepts a trailing newline.
-_SAFE_DOI = re.compile(r"10\.\d{4,9}/[^\s{}\\%#^~]+")
-_SAFE_URL = re.compile(r"https?://[^\s{}\\%#^~]+")
+_SAFE_DOI = re.compile(r"10\.\d{4,9}/[^\s{}\\^]+")
+_SAFE_URL = re.compile(r"https?://[^\s{}\\^]+")
+_DOI_PREFIX = re.compile(r"\s*(?:https?://(?:dx\.)?doi\.org/|doi:\s*)", re.IGNORECASE)
 
 
 class LaTeXExportError(Exception):
@@ -384,13 +385,29 @@ class LaTeXExporter:
         elif citation.publisher:
             parts.append(self._escape_latex(citation.publisher))
 
-        # DOI or URL
-        if citation.doi and _SAFE_DOI.fullmatch(citation.doi):
-            parts.append(f"DOI: \\url{{https://doi.org/{citation.doi}}}")
-        elif citation.url and _SAFE_URL.fullmatch(citation.url):
-            parts.append(f"\\url{{{citation.url}}}")
+        link = self._format_link_latex(citation)
+        if link:
+            parts.append(link)
 
         return ". ".join(parts) + "."
+
+    def _format_link_latex(self, citation: Citation) -> str:
+        """A DOI or URL as a link when it is a plain one, else as escaped text."""
+        doi = _DOI_PREFIX.sub("", citation.doi or "", count=1).strip()
+        if _SAFE_DOI.fullmatch(doi):
+            return f"DOI: \\url{{https://doi.org/{self._url_argument(doi)}}}"
+        if citation.url and _SAFE_URL.fullmatch(citation.url):
+            return f"\\url{{{self._url_argument(citation.url)}}}"
+        text = citation.doi or citation.url
+        if not text:
+            return ""
+        prefix = "DOI: " if citation.doi else ""
+        return prefix + self._escape_latex(text)
+
+    @staticmethod
+    def _url_argument(url: str) -> str:
+        """hyperref's \\url reads \\% and \\# as literal % and #."""
+        return url.replace("%", "\\%").replace("#", "\\#")
 
     def _convert_markdown_to_latex(self, markdown_text: str) -> str:
         """Convert markdown text to LaTeX."""

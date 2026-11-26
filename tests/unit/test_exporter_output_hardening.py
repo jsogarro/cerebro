@@ -3,6 +3,7 @@
 import re
 import socket
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from src.models.report import (
     Citation,
     Report,
+    ReportConfiguration,
     ReportSection,
     ReportType,
 )
@@ -23,6 +25,7 @@ from src.services.report_config import (
 from src.services.report_output_generator import ReportOutputGenerator
 from src.services.template_renderer import TemplateRenderingError
 
+ROOT = Path(__file__).resolve().parents[2]
 INJECTION = r"x}\input{/etc/passwd}%"
 FORBIDDEN_TEX = ("\\input", "\\openin", "\\write", "\\catcode", "file:")
 
@@ -65,9 +68,21 @@ def test_citation_fields_cannot_inject_tex(field: str) -> None:
 
 
 @pytest.mark.parametrize("url", ["file:///etc/passwd", "javascript:x", INJECTION])
-def test_url_must_be_plain_http(url: str) -> None:
+def test_non_http_url_renders_as_escaped_text_not_a_link(url: str) -> None:
     out = LaTeXExporter()._format_citation_latex(_citation(url=url))
-    assert "\\url" not in out and "file:" not in out and "javascript" not in out
+    assert "\\url" not in out
+    assert LaTeXExporter()._escape_latex(url) in out
+
+
+def test_unlinkable_doi_renders_as_escaped_text_and_url_still_wins() -> None:
+    exporter = LaTeXExporter()
+    bad = exporter._format_citation_latex(_citation(doi="not a doi {"))
+    assert "\\url" not in bad
+    assert exporter._escape_latex("not a doi {") in bad
+    fallback = exporter._format_citation_latex(
+        _citation(doi="not a doi", url="https://example.org/p")
+    )
+    assert "\\url{https://example.org/p}" in fallback
 
 
 def test_valid_doi_and_url_still_render() -> None:
@@ -76,6 +91,27 @@ def test_valid_doi_and_url_still_render() -> None:
     assert "\\url{https://doi.org/10.1000/abc.123}" in doi
     url = exporter._format_citation_latex(_citation(url="https://example.org/p?q=1"))
     assert "\\url{https://example.org/p?q=1}" in url
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        "doi:10.1000/x",
+        "DOI: 10.1000/x",
+        "https://doi.org/10.1000/x",
+        "http://dx.doi.org/10.1000/x",
+    ],
+)
+def test_prefixed_doi_is_normalised_to_the_bare_doi(stored: str) -> None:
+    out = LaTeXExporter()._format_citation_latex(_citation(doi=stored))
+    assert "\\url{https://doi.org/10.1000/x}" in out
+
+
+def test_percent_hash_and_tilde_are_kept_and_escaped_inside_url() -> None:
+    out = LaTeXExporter()._format_citation_latex(
+        _citation(url="https://example.org/~a/b%20c#sec")
+    )
+    assert "\\url{https://example.org/~a/b\\%20c\\#sec}" in out
 
 
 def test_trailing_newline_does_not_pass_the_url_check() -> None:
@@ -202,3 +238,9 @@ def test_render_never_connects_to_remote_hosts(
     pdf_exporter.HTML(string=html, **kwargs).write_pdf()
     server.close()
     assert len(hits) == expected_hits
+
+
+def test_report_configuration_has_no_custom_css_injection_point() -> None:
+    assert "custom_css" not in ReportConfiguration.model_fields
+    template = Path(ROOT / "src/templates/reports/base.html.j2").read_text()
+    assert "custom_css" not in template

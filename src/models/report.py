@@ -243,7 +243,6 @@ class ReportConfiguration(BaseModel):
     include_citations: bool = Field(default=True)
     include_methodology: bool = Field(default=True)
     max_sections: int | None = Field(None, ge=1, description="Maximum sections")
-    custom_css: str | None = Field(None, description="Custom CSS styles")
     template_name: str | None = Field(None, description="Custom template name")
     language: str = Field(default="en", description="Report language")
     author_name: str | None = Field(None, description="Report author")
@@ -335,7 +334,6 @@ class Report(BaseModel):
     configuration: ReportConfiguration = Field(
         default_factory=lambda: ReportConfiguration(
             max_sections=None,
-            custom_css=None,
             template_name=None,
             author_name=None,
             institution=None,
@@ -423,7 +421,6 @@ class ReportGenerationRequest(BaseModel):
     configuration: ReportConfiguration = Field(
         default_factory=lambda: ReportConfiguration(
             max_sections=None,
-            custom_css=None,
             template_name=None,
             author_name=None,
             institution=None,

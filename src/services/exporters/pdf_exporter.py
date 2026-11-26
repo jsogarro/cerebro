@@ -135,10 +135,6 @@ class PDFExporter:
         print_css = self._get_print_css(report)
         css_styles.append(print_css)
 
-        # Custom CSS from configuration
-        if report.configuration.custom_css:
-            css_styles.append(report.configuration.custom_css)
-
         # Override custom CSS
         if custom_css:
             css_styles.append(custom_css)
