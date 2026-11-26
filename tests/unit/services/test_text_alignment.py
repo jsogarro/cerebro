@@ -155,3 +155,137 @@ class TestLocate:
 
     def test_empty_quote_is_not_found(self) -> None:
         assert locate("", SOURCE).kind is MatchKind.NOT_FOUND
+
+
+_PIN_SRC = (
+    "Intro text. The quick-\nbrown fox said “hello  world” to the lazy dog. "
+    "Soft­hyphen word here.   Extra   spaces\there. The end of the line."
+)
+
+# Pinned from the implementation before `locate` was re-expressed on `prepare`.
+_LOCATE_PINNED = [
+    ("quick-\nbrown fox", _PIN_SRC, "exact", 16, 32, [], None),
+    ("The quick", _PIN_SRC, "exact", 12, 21, [], None),
+    ("end of the line.", _PIN_SRC, "exact", 120, 136, [], None),
+    (
+        "quickbrown fox said",
+        _PIN_SRC,
+        "normalized",
+        16,
+        37,
+        ["linebreak_hyphenation_repaired"],
+        None,
+    ),
+    (
+        'said "hello world" to',
+        _PIN_SRC,
+        "normalized",
+        33,
+        55,
+        ["quote_folded", "whitespace_collapsed"],
+        None,
+    ),
+    ("Softhyphen word", _PIN_SRC, "normalized", 70, 86, ["soft_hyphen_removed"], None),
+    (
+        "Extra spaces here.",
+        _PIN_SRC,
+        "normalized",
+        95,
+        115,
+        ["whitespace_collapsed"],
+        None,
+    ),
+    ("slow red cat", _PIN_SRC, "not_found", None, None, [], (3, 0)),
+    ("", _PIN_SRC, "not_found", None, None, [], (0, 0)),
+    ("   ", _PIN_SRC, "not_found", None, None, [], (0, 0)),
+    (
+        "The quick brown fox jumps over the dog",
+        _PIN_SRC,
+        "not_found",
+        None,
+        None,
+        [],
+        (8, 0),
+    ),
+    ("lazy dog. Soft", _PIN_SRC, "exact", 60, 74, [], None),
+    ("ZZZ", "", "not_found", None, None, [], (1, 0)),
+    ("a", "a", "exact", 0, 1, [], None),
+    ("hello  world", _PIN_SRC, "exact", 39, 51, [], None),
+    (
+        "fox said “hello world”",
+        _PIN_SRC,
+        "normalized",
+        29,
+        52,
+        ["quote_folded", "whitespace_collapsed"],
+        None,
+    ),
+    ("The quick brown", _PIN_SRC, "not_found", None, None, [], (3, 0)),
+    ("Intro text. The", _PIN_SRC, "exact", 0, 15, [], None),
+    (
+        "hyphen word here. Extra spaces",
+        _PIN_SRC,
+        "normalized",
+        75,
+        109,
+        ["whitespace_collapsed"],
+        None,
+    ),
+    ("dog. Softhyphen", _PIN_SRC, "normalized", 65, 81, ["soft_hyphen_removed"], None),
+    ("nothing like it at all in source", _PIN_SRC, "not_found", None, None, [], (7, 0)),
+    ("“hello", _PIN_SRC, "exact", 38, 44, [], None),
+    ("brown fox said", _PIN_SRC, "exact", 23, 37, [], None),
+    ("TO THE LAZY", _PIN_SRC, "not_found", None, None, [], (3, 0)),
+    ("to the lazy dog", _PIN_SRC, "exact", 53, 68, [], None),
+    ("line.", _PIN_SRC, "exact", 131, 136, [], None),
+    ("Intro", _PIN_SRC, "exact", 0, 5, [], None),
+    ("text. The quick brown fox said", _PIN_SRC, "not_found", None, None, [], (6, 0)),
+    ("lazy cat", _PIN_SRC, "not_found", None, None, [], (2, 0)),
+    ("Extra   spaces\there", _PIN_SRC, "exact", 95, 114, [], None),
+]
+
+
+class TestLocatePreparedParity:
+    @pytest.mark.parametrize("case", _LOCATE_PINNED)
+    def test_locate_is_unchanged(self, case: tuple) -> None:  # type: ignore[type-arg]
+        quote, source, kind, start, end, applied, coverage = case
+        m = locate(quote, source)
+        assert (m.kind.value, m.raw_start, m.raw_end) == (kind, start, end)
+        assert sorted(m.normalizations_applied) == applied
+        got = (
+            None
+            if m.coverage is None
+            else (m.coverage.query_tokens, m.coverage.matched_tokens)
+        )
+        assert got == coverage
+
+    def test_prepared_locate_matches_exact_and_normalized(self) -> None:
+        prepared = text_alignment.prepare(_PIN_SRC)
+        assert (
+            text_alignment.locate_prepared("The quick", prepared).kind
+            is MatchKind.EXACT
+        )
+        m = text_alignment.locate_prepared("Softhyphen word", prepared)
+        assert (m.kind, m.raw_start, m.raw_end) == (MatchKind.NORMALIZED, 70, 86)
+        miss = text_alignment.locate_prepared("slow red cat", prepared)
+        assert miss.kind is MatchKind.NOT_FOUND and miss.coverage is None
+        assert (
+            text_alignment.locate_prepared("  ", prepared).kind is MatchKind.NOT_FOUND
+        )
+
+    def test_source_is_normalized_once_for_many_quotes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = []
+        real = text_alignment.alignment.normalize
+
+        def spy(raw: str):  # type: ignore[no-untyped-def]
+            calls.append(len(raw))
+            return real(raw)
+
+        monkeypatch.setattr(text_alignment.alignment, "normalize", spy)
+        prepared = text_alignment.prepare(_PIN_SRC)
+        for _ in range(10):
+            text_alignment.locate_prepared("Softhyphen word", prepared)
+        big = [n for n in calls if n == len(_PIN_SRC)]
+        assert len(big) == 1

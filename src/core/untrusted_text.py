@@ -1,5 +1,6 @@
-"""Defences for text that came from outside the system."""
+"""Handling for text that originates outside the system: uploads and model output."""
 
+import re
 import unicodedata
 
 # Format characters whose removal would change Persian, Indic or emoji text.
@@ -78,3 +79,43 @@ def strip_invisible(text: str) -> tuple[str, int]:
         flagged += char in _JOINERS
         previous = char
     return "".join(kept), flagged
+
+# Ordinary prose ("as follows:", "p < 0.05 and t > 2", "<p-value>") matches none of these.
+SANITIZE_PATTERNS = (
+    r"</?(?:a|b|i|u|em|strong|span|div|p|br|hr|img|script|style|iframe|object|embed|svg|math|sup|sub|code|pre|table|tr|td|th|ul|ol|li|h[1-6]|link|meta|form|input|button)(?=[\s/>])[^<>\n]{0,200}>",
+    r"&(?:[a-z]{2,10}|#\d{1,7}|#x[0-9a-f]{1,6});",
+    r"!?\[[^\]\n]{0,200}\]\([^)\s]{1,500}\)",
+    r"`{3}",
+    r"\b[a-z][a-z0-9+.-]{1,20}://\S+",
+    r"\b(?:doi|arxiv|mailto|javascript|data|file):\S+",
+    r"(?<![\w:])//[a-z0-9.-]+\.[a-z]{2,}\S*",
+    r"\bwww\.\S+",
+    r"\b[\w-]+\.[a-z]{2,}/\S*",
+)
+_COMPILED = tuple(re.compile(p, re.IGNORECASE) for p in SANITIZE_PATTERNS)
+_MARKDOWN_LINK = re.compile(r"!?\[([^\]\n]{0,200})\]\([^)\s]{1,500}\)")
+_MARKDOWN_LINK_INDEX = 2
+
+
+def sanitize_model_field(text: str, max_len: int) -> tuple[str, bool]:
+    """Reduce model-written text to plain prose; also report whether anything was removed."""
+    cleaned = strip_invisible(text)[0]
+    removed = cleaned != text
+    # Removing one construct can splice its neighbours into a new one ("<<b>b>"), so repeat.
+    changed = True
+    while changed:
+        changed = False
+        for index, pattern in enumerate(_COMPILED):
+            if index == _MARKDOWN_LINK_INDEX:
+                cleaned, n = _MARKDOWN_LINK.subn(r"\1", cleaned)
+            else:
+                cleaned, n = pattern.subn("", cleaned)
+            changed = changed or n > 0
+        removed = removed or changed
+    cleaned = " ".join(cleaned.split())
+    if len(cleaned) > max_len:
+        cut = cleaned[:max_len]
+        if cleaned[max_len] != " ":
+            cut = cut.rpartition(" ")[0] or cut
+        cleaned = cut.rstrip()
+    return cleaned, removed
