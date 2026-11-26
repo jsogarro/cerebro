@@ -93,7 +93,7 @@ def _start_document_purge(
     resources: AsyncExitStack,
     app: FastAPI,
     session_factory: Callable[[], AsyncSession] | None,
-) -> None:
+) -> asyncio.Task[None] | None:
     """Run the retention sweep until shutdown, whatever the upload flag says.
 
     Without a database nothing can be stored or expired, and uploads are
@@ -102,11 +102,20 @@ def _start_document_purge(
     app.state.document_purge_active = session_factory is not None
     resources.callback(app.state._state.pop, "document_purge_active", None)
     if session_factory is None:
-        return
+        return None
     task = asyncio.create_task(
         run_purge_loop(session_factory, settings.DOCUMENT_PURGE_INTERVAL_S)
     )
+
+    def stopped(done: asyncio.Task[None]) -> None:
+        if done.cancelled() or done.exception() is None:
+            return
+        logger.error("document_purge_stopped", error=type(done.exception()).__name__)
+        app.state.document_purge_active = False
+
+    task.add_done_callback(stopped)
     resources.callback(task.cancel)
+    return task
 
 
 @asynccontextmanager

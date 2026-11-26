@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, cast
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
@@ -409,7 +410,9 @@ async def run_purge_loop(
 ) -> None:
     """Delete expired documents now and then every ``interval_s``.
 
-    Safe to run in every worker. A failed sweep is logged and the loop goes on.
+    Safe to run in every worker. A sweep that fails on the database or the
+    network is logged and the loop goes on; anything else ends the task, and the
+    caller decides what that means.
     """
     while True:
         try:
@@ -419,6 +422,6 @@ async def run_purge_loop(
                 )
                 await session.commit()
             logger.info("documents_purged", count=purged)
-        except Exception as error:
+        except (SQLAlchemyError, OSError) as error:
             logger.warning("document_purge_failed", error=type(error).__name__)
         await asyncio.sleep(interval_s)

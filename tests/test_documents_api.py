@@ -13,6 +13,7 @@ import structlog
 from cryptography.fernet import Fernet
 from fpdf import FPDF
 from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from starlette.requests import Request
 
@@ -690,7 +691,7 @@ async def test_users_can_delete_their_documents_without_the_flag_or_the_key(
     assert (await client.delete(f"/api/v1/documents/{second}")).status_code == 204
 
 
-async def test_the_purge_loop_sweeps_at_start_and_survives_any_error(
+async def test_the_purge_loop_sweeps_at_start_and_survives_database_errors(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     calls: list[int] = []
@@ -701,7 +702,7 @@ async def test_the_purge_loop_sweeps_at_start_and_survives_any_error(
         async def purge_expired(self, now: datetime) -> int:
             calls.append(1)
             if len(calls) == 1:
-                raise RuntimeError("secret-detail")
+                raise OperationalError("secret-detail", {}, Exception())
             return 0
 
     class _Session:
@@ -724,4 +725,69 @@ async def test_the_purge_loop_sweeps_at_start_and_survives_any_error(
         with pytest.raises(asyncio.CancelledError):
             await task
     assert len(calls) >= 2
-    assert "RuntimeError" in repr(logs) and "secret-detail" not in repr(logs)
+    assert "OperationalError" in repr(logs) and "secret-detail" not in repr(logs)
+
+
+async def test_an_unexpected_purge_failure_stops_the_loop_and_closes_uploads(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from contextlib import AsyncExitStack
+
+    from src.api import main
+
+    async def broken(factory: object, interval: float) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(main, "run_purge_loop", broken)
+    with structlog.testing.capture_logs() as logs:
+        async with AsyncExitStack() as stack:
+            main._start_document_purge(stack, app, object)  # type: ignore[arg-type]
+            await asyncio.sleep(0.05)
+            assert app.state.document_purge_active is False
+            response = await _upload(client)
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "retention_unavailable"
+    assert "document_purge_stopped" in repr(logs) and "RuntimeError" in repr(logs)
+
+
+async def test_cancelling_the_purge_at_shutdown_does_not_close_uploads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import AsyncExitStack
+
+    from src.api import main
+
+    async def idle(factory: object, interval: float) -> None:
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(main, "run_purge_loop", idle)
+    async with AsyncExitStack() as stack:
+        task = main._start_document_purge(stack, app, object)  # type: ignore[arg-type]
+        assert task is not None
+        task.cancel()
+        await asyncio.sleep(0.05)
+        assert app.state.document_purge_active is True
+
+
+async def test_the_purge_loop_ends_on_an_error_it_does_not_expect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Repo:
+        def __init__(self, *_: Any) -> None: ...
+
+        async def purge_expired(self, now: datetime) -> int:
+            raise RuntimeError("unexpected")
+
+    class _Session:
+        async def __aenter__(self) -> "_Session":
+            return self
+
+        async def __aexit__(self, *_: Any) -> None:
+            return None
+
+        async def commit(self) -> None:
+            return None
+
+    monkeypatch.setattr(di, "UploadedDocumentRepository", _Repo)
+    with pytest.raises(RuntimeError):
+        await asyncio.wait_for(di.run_purge_loop(_Session, 0.01), 2)  # type: ignore[arg-type]
