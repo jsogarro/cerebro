@@ -18,6 +18,7 @@ from src.core.claims.citation_prose import (
 )
 from src.services.text_alignment.alignment import normalize
 from src.services.text_reuse.types import (
+    MAX_MATCHES_PER_CANDIDATE,
     MAX_POSITIONS_PER_SHINGLE,
     MIN_MATCH_TOKENS,
     SHINGLE_TOKENS,
@@ -183,7 +184,8 @@ def _runs(
     segments: list[tuple[int, int]],
     cand: list[str],
     deadline: float = float("inf"),
-) -> tuple[list[tuple[int, int, int, int]], int]:
+) -> tuple[list[tuple[int, int, int, int]], int, bool]:
+    """Runs, common-shingle count, and whether the match cap cut the scan short."""
     index, common = _index(cand)
     last_end: dict[int, int] = {}
     runs = []
@@ -203,7 +205,9 @@ def _runs(
                 last_end[d] = i1
                 if i1 - i0 >= MIN_MATCH_TOKENS:
                     runs.append((i0, i1, j0, j1))
-    return runs, common
+                    if len(runs) >= MAX_MATCHES_PER_CANDIDATE:
+                        return runs, common, True
+    return runs, common, False
 
 
 class _Attributor:
@@ -321,7 +325,7 @@ def find_verbatim_reuse(
 
         src_tokens = _tokenize(c.text)
         try:
-            runs, common = _runs(
+            runs, common, truncated = _runs(
                 doc_keys,
                 segments,
                 [t[0] for t in src_tokens],
@@ -331,6 +335,8 @@ def find_verbatim_reuse(
             skipped.append((c.source_id, "deadline_reached"))
             continue
         common_total += common
+        if truncated:
+            skipped.append((c.source_id, "too_many_matches"))
         overlap = any(k[0] and k in declared for k in map(author_key, c.authors))
         for i0, i1, j0, j1 in sorted(runs):
             d_start, d_end = doc_tokens[i0][1], doc_tokens[i1 - 1][2]

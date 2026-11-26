@@ -15,10 +15,14 @@ MIN_MATCH_TOKENS = 12
 SHINGLE_TOKENS = 8
 MAX_POSITIONS_PER_SHINGLE = 64
 MAX_TOTAL_CANDIDATE_CHARS = 10_000_000
+# A 50k-token paper holds at most ~3.8k maximal runs even if every 13th token differs.
+MAX_MATCHES_PER_CANDIDATE = 5_000
 DECLARED_AUTHOR_NOTE = "author overlap (declared by the uploader, unverified)"
 
 Origin = Literal["own_upload", "openalex", "arxiv"]
-SkipReason = Literal["too_long", "budget_exhausted", "deadline_reached"]
+SkipReason = Literal[
+    "too_long", "budget_exhausted", "deadline_reached", "too_many_matches"
+]
 
 _DOI = re.compile(r'10\.\d{4,9}/[^\s"<>\x00-\x1f\x7f]+', re.ASCII)
 _ARXIV_NEW = r"\d{4}\.\d{4,5}(?:v\d+)?"

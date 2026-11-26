@@ -13,6 +13,7 @@ import pytest
 from src.core.acquisition.sources import LicenseDeclaration, SourceLicense
 from src.services.text_reuse import types as reuse_types
 from src.services.text_reuse.types import (
+    MAX_MATCHES_PER_CANDIDATE,
     MAX_TOTAL_CANDIDATE_CHARS,
     MIN_MATCH_TOKENS,
     Attribution,
@@ -638,3 +639,16 @@ def test_one_document_wide_quote_pair_does_not_quote_every_match():
     p = passage()
     doc = f'"\nAs shown (Lee, 2020) elsewhere\n{p}\n{sentence("a", 5000)}"'
     assert attribution(doc) is Attribution.CITED_UNQUOTED
+
+
+def test_matches_per_candidate_are_capped_and_reported():
+    reps = MAX_MATCHES_PER_CANDIDATE + 500
+    res = run("a " * reps, [cand("a " * 71)])
+    assert len(res.matches) == MAX_MATCHES_PER_CANDIDATE
+    assert dict(res.skipped) == {"W1": "too_many_matches"}
+
+
+def test_candidate_under_the_match_cap_is_not_reported_as_truncated():
+    p = passage()
+    res = run(f"{sentence('a', 20)} {p}", [cand(p)])
+    assert res.skipped == () and len(res.matches) == 1
