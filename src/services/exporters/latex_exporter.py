@@ -45,7 +45,16 @@ class LaTeXExporter:
         self.paper_size = self.latex_settings.get("paper_size", "a4paper")
         self.packages = self.latex_settings.get(
             "packages",
-            ["geometry", "graphicx", "hyperref", "cite", "amsmath", "amsfonts"],
+            [
+                "geometry",
+                "graphicx",
+                "hyperref",
+                "cite",
+                "amsmath",
+                "amsfonts",
+                "xcolor",
+                "authblk",
+            ],
         )
 
         self.pdflatex_available = self._check_pdflatex_availability()
@@ -190,7 +199,7 @@ class LaTeXExporter:
                 "% Custom commands",
                 "\\newcommand{\\researchquery}[1]{\\textit{#1}}",
                 "\\newcommand{\\finding}[1]{\\textbf{#1}}",
-                "\\newcommand{\\confidence}[1]{\\textcolor{blue}{(Confidence: #1)}",
+                "\\newcommand{\\confidence}[1]{\\textcolor{blue}{(Confidence: #1)}}",
             ]
         )
 
@@ -400,27 +409,41 @@ class LaTeXExporter:
         if not markdown_text:
             return ""
 
-        latex_text = markdown_text
+        latex_text = re.sub(
+            r"^#{1,6}\s+(.+)$", r"\1", markdown_text, flags=re.MULTILINE
+        )
+        return self._convert_lists_to_latex(latex_text)
 
-        # Convert headers (already handled at section level)
-        latex_text = re.sub(r"^#{1,6}\s+(.+)$", r"\1", latex_text, flags=re.MULTILINE)
+    _INLINE_RE = re.compile(
+        r"\*\*(?P<b1>.+?)\*\*|__(?P<b2>.+?)__|\*(?P<i1>.+?)\*|(?<!\w)_(?P<i2>.+?)_(?!\w)"
+        r"|`(?P<code>.+?)`|\[(?P<text>[^\]]+)\]\((?P<url>[^)]+)\)"
+    )
 
-        latex_text = re.sub(r"\*\*(.*?)\*\*", r"\\textbf{\1}", latex_text)
-        latex_text = re.sub(r"__(.*?)__", r"\\textbf{\1}", latex_text)
-
-        latex_text = re.sub(r"\*(.*?)\*", r"\\textit{\1}", latex_text)
-        latex_text = re.sub(r"_(.*?)_", r"\\textit{\1}", latex_text)
-
-        latex_text = re.sub(r"`(.*?)`", r"\\texttt{\1}", latex_text)
-
-        latex_text = self._convert_lists_to_latex(latex_text)
-
-        latex_text = re.sub(r"\[([^\]]+)\]\(([^\)]+)\)", r"\\href{\2}{\1}", latex_text)
-
-        latex_text = latex_text.replace("\n\n", "\n\n\\par\n")
-
-        # Escape remaining LaTeX special characters
-        return self._escape_latex(latex_text)
+    def _inline_to_latex(self, text: str) -> str:
+        """Convert inline markdown, escaping literal text so markup is not escaped."""
+        out: list[str] = []
+        pos = 0
+        for m in self._INLINE_RE.finditer(text):
+            out.append(self._escape_latex(text[pos : m.start()]))
+            pos = m.end()
+            if m.group("b1") or m.group("b2"):
+                out.append(
+                    f"\\textbf{{{self._inline_to_latex(m.group('b1') or m.group('b2'))}}}"
+                )
+            elif m.group("i1") or m.group("i2"):
+                out.append(
+                    f"\\textit{{{self._inline_to_latex(m.group('i1') or m.group('i2'))}}}"
+                )
+            elif m.group("code"):
+                out.append(f"\\texttt{{{self._escape_latex(m.group('code'))}}}")
+            else:
+                url = re.sub(r"[\\{}]", "", m.group("url"))
+                url = re.sub(r"([%#&])", r"\\\1", url)
+                out.append(
+                    f"\\href{{{url}}}{{{self._inline_to_latex(m.group('text'))}}}"
+                )
+        out.append(self._escape_latex(text[pos:]))
+        return "".join(out)
 
     def _convert_lists_to_latex(self, text: str) -> str:
         """Convert markdown lists to LaTeX."""
@@ -441,7 +464,7 @@ class LaTeXExporter:
                     list_type = "itemize"
 
                 item_text = re.sub(r"^[-*+]\s+", "", stripped)
-                result_lines.append(f"\\item {item_text}")
+                result_lines.append(f"\\item {self._inline_to_latex(item_text)}")
 
             elif re.match(r"^\d+\.\s+", stripped):  # Ordered list
                 if not in_list or list_type != "enumerate":
@@ -452,7 +475,7 @@ class LaTeXExporter:
                     list_type = "enumerate"
 
                 item_text = re.sub(r"^\d+\.\s+", "", stripped)
-                result_lines.append(f"\\item {item_text}")
+                result_lines.append(f"\\item {self._inline_to_latex(item_text)}")
 
             else:
                 if in_list and stripped == "":
@@ -462,7 +485,7 @@ class LaTeXExporter:
                     in_list = False
                     list_type = None
 
-                result_lines.append(line)
+                result_lines.append(self._inline_to_latex(line))
 
         # Close any open list
         if in_list:
@@ -489,11 +512,8 @@ class LaTeXExporter:
             "\\": "\\textbackslash{}",
         }
 
-        escaped_text = text
-        for char, escape in escape_chars.items():
-            escaped_text = escaped_text.replace(char, escape)
-
-        return escaped_text
+        # Single pass: sequential replaces re-escape the braces of earlier output.
+        return re.sub(r"[&%$#^_{}~\\]", lambda m: escape_chars[m.group()], text)
 
     def _extract_abstract_from_summary(self, executive_summary: str) -> str:
         """Extract abstract content from executive summary."""
