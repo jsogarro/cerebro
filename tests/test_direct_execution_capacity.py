@@ -7,7 +7,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.api.services.direct_execution_service import DirectExecutionService
+from src.api.services.direct_execution_service import (
+    DirectExecutionService,
+    ExecutionStatus,
+)
 from src.models.execution_authority import ExecutionAuthorityReference
 from tests.test_direct_execution_authority import (
     OWNING_ORGANIZATION,
@@ -97,4 +100,75 @@ async def test_cap_still_refuses_when_genuinely_running() -> None:
     await _drain(service)
     await _admit(service)  # capacity returns once they finish
     await _drain(service)
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_stops_the_running_workflow() -> None:
+    service = _capacity_service(cap=50)
+    interrupted = asyncio.Event()
+
+    async def workflow(project, execution_status, *args, **kwargs) -> None:
+        execution_status.status = "running"
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            interrupted.set()
+            raise
+
+    service._execute_research_workflow = workflow  # type: ignore[method-assign]
+    execution_id = await _admit(service)
+    await asyncio.sleep(0)
+
+    assert await service.cancel_execution(execution_id) is True
+    await asyncio.wait_for(interrupted.wait(), timeout=1)
+
+    await asyncio.sleep(0)
+    assert not service._background_tasks
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_workflow_task_records_its_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "src.api.services.direct_execution_service.asdict", lambda _decision: {}
+    )
+    service, _router = _service()
+    started = asyncio.Event()
+    recorded: list[str] = []
+
+    async def block(*args, **kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    async def record(execution_status) -> None:
+        recorded.append(execution_status.execution_id)
+
+    service.supervisor_bridge.execute_execution_plan = block
+    service._record_requested_cancellation = record  # type: ignore[method-assign]
+    execution_status = ExecutionStatus(
+        execution_id="exec-1", project_id="p", status="pending"
+    )
+    execution_status._budget_ledger = Mock()
+    plan = Mock()
+    plan.routing_decision.domains = []
+    task = asyncio.create_task(
+        service._execute_research_workflow(
+            _project(),
+            execution_status,
+            None,
+            None,
+            None,
+            Mock(),
+            plan,
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert recorded == ["exec-1"]
     await service.close()

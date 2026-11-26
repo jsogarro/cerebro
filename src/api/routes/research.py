@@ -143,6 +143,7 @@ async def create_research_project(
                 execution_id = await execution_service.start_research_execution(
                     project,
                     authority_reference=request.authority_reference,
+                    organization_id=tenant_context.organization_id,
                 )
             await repo.update_status(
                 db_project.id,

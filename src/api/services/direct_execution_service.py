@@ -515,6 +515,7 @@ class DirectExecutionService:
 
         # Store background task references to prevent GC
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._workflow_tasks: dict[str, asyncio.Task[None]] = {}
         self._fast_path_provider: OpenRouterProvider | None = None
         self.closed = False
         # Performance metrics
@@ -1659,15 +1660,9 @@ class DirectExecutionService:
     ) -> DurableWriteOutcome:
         """Persist a cancellation request onto the run/task/attempt.
 
-        This can only ever record ``CANCELLING`` (via
-        :meth:`Run.request_cancellation`, which picks ``CANCELLING`` over
-        ``CANCELLED`` for a running record) — it does not, and cannot today,
-        record ``CANCELLED``. Nothing in this codebase propagates an actual
-        cancellation signal into the running ``asyncio.Task``
-        (``cancel_execution`` only flips ``execution_status.status`` and
-        returns); persisting a fabricated ``CANCELLED`` would misrepresent
-        work that is still in flight. Closing that gap is a real limitation
-        beyond this packet's scope, not a hidden one.
+        This records ``CANCELLING`` for a running record (via
+        :meth:`Run.request_cancellation`); ``CANCELLED`` is recorded only by
+        the workflow once its task has actually stopped.
 
         Returns:
             What the durable layer did with the request, so
@@ -2225,6 +2220,8 @@ class DirectExecutionService:
         )
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
+        self._workflow_tasks[execution_id] = task
+        task.add_done_callback(lambda _t: self._workflow_tasks.pop(execution_id, None))
 
         logger.info(f"Started direct execution {execution_id} for project {project.id}")
 
@@ -2295,8 +2292,11 @@ class DirectExecutionService:
     @retry(
         stop=stop_after_attempt(_WORKFLOW_MAX_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        # An exhausted budget stays exhausted: retrying cannot succeed.
-        retry=retry_if_not_exception_type(BudgetExceededError),
+        # An exhausted budget stays exhausted, and a cancelled run must not be
+        # restarted by the retry wrapper.
+        retry=retry_if_not_exception_type(
+            (BudgetExceededError, asyncio.CancelledError)
+        ),
     )
     async def _execute_research_workflow(
         self,
@@ -2455,6 +2455,9 @@ class DirectExecutionService:
             )
             await self._checkpoint(execution_status, "completed")
             return
+        except asyncio.CancelledError:
+            await self._record_requested_cancellation(execution_status)
+            raise
         except Exception as e:
             logger.error(
                 f"Direct execution {execution_status.execution_id} failed with exception: {e}"
@@ -2562,6 +2565,38 @@ class DirectExecutionService:
         )
         self._settle_terminal_state(
             execution_status, outcome=outcome, status="failed", phase="failed"
+        )
+
+    async def _record_requested_cancellation(
+        self, execution_status: ExecutionStatus
+    ) -> None:
+        """Finish a cancellation the caller asked for once the work has stopped.
+
+        Only a cancellation requested through :meth:`cancel_execution` is
+        recorded; a task cancelled by shutdown leaves the run as it was, so
+        the next process sees it still in flight.
+        """
+        run = execution_status._run
+        if execution_status.status != "cancelled" or run is None:
+            return
+        if run.status is not RunStatus.CANCELLING:
+            return
+        outcome = await asyncio.shield(
+            self._persist_transition(
+                execution_status,
+                run_target=RunStatus.CANCELLED,
+                task_target=TaskStatus.CANCELLED,
+                attempt_target=AttemptStatus.CANCELLED,
+                event_type="run.cancelled",
+                payload={},
+                reason="Execution cancelled by request",
+            )
+        )
+        self._settle_terminal_state(
+            execution_status,
+            outcome=outcome,
+            status="cancelled",
+            phase="cancelled",
         )
 
     def _visible_execution(
@@ -2715,10 +2750,9 @@ class DirectExecutionService:
         rather than being told a run was cancelled that the durable record
         (and any other process reading it) still considers live.
 
-        What a successful cancellation records is the *request*: the durable
-        run moves to CANCELLING, never to CANCELLED, because nothing here
-        propagates cancellation into the running task. See
-        :meth:`_persist_cancellation`.
+        The durable run moves to CANCELLING here and the running workflow task
+        is cancelled; the workflow records CANCELLED once it has actually
+        stopped. See :meth:`_record_requested_cancellation`.
 
         Returns:
             True if the cancellation was accepted and durably requested.
@@ -2740,6 +2774,9 @@ class DirectExecutionService:
                 return False
             execution.status = "cancelled"
             execution.current_phase = "cancelled"
+            workflow_task = self._workflow_tasks.get(execution_id)
+            if workflow_task is not None:
+                workflow_task.cancel()
 
             await self._publish_progress_update(execution)
 
