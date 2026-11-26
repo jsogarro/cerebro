@@ -30,7 +30,7 @@ from src.models.db.document_critique import (
 from src.models.db.job_constants import ACTIVE_STATUSES
 from src.repositories.tenant_scope import normalize_organization_id, scope_to_owner
 from src.repositories.uploaded_document_repository import UndecryptableDocumentError
-from src.services.document_jobs import flip_if_stale, stale_cutoff
+from src.services.document_jobs import flip_if_stale, is_stale, stale_cutoff
 
 CRITIQUE_DEADLINE_S = 900
 MAX_LIST = 50
@@ -197,9 +197,11 @@ class CritiqueRepository:
         await self._session.flush()
 
     async def _fresh(self, row: DocumentCritique) -> DocumentCritique:
-        if await flip_if_stale(
-            self._session, DOCUMENT_CRITIQUES, row, CRITIQUE_DEADLINE_S
-        ):
+        if is_stale(row.status, row.created_at, CRITIQUE_DEADLINE_S, datetime.now(UTC)):
+            await flip_if_stale(
+                self._session, DOCUMENT_CRITIQUES, row, CRITIQUE_DEADLINE_S
+            )
+            # Refresh even when the flip lost the race: the job may have just finished.
             await self._session.refresh(row)
         return row
 

@@ -209,6 +209,8 @@ def render_report(critique: CritiqueView, document_text_sha256: str) -> str:
     lines = [
         "Critique report",
         f"Model: {critique.model_id} (temperature {critique.temperature})",
+        f"Status: {critique.status}"
+        + (f" ({critique.status_reason})" if critique.status_reason else ""),
         f"Completed: {completed}",
         f"Document text sha256: {document_text_sha256}",
         f"Prompt versions: {versions}",

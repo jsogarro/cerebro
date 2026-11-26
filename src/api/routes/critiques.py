@@ -12,12 +12,16 @@ from datetime import date
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.critique.model import ReviewModel
 from src.core.config import settings
-from src.core.memory_encryption import DocumentEncryptionUnavailable, document_cipher
+from src.core.memory_encryption import (
+    DocumentEncryptionUnavailable,
+    MemoryEncryption,
+    document_cipher,
+)
 from src.middleware.tenant_context import (
     OwnerIds,
     TenantContext,
@@ -50,13 +54,14 @@ from src.services.document_jobs import (
 router = APIRouter(tags=["critiques"])
 
 ModelFactory = Callable[[], ReviewModel]
+NO_STORE = "no-store"
 
 
 class CritiqueRequest(BaseModel):
     model_id: str = Field(max_length=100)
-    hosts: list[str] = Field(max_length=5)
+    hosts: list[Annotated[str, Field(max_length=253)]] = Field(max_length=5)
     consent_text_version: str = Field(max_length=50)
-    acknowledged: bool
+    acknowledged: StrictBool
 
 
 class FindingOut(BaseModel):
@@ -80,7 +85,7 @@ class FindingOut(BaseModel):
         return cls(**vars(finding))
 
 
-class CritiqueOut(BaseModel):
+class CritiqueSummaryOut(BaseModel):
     id: uuid.UUID
     document_id: uuid.UUID
     status: str
@@ -91,21 +96,32 @@ class CritiqueOut(BaseModel):
     created_at: str
     started_at: str | None
     completed_at: str | None
+
+    @classmethod
+    def summary_of(cls, view: CritiqueView) -> dict[str, Any]:
+        return {
+            "id": view.id,
+            "document_id": view.document_id,
+            "status": view.status,
+            "status_reason": view.status_reason,
+            "model_id": view.model_id,
+            "temperature": view.temperature,
+            "role_outcomes": view.role_outcomes,
+            "created_at": view.created_at.isoformat(),
+            "started_at": view.started_at.isoformat() if view.started_at else None,
+            "completed_at": view.completed_at.isoformat()
+            if view.completed_at
+            else None,
+        }
+
+
+class CritiqueOut(CritiqueSummaryOut):
     findings: list[FindingOut]
 
     @classmethod
     def of(cls, view: CritiqueView) -> "CritiqueOut":
         return cls(
-            id=view.id,
-            document_id=view.document_id,
-            status=view.status,
-            status_reason=view.status_reason,
-            model_id=view.model_id,
-            temperature=view.temperature,
-            role_outcomes=view.role_outcomes,
-            created_at=view.created_at.isoformat(),
-            started_at=view.started_at.isoformat() if view.started_at else None,
-            completed_at=view.completed_at.isoformat() if view.completed_at else None,
+            **cls.summary_of(view),
             findings=[FindingOut.of(f) for f in view.findings],
         )
 
@@ -131,32 +147,39 @@ def _error(code: int, name: str, details: Any = None) -> HTTPException:
     return HTTPException(status_code=code, detail=detail)
 
 
-def _require_enabled() -> None:
+async def _enabled(
+    response: Response, _: TenantContext = Depends(get_tenant_context)
+) -> None:
+    """Runs after authentication and before the body is parsed, so a dark feature is a 404."""
     if not settings.DOCUMENT_CRITIQUE_ENABLED:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    response.headers["Cache-Control"] = NO_STORE
 
 
 def _terms_verified() -> bool:
     try:
-        date.fromisoformat(settings.PROVIDER_TERMS_VERIFIED_ON)
+        return date.fromisoformat(settings.PROVIDER_TERMS_VERIFIED_ON) <= date.today()
     except ValueError:
         return False
-    return True
 
 
-def _repository(session: AsyncSession) -> CritiqueRepository:
+def _cipher() -> MemoryEncryption:
     try:
-        return CritiqueRepository(session, document_cipher())
+        return document_cipher()
     except DocumentEncryptionUnavailable:
         raise _error(
             status.HTTP_503_SERVICE_UNAVAILABLE, "document_storage_unavailable"
         ) from None
 
 
+def _repository(session: AsyncSession) -> CritiqueRepository:
+    return CritiqueRepository(session, _cipher())
+
+
 async def _owned_document(
     session: AsyncSession, document_id: uuid.UUID, ids: OwnerIds
 ) -> DocumentMeta:
-    document = await UploadedDocumentRepository(session, document_cipher()).get_meta(
+    document = await UploadedDocumentRepository(session, _cipher()).get_meta(
         document_id, organization_id=ids.organization_id, user_id=ids.user_id
     )
     if document is None:
@@ -193,6 +216,7 @@ async def critique_config(
     "/documents/{document_id}/critiques",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=CritiqueAccepted,
+    dependencies=[Depends(_enabled)],
 )
 async def start_critique(
     document_id: uuid.UUID,
@@ -203,7 +227,6 @@ async def start_critique(
     model_factory: ModelFactory = Depends(get_review_model),
     session_factory: Callable[[], AsyncSession] = Depends(get_job_session_factory),
 ) -> CritiqueAccepted:
-    _require_enabled()
     ids = owner_ids(tenant)
     document = await _owned_document(session, document_id, ids)
     if not _terms_verified():
@@ -295,14 +318,17 @@ async def start_critique(
     return CritiqueAccepted(id=critique_id, status="queued")
 
 
-@router.get("/documents/{document_id}/critiques", response_model=list[CritiqueOut])
+@router.get(
+    "/documents/{document_id}/critiques",
+    response_model=list[CritiqueSummaryOut],
+    dependencies=[Depends(_enabled)],
+)
 async def list_critiques(
     document_id: uuid.UUID,
     limit: Annotated[int, Query(ge=1, le=50)] = 50,
     session: AsyncSession = Depends(get_session),
     tenant: TenantContext = Depends(get_tenant_context),
-) -> list[CritiqueOut]:
-    _require_enabled()
+) -> list[CritiqueSummaryOut]:
     ids = owner_ids(tenant)
     await _owned_document(session, document_id, ids)
     rows = await _repository(session).list_for_document(
@@ -311,13 +337,12 @@ async def list_critiques(
         user_id=ids.user_id,
         limit=limit,
     )
-    return [CritiqueOut.of(view) for view in rows]
+    return [CritiqueSummaryOut(**CritiqueSummaryOut.summary_of(v)) for v in rows]
 
 
 async def _owned_critique(
     critique_id: uuid.UUID, session: AsyncSession, tenant: TenantContext
 ) -> CritiqueView:
-    _require_enabled()
     ids = owner_ids(tenant)
     view = await _repository(session).get(
         critique_id, organization_id=ids.organization_id, user_id=ids.user_id
@@ -327,7 +352,11 @@ async def _owned_critique(
     return view
 
 
-@router.get("/critiques/{critique_id}", response_model=CritiqueOut)
+@router.get(
+    "/critiques/{critique_id}",
+    response_model=CritiqueOut,
+    dependencies=[Depends(_enabled)],
+)
 async def get_critique(
     critique_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -336,7 +365,7 @@ async def get_critique(
     return CritiqueOut.of(await _owned_critique(critique_id, session, tenant))
 
 
-@router.get("/critiques/{critique_id}/report")
+@router.get("/critiques/{critique_id}/report", dependencies=[Depends(_enabled)])
 async def get_report(
     critique_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -351,18 +380,22 @@ async def get_report(
         service.render_report(view, document.text_sha256),
         media_type="text/plain; charset=utf-8",
         headers={
-            "Content-Disposition": f'attachment; filename="critique-{critique_id}.txt"'
+            "Content-Disposition": f'attachment; filename="critique-{critique_id}.txt"',
+            "Cache-Control": NO_STORE,
         },
     )
 
 
-@router.delete("/critiques/{critique_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/critiques/{critique_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_enabled)],
+)
 async def delete_critique(
     critique_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> Response:
-    _require_enabled()
     ids = owner_ids(tenant)
     if not await _repository(session).delete(
         critique_id, organization_id=ids.organization_id, user_id=ids.user_id

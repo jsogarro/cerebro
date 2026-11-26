@@ -83,14 +83,17 @@ def upgrade() -> None:
         "ix_document_critiques_document", "document_critiques", ["document_id"]
     )
     op.create_index(
-        "ix_document_critiques_owner_created",
-        "document_critiques",
-        ["organization_id", "user_id", "created_at"],
-    )
-    op.create_index(
         "ix_document_critiques_org_status",
         "document_critiques",
         ["organization_id", "status"],
+    )
+
+    # Global budget and count checks filter by kind and window across every org.
+    op.create_index(
+        "ix_usage_ledger_kind_created",
+        "usage_ledger",
+        ["kind", "created_at"],
+        postgresql_include=["units"],
     )
 
     op.create_table(
@@ -145,4 +148,5 @@ def downgrade() -> None:
         for table in TENANT_TABLES:
             op.execute(f"DROP POLICY IF EXISTS tenant_isolation_{table} ON {table}")
     op.drop_table("critique_findings")
+    op.drop_index("ix_usage_ledger_kind_created", table_name="usage_ledger")
     op.drop_table("document_critiques")

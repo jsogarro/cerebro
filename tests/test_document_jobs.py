@@ -23,6 +23,7 @@ from src.models.db.uploaded_document import UsageLedger
 from src.services import document_jobs as jobs
 from src.services.document_jobs import (
     MODEL_JOB_KINDS,
+    RUN_JOB_REASONS,
     STALE_GRACE_S,
     JobLimits,
     QuotaExceeded,
@@ -292,6 +293,7 @@ async def test_a_deleted_row_discards_the_result_without_persisting(
         if row is not None and row.status == "running":
             break
         await asyncio.sleep(0.01)
+    assert row is not None and row.status == "running"
     async with factory() as session:
         await session.delete(await session.get(DocumentCritique, job_id))
         await session.commit()
@@ -303,16 +305,17 @@ async def test_a_deleted_row_discards_the_result_without_persisting(
     assert count == 0
 
 
-async def test_an_integrity_error_inside_persist_discards_without_raising(
+async def test_a_constraint_failure_inside_persist_fails_the_row_without_raising(
     factory: Factory,
 ) -> None:
     job_id = await insert_job(factory)
 
     async def persist(session: AsyncSession, result: Any) -> tuple[str, dict[str, Any]]:
-        raise IntegrityError("insert", {}, Exception("fk"))
+        raise IntegrityError("insert", {}, Exception("check"))
 
     await start(factory, job_id, Spy(), persist=persist)
-    assert (await row_of(factory, job_id)).status == "running"  # type: ignore[union-attr]
+    row = await row_of(factory, job_id)
+    assert (row.status, row.status_reason) == ("failed", "internal_error")  # type: ignore[union-attr]
 
 
 # ---- 5b. terminal reasons -----------------------------------------------------
@@ -454,6 +457,30 @@ async def test_cancellation_fails_the_row_as_interrupted_and_reraises(
         await task
     row = await row_of(factory, job_id)
     assert (row.status, row.status_reason) == ("failed", "interrupted")  # type: ignore[union-attr]
+
+
+async def test_every_reason_a_run_writes_is_a_declared_reason(
+    factory: Factory,
+) -> None:
+    never = asyncio.Event()
+
+    async def hang() -> None:
+        await never.wait()
+
+    async def boom() -> None:
+        raise ValueError
+
+    reasons: set[str | None] = set()
+    for work, deadline in ((hang, 0.05), (boom, 30)):
+        job_id = await insert_job(factory)
+        await asyncio.wait_for(start(factory, job_id, work, deadline_s=deadline), 5)
+        reasons.add((await row_of(factory, job_id)).status_reason)  # type: ignore[union-attr]
+    job_id = await insert_job(factory)
+    task = asyncio.create_task(start(factory, job_id, hang))
+    await asyncio.sleep(0.05)
+    await cancel_all({task})
+    reasons.add((await row_of(factory, job_id)).status_reason)  # type: ignore[union-attr]
+    assert reasons == set(RUN_JOB_REASONS)
 
 
 # ---- admission rules (single connection; the races are in the integration suite) --

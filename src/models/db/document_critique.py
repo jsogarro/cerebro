@@ -83,12 +83,6 @@ class DocumentCritique(Base):
             name="ck_document_critiques_status_reason",
         ),
         Index("ix_document_critiques_document", "document_id"),
-        Index(
-            "ix_document_critiques_owner_created",
-            "organization_id",
-            "user_id",
-            "created_at",
-        ),
         Index("ix_document_critiques_org_status", "organization_id", "status"),
     )
 

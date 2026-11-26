@@ -106,4 +106,11 @@ class UsageLedger(Base):
             "kind",
             "created_at",
         ),
+        # Global budget checks filter by kind and window across every org.
+        Index(
+            "ix_usage_ledger_kind_created",
+            "kind",
+            "created_at",
+            postgresql_include=["units"],
+        ),
     )

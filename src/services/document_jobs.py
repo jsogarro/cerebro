@@ -166,7 +166,7 @@ async def _ledger_breach(
     org = UsageLedger.organization_id == request.organization_id
     if limits.per_user_daily is not None:
         count, _ = await _used(
-            session, since, mine, org, UsageLedger.user_id == request.user_id
+            session, since, mine, UsageLedger.user_id == request.user_id
         )
         if count >= limits.per_user_daily:
             return "user_daily"
@@ -305,10 +305,17 @@ async def _finish(
                 await session.rollback()
                 return
             await session.commit()
-        except IntegrityError:
-            # The parent row was deleted while the job ran; its dependents went with it.
+        except IntegrityError as exc:
+            # The row is locked above, so a deleted parent cannot reach here: this is a
+            # constraint the result violated, and the job must fail, not stay running.
             await session.rollback()
-            logger.info("document_job_discarded", job_id=str(job.id))
+            logger.warning(
+                "document_job_failed",
+                job_id=str(job.id),
+                reason="internal_error",
+                error_type=type(exc).__name__,
+            )
+            await _fail(job, expected="running", reason="internal_error")
 
 
 async def run_job(
@@ -331,7 +338,6 @@ async def run_job(
     """
     job = _Job(session_factory, table, job_id, organization_id)
     fail = functools.partial(_fail, job)
-    holds = "queued"
     try:
         async with semaphore:
             elapsed = (datetime.now(UTC) - _aware(created_at)).total_seconds()
@@ -340,7 +346,6 @@ async def run_job(
                 return
             if not await _start(job):
                 return
-            holds = "running"
             try:
                 async with asyncio.timeout(remaining) as deadline:
                     result = await work()
@@ -360,7 +365,10 @@ async def run_job(
             reason=reason,
             error_type=type(exc).__name__,
         )
-        await fail(expected=holds, reason=reason)
+        # The row is queued until _start commits and running after; the CAS that does not
+        # match is a no-op, so trying both covers a cancellation landing between them.
+        await fail(expected="running", reason=reason)
+        await fail(expected="queued", reason=reason)
         if cancelled:
             raise
 

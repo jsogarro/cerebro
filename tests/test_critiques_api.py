@@ -745,6 +745,113 @@ async def test_no_critique_route_accepts_text_in_its_body() -> None:
     assert bodies == 1
 
 
+# ---- review fixes ------------------------------------------------------------------
+
+
+async def test_flag_off_is_404_even_for_a_malformed_body_but_still_401_unauthenticated(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_id = await make_document(factory)
+    critique_id = await run_to_end(client, document_id)
+    monkeypatch.setattr(settings, "DOCUMENT_CRITIQUE_ENABLED", False)
+    url = f"/api/v1/documents/{document_id}/critiques"
+    assert (await client.post(url, json={})).status_code == 404
+    assert (await client.get(f"/api/v1/critiques/{critique_id}")).status_code == 404
+    assert (
+        await client.get(f"/api/v1/critiques/{critique_id}/report")
+    ).status_code == 404
+    assert (await client.delete(f"/api/v1/critiques/{critique_id}")).status_code == 404
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://t"
+    ) as bare:
+        assert (await bare.post(url, json={})).status_code == 401
+
+
+@pytest.mark.parametrize("value", ["yes", 1, "true", "on"])
+async def test_consent_must_be_a_real_true(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    value: Any,
+) -> None:
+    response = await start(client, await make_document(factory), acknowledged=value)
+    assert response.status_code == 422
+    assert await count(factory, UsageLedger) == 0
+
+
+async def test_an_oversized_host_is_rejected_by_validation(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    response = await start(
+        client, await make_document(factory), hosts=["h" * 1_000_000]
+    )
+    assert response.status_code == 422
+
+
+async def test_every_read_is_marked_not_cacheable(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    document_id = await make_document(factory)
+    critique_id = await run_to_end(client, document_id)
+    for url in (
+        f"/api/v1/critiques/{critique_id}",
+        f"/api/v1/critiques/{critique_id}/report",
+        f"/api/v1/documents/{document_id}/critiques",
+    ):
+        response = await client.get(url)
+        assert response.headers["cache-control"] == "no-store", url
+
+
+async def test_the_list_carries_summaries_without_a_findings_field(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    document_id = await make_document(factory)
+    critique_id = await run_to_end(client, document_id)
+    (item,) = (await client.get(f"/api/v1/documents/{document_id}/critiques")).json()
+    assert item["id"] == critique_id and "findings" not in item
+    assert (await read(client, critique_id))["findings"]
+
+
+async def test_a_third_concurrent_critique_in_an_org_is_429_org_concurrent(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    model: GatedModel,
+) -> None:
+    model.gate.clear()
+    document_id = await make_document(factory)
+    for _ in range(2):
+        assert (await start(client, document_id)).status_code == 202
+    response = await start(client, document_id)
+    assert response.status_code == 429
+    assert response.json()["error"]["code"] == "org_concurrent"
+    model.gate.set()
+    await drain()
+
+
+async def test_a_lost_encryption_key_is_503_not_500_on_every_document_route(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_id = await make_document(factory)
+    monkeypatch.setattr(settings, "DOCUMENT_ENCRYPTION_KEY", "")
+    assert (await start(client, document_id)).status_code == 503
+    listed = await client.get(f"/api/v1/documents/{document_id}/critiques")
+    assert listed.status_code == 503
+
+
+async def test_a_future_terms_date_does_not_open_the_gate(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_id = await make_document(factory)
+    monkeypatch.setattr(settings, "PROVIDER_TERMS_VERIFIED_ON", "2999-01-01")
+    assert (await start(client, document_id)).status_code == 409
+    assert (await client.get("/api/v1/critique-config")).json()["enabled"] is False
+
+
 # ---- lifespan -------------------------------------------------------------------------
 
 

@@ -386,3 +386,137 @@ def test_the_work_reads_the_panel_result_shape_the_report_expects() -> None:
         "output_tokens",
         "error_type",
     }
+
+
+# ---- review fixes ----------------------------------------------------------------
+
+
+def a_view(**overrides: Any) -> CritiqueView:
+    base: dict[str, Any] = {
+        "id": uuid.uuid4(),
+        "document_id": uuid.uuid4(),
+        "status": "failed",
+        "status_reason": "deadline_exceeded",
+        "model_id": "m",
+        "temperature": 0.2,
+        "prompt_versions": {"methods": "abcdef0123456789" * 4},
+        "consent_text_version": "v",
+        "consent_text_sha256": "0" * 64,
+        "role_outcomes": {},
+        "created_at": datetime.now(UTC),
+        "started_at": None,
+        "completed_at": datetime.now(UTC),
+    }
+    return CritiqueView(**(base | overrides))
+
+
+def test_a_failed_run_says_so_and_why_in_its_report() -> None:
+    text = service.render_report(a_view(), "d" * 64)
+    assert "Status: failed (deadline_exceeded)" in text
+    assert "Findings: 0" in text
+    for pattern in FORBIDDEN:
+        assert not re.search(pattern, text, re.I), pattern
+
+
+def test_the_report_header_lists_prompt_versions_and_dropped_counts() -> None:
+    view = a_view(
+        status="partial",
+        status_reason=None,
+        role_outcomes={
+            "methods": {
+                "status": "succeeded",
+                "kept": 1,
+                "dropped": {"not_found": 2, "too_short": 1},
+            }
+        },
+    )
+    text = service.render_report(view, "d" * 64)
+    assert "methods abcdef012345" in text
+    assert "dropped not_found 2, too_short 1" in text
+    assert (
+        "Status: partial" in text
+        and "(" not in text.split("Status: partial")[1].split("\n")[0]
+    )
+
+
+async def test_second_quotes_and_the_severity_then_offset_order_round_trip(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    critique_id = await stored(factory)
+    model = by_role(
+        methods=reply(
+            [
+                issue(Q2, severity="minor"),
+                issue(Q1, severity="minor", second_quote=Q2),
+                issue(Q2, severity="critical"),
+            ]
+        )
+    )
+    panel = await run_panel(DOC, model=model)
+    persist = service.make_persist(
+        critique_id=critique_id, organization_id=ORG, user_id=USER
+    )
+    async with factory() as session:
+        await persist(session, panel)
+        await session.commit()
+    await mark_finished(factory, critique_id)
+    async with factory() as session:
+        view = await CritiqueRepository(session, service.document_cipher()).get(
+            critique_id, organization_id=ORG, user_id=USER
+        )
+    assert view is not None
+    methods = [f for f in view.findings if f.role == "methods"]
+    assert [(f.severity, f.quote) for f in methods] == [
+        ("critical", Q2),
+        ("minor", Q1),
+        ("minor", Q2),
+    ]
+    second = next(f for f in methods if f.second_quote)
+    assert second.second_quote == Q2 and second.second_page == 2
+    assert DOC.text[second.second_raw_start : second.second_raw_end] == Q2
+
+
+async def test_active_model_jobs_counts_only_this_orgs_fresh_queued_or_running_rows(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    from datetime import timedelta
+
+    from src.models.db.document_critique import DocumentCritique
+    from src.repositories.critique_repository import (
+        CRITIQUE_DEADLINE_S,
+        active_model_jobs,
+    )
+    from src.services.document_jobs import STALE_GRACE_S
+
+    now = datetime.now(UTC)
+    stale = now - timedelta(seconds=CRITIQUE_DEADLINE_S + STALE_GRACE_S + 5)
+    rows = [
+        (ORG, "queued", now),
+        (ORG, "running", now),
+        (ORG, "succeeded", now),
+        (ORG, "failed", now),
+        (ORG, "running", stale),
+        (uuid.uuid4(), "running", now),
+    ]
+    async with factory() as session:
+        for org, status, created in rows:
+            session.add(
+                DocumentCritique(
+                    document_id=uuid.uuid4(),
+                    organization_id=org,
+                    user_id=USER,
+                    status=status,
+                    model_id="m",
+                    temperature=0.2,
+                    prompt_versions={},
+                    consent_text_version="v",
+                    consent_text_sha256="0",
+                    consent_recorded_at=now,
+                    reserved_units=1,
+                    role_outcomes={},
+                    created_at=created,
+                )
+            )
+        await session.commit()
+    async with factory() as session:
+        assert await active_model_jobs(session, ORG, now) == 2

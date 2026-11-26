@@ -17,6 +17,9 @@ from testcontainers.postgres import PostgresContainer
 from src.models.db.base import Base
 from src.models.db.document_critique import (  # noqa: F401
     CRITIQUE_REASONS,
+    MATCH_KINDS,
+    ROLE_NAMES,
+    SEVERITIES,
     CritiqueFinding,
     DocumentCritique,
 )
@@ -203,7 +206,7 @@ async def _finding(
 
 
 @pytest.mark.parametrize("status", JOB_STATUSES)
-async def test_every_job_status_is_accepted_and_others_are_not(
+async def test_every_job_status_is_accepted(
     connection: AsyncConnection, status: str
 ) -> None:
     document_id, user_id = await _document(connection)
@@ -228,6 +231,35 @@ async def test_unknown_statuses_and_reasons_are_rejected(
     document_id, user_id = await _document(connection)
     with pytest.raises(IntegrityError):
         await _critique(connection, document_id, user_id, **override)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        *({"role": role} for role in ROLE_NAMES),
+        *({"severity": severity} for severity in SEVERITIES),
+        *({"kind": kind} for kind in MATCH_KINDS),
+    ],
+)
+async def test_every_role_severity_and_match_kind_the_orm_allows_is_accepted(
+    connection: AsyncConnection, override: dict[str, str]
+) -> None:
+    document_id, user_id = await _document(connection)
+    critique_id = await _critique(connection, document_id, user_id)
+    await _finding(connection, critique_id, **override)
+
+
+async def test_the_global_ledger_index_covers_kind_window_and_units(
+    connection: AsyncConnection,
+) -> None:
+    definition = await connection.scalar(
+        text(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname='public' "
+            "AND indexname = 'ix_usage_ledger_kind_created'"
+        )
+    )
+    assert definition is not None
+    assert "(kind, created_at)" in definition and "INCLUDE (units)" in definition
 
 
 @pytest.mark.parametrize(
