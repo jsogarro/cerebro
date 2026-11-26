@@ -993,7 +993,7 @@ def test_a_phrase_from_another_paragraph_is_never_sent_reordered():
         para(["quantum", "photonic", "lattice", "oscillator", "tunneling"]),
         para(["quantum", "decoherence", "tunneling", "lattice", "oscillator"]),
     ]
-    text = "\n\n".join([first, *rest])
+    text = "\n\n".join(["A Short Title", first, *rest])
     for query in build_queries(text):
         assert not {"quantum", "entanglement", "decoherence"} <= set(query)
 
