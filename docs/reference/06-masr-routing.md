@@ -235,7 +235,7 @@ Two offline scripts evaluate the allocation policy without enabling it; see the 
 
 ## Memory-informed routing
 
-> **Not wired.** `MEMORY_INFORMED_ROUTING_ENABLED` (default `false`) is read into `MASRouter.memory_informed_routing_enabled`, but `MASRouter.episodic_memory` and `MASRouter.procedural_memory` are initialised to `None` and nothing assigns them, so `_get_episodic_routing_prior` returns `None` and routing is unchanged. See [not wired](15-not-wired.md).
+> **Not wired.** `MEMORY_INFORMED_ROUTING_ENABLED` (default `false`) is read into `MASRouter.memory_informed_routing_enabled`, but `MASRouter.episodic_memory` and `MASRouter.procedural_memory` are initialised to `None` and nothing assigns them, so `_get_episodic_routing_prior` would return `None`. `create_masr_router` therefore raises `ValueError` at startup when the flag is true (outside fixture mode) rather than letting it do nothing. See [not wired](15-not-wired.md).
 
 ## Routing outcomes and metrics
 

@@ -27,3 +27,9 @@ async def test_password_settings_are_applied_and_redis_is_closed() -> None:
             await agen.__anext__()
 
     client.close.assert_awaited_once()
+
+
+def test_login_request_has_no_unused_remember_me_field() -> None:
+    from src.auth.models import LoginRequest
+
+    assert "remember_me" not in LoginRequest.model_fields

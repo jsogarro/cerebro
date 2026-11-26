@@ -74,7 +74,6 @@ class LoginRequest(BaseModel):
     email: EmailStr = Field(..., description="User email address")
     password: str = Field(..., min_length=12, description="User password")
     device_id: str | None = Field(None, description="Device fingerprint")
-    remember_me: bool = Field(default=False, description="Extended session duration")
 
     @field_validator("password")
     @classmethod
@@ -101,7 +100,6 @@ class LoginRequest(BaseModel):
                 "email": "user@example.com",
                 "password": "SecurePassword123!",
                 "device_id": "device-fingerprint-123",
-                "remember_me": False,
             }
         }
     )

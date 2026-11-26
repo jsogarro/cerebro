@@ -148,6 +148,13 @@ def create_masr_router(
 ) -> MASRouter:
     """Create a settings-backed router without performing I/O."""
 
+    # No code attaches episodic memory to the router, so the flag could only
+    # ever be a silent no-op.
+    if settings.MEMORY_INFORMED_ROUTING_ENABLED and not fixture_mode:
+        raise ValueError(
+            "MEMORY_INFORMED_ROUTING_ENABLED is set but no memory is attached "
+            "to the router; unset it"
+        )
     policy = EvaluatorEligibilityPolicy(
         policy_version=settings.ADAPTIVE_ROUTING_POLICY_VERSION,
         schema_version=settings.ADAPTIVE_ROUTING_SCHEMA_VERSION,

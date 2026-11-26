@@ -81,7 +81,7 @@ All routes are in `src/api/auth/auth_router.py`, mounted at `/api/v1/auth`.
 
 **`RegisterRequest`.** `email`, `username` (3 to 50 characters; letters, digits, `_` and `-`; stored lower-case), `password`, `confirm_password` (must equal `password`), `full_name` (optional, up to 255), `organization` (optional free text, up to 255), `accept_terms` (must be `true`). `organization` is stored on the user as profile text and has no tenancy effect; `accept_terms` is validated and not stored.
 
-**`LoginRequest`.** `email`, `password`, `device_id` (optional; the route generates `web_<8 hex characters>` when absent), `remember_me`. `remember_me` is declared and never read, so it changes nothing. The password field applies the full complexity rules, so a login password that breaks them is rejected with `422` before any lookup.
+**`LoginRequest`.** `email`, `password`, `device_id` (optional; the route generates `web_<8 hex characters>` when absent). The password field applies the full complexity rules, so a login password that breaks them is rejected with `422` before any lookup.
 
 **Other models.** `RefreshRequest` (`refresh_token`, optional `device_id`), `PasswordResetRequest` (`email`), `PasswordResetConfirm` (`token`, `new_password`, `confirm_password`), `ChangePasswordRequest` (`current_password`, `new_password`, `confirm_password`; the new password must differ from the current one).
 
