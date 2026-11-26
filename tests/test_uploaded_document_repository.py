@@ -226,3 +226,23 @@ async def test_listing_does_not_select_encrypted_bodies(
         event.remove(engine, "before_cursor_execute", capture)
     selects = [s for s in statements if s.lstrip().upper().startswith("SELECT")]
     assert selects and all("text_enc" not in s for s in selects)
+
+
+async def test_the_stored_character_count_matches_the_text(
+    session: AsyncSession, cipher: MemoryEncryption
+) -> None:
+    repo = UploadedDocumentRepository(session, cipher)
+    doc_id = await _create(repo)
+    row = (await session.execute(select(UploadedDocument))).scalar_one()
+    assert row.id == doc_id and row.char_count == len(TEXT)
+
+
+@pytest.mark.parametrize(("org", "user"), [(None, USER_A), (ORG_A, None)])
+async def test_create_refuses_a_missing_identity(
+    session: AsyncSession,
+    cipher: MemoryEncryption,
+    org: uuid.UUID | None,
+    user: uuid.UUID | None,
+) -> None:
+    with pytest.raises(MissingOrganizationContextError):
+        await _create(UploadedDocumentRepository(session, cipher), org=org, user=user)  # type: ignore[arg-type]

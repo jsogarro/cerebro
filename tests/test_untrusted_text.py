@@ -1,3 +1,5 @@
+import pytest
+
 from src.core.untrusted_text import strip_invisible
 
 ZWSP = chr(0x200B)
@@ -72,3 +74,20 @@ def test_range_edges_are_stripped_and_the_neighbours_are_not() -> None:
         assert strip_invisible(f"a{chr(edge)}b") == ("ab", 1)
     assert strip_invisible(f"a{chr(0xE01F0)}b")[1] == 1  # unassigned (Cn)
     assert strip_invisible("aéb") == ("aéb", 0)
+
+
+def test_ascii_controls_are_removed_and_counted_including_delete() -> None:
+    assert strip_invisible("a\x00b\x1fc\x7fd e") == ("abcd e", 3)
+    assert strip_invisible("a\x20b") == ("a b", 0)
+
+
+@pytest.mark.parametrize("code", [0x1160, 0x17B5, 0x180F, 0x2029, 0x180B, 0xFFA0])
+def test_each_blank_filler_and_separator_is_removed(code: int) -> None:
+    assert strip_invisible(f"a{chr(code)}b") == ("ab", 1)
+
+
+def test_variation_selector_edge_cases() -> None:
+    vs16, vs15 = chr(0xFE0F), chr(0xFE0E)
+    assert strip_invisible(vs16) == ("", 1)
+    assert strip_invisible(f"1{vs16}") == (f"1{vs16}", 0)
+    assert strip_invisible(f"é{vs15}") == ("é", 1)

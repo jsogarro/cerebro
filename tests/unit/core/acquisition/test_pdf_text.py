@@ -223,3 +223,25 @@ def test_cleaned_pages_are_renormalized() -> None:
     pdf = _pdf(["e"])
     result = extract_pdf_text(pdf, clean_page=lambda page: page + "́")
     assert result.text == "é"
+
+
+def test_page_of_rejects_offsets_outside_every_page() -> None:
+    result = extract_pdf_text(_pdf(["aa", "bb"]))
+    assert result.page_of(0) == 1 and result.page_of(len(result.text) - 1) == 2
+    for offset in (-1, len(result.text), 2):
+        with pytest.raises(IndexError):
+            result.page_of(offset)
+
+
+@pytest.mark.parametrize(
+    "error", [KeyError("k"), TypeError("t"), ValueError("v"), RecursionError()]
+)
+def test_reader_failures_are_malformed_pdfs(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    def boom(*_: object, **__: object) -> None:
+        raise error
+
+    monkeypatch.setattr("src.core.acquisition.pdf_text.PdfReader", boom)
+    with pytest.raises(MalformedPdfError):
+        extract_pdf_text(_pdf(["x"]))
