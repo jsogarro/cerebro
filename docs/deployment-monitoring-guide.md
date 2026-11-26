@@ -44,7 +44,6 @@ Build locally with `docker compose build` (development stage, `docker-compose.ym
 |---|---|---|---|
 | `api` | `Dockerfile`, target `production` | 8000 | Memory limit 2G, `read_only: true`, `tmpfs` for `/tmp` and `/var/cache/nginx` |
 | `masr-router` | `docker/Dockerfile.masr` | 9100 | Profile `legacy-masr-service`; see [legacy MASR service](#legacy-standalone-masr-service) |
-| `mcp-server` | `Dockerfile`, target `production`, command `python -m src.mcp.server` | 9000 | Uses Redis database 2. `src/mcp/server.py` has no `__main__` block and `src/mcp` has no `__main__.py`, so that command imports the module and exits, nothing listens on 9000, and `restart: always` restarts it in a loop. The production target also installs the package without the `[mcp]` extra, and the service passes no `SECRET_KEY` or `DATABASE_URL` to the image entrypoint's `alembic upgrade head`. |
 | `postgres` | `postgres:16-alpine` | 5432 | Volume `postgres_data_prod`, user `research`, database `research_db` |
 | `redis` | `redis:7-alpine` | 6379 | Started with `--requirepass ${REDIS_PASSWORD}`, volume `redis_data_prod` |
 | `web` | `cerebro/web/Dockerfile` | none | Built with `VITE_API_URL=/api/v1` |

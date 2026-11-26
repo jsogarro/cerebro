@@ -38,7 +38,7 @@ docker compose exec postgres pg_isready
 docker compose exec redis redis-cli ping
 ```
 
-`docker-compose.yml` defines `api`, `mcp-server`, `postgres`, `redis`, `nginx` and `web`, plus `masr-router` under the profile `legacy-masr-service` and `pgadmin` and `redis-commander` under the profile `dev-tools`. There is no worker service: executions run inside the `api` container.
+`docker-compose.yml` defines `api`, `postgres`, `redis`, `nginx` and `web`, plus `masr-router` under the profile `legacy-masr-service` and `pgadmin` and `redis-commander` under the profile `dev-tools`. There is no worker service: executions run inside the `api` container.
 
 ## Connection issues
 

@@ -211,7 +211,7 @@ Alembic scripts are in `alembic/versions/`; `alembic/env.py` reads `DATABASE_URL
 
 Migrations that create row-level security or triggers do so inside an `_is_postgresql()` guard; on another dialect they create tables and indexes only.
 
-`docker/entrypoint.sh` runs `alembic upgrade head` before starting the application. If the upgrade fails it prints the exit status and exits with it, so the container does not start; with no application command it exits with status 64. The `api` service in `docker-compose.yml` uses this entrypoint. The `mcp-server` service sets `entrypoint: []` and runs no migration.
+`docker/entrypoint.sh` runs `alembic upgrade head` before starting the application. If the upgrade fails it prints the exit status and exits with it, so the container does not start; with no application command it exits with status 64. The `api` service in `docker-compose.yml` uses this entrypoint.
 
 Commands (the `Makefile` targets run them inside the `api` container):
 

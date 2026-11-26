@@ -302,7 +302,7 @@ Notes on specific rows:
 - `LOG_LEVEL` is not read by the API process. The legacy MASR service reads the environment variable directly (see [Environment variables read outside Settings](#environment-variables-read-outside-settings)).
 - `DEEPSEEK_ENABLED`, `LLAMA_ENABLED`, `GEMINI_ENABLED` and `OPENROUTER_ENABLED` are emitted into the provider configuration, but `_build_plan_route` overwrites `enabled` with true and no other path reads them. `MODEL_PROVIDERS_ENABLED` is emitted as `providers["enabled"]`, which no code reads.
 - `MODEL_ROUTER_*` values are not passed to `ModelRouter`, which reads `health_check_interval`, `max_retries` and `enable_fallback` from its own configuration dictionary with its own defaults.
-- `MCP_PORT` is not read by the API. The compose `mcp-server` command reads the process variable `MCP_PORT` directly (see [Compose-level variables](#compose-level-variables)).
+- `MCP_PORT` is not read by the API. No compose service reads it.
 - `CLOUD_RUN_*`, `PERF_*`, `COST_DAILY_BUDGET_LIMIT`, `COST_ENABLE_BUDGET_ALERTS` and `COST_OPTIMIZATION_ENABLED` configure nothing. `COST_MAX_PER_REQUEST` is the only `COST_*` field read, and its value limits nothing (see the MASR table).
 - `AI_BRAIN_ENABLED` and `AI_BRAIN_MODE` are read only by `Settings.is_ai_brain_mode` and `Settings.is_research_only_mode`, which have no callers.
 
@@ -406,9 +406,7 @@ Compose interpolates these variables from the shell or an `.env` file next to th
 | `GRAFANA_PASSWORD` | none | `docker-compose.production.yml` | Grafana admin password |
 | `JWT_PRIVATE_KEY_FILE`, `JWT_PUBLIC_KEY_FILE` | none; compose stops with an error when either is unset | `docker-compose.production.yml` | host paths of the RSA key pair, exposed to the API as compose secrets and mounted at `/run/secrets` |
 
-The `mcp-server` service reads the process variable `MCP_PORT` (set to `9000` in the compose file) in its start command.
-
-Both compose files also set literal environment entries that no code reads: `MASR_ENABLE_ROUTING`, `MASR_ENABLE_LEARNING`, `MASR_MAX_AGENTS` and `MASR_QUALITY_THRESHOLD` (production file and the `masr-router` service), and in the production file `GUNICORN_WORKERS`, `GUNICORN_WORKER_CLASS`, `GUNICORN_MAX_REQUESTS` and `GUNICORN_MAX_REQUESTS_JITTER`. The production image starts `uvicorn` with `--workers 1`, not gunicorn.
+Both compose files also set literal environment entries that no code reads: `MASR_MAX_AGENTS` and `MASR_QUALITY_THRESHOLD` (the `masr-router` service in both files, and the production `api` service), `MASR_ENABLE_LEARNING` (the `masr-router` service in the development file, the `api` service in the production file) and `MASR_ENABLE_ROUTING` (production `api` service only). The production image starts `uvicorn` with `--workers 1`.
 
 ## Example environment files
 

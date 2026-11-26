@@ -66,3 +66,9 @@ def test_query_research_smoke_step_sends_the_bearer_token(script: str) -> None:
 def test_postgres_smoke_script_detects_the_api_service_by_compose_name() -> None:
     text = (REPO_ROOT / "scripts/smoke_test_postgres.sh").read_text(encoding="utf-8")
     assert "research-api" not in text
+
+
+@pytest.mark.parametrize("name", COMPOSE_FILES)
+def test_no_standalone_mcp_server_service(name: str) -> None:
+    # MCPClient builds its own in-process server; nothing calls a compose one.
+    assert "mcp-server" not in _load(name)["services"]

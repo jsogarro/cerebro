@@ -1,6 +1,6 @@
 # Code that is not wired
 
-This page lists code and settings present in the repository that no production path calls. Nothing listed here runs in the default configuration or when any setting is changed, unless a row says otherwise. "Production path" means the processes the repository starts: the API (`uvicorn src.api.main:app`), the `research-cli` script and the MCP server container. Other reference pages link here instead of repeating detail.
+This page lists code and settings present in the repository that no production path calls. Nothing listed here runs in the default configuration or when any setting is changed, unless a row says otherwise. "Production path" means the processes the repository starts: the API (`uvicorn src.api.main:app`) and the `research-cli` script. Other reference pages link here instead of repeating detail.
 
 ## Summary
 
