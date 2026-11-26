@@ -52,10 +52,21 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
         _skipped_sandbox_tests.append(report.nodeid)
 
 
+def _guard_tripped() -> bool:
+    return bool(os.environ.get("CI") and _skipped_sandbox_tests)
+
+
 def pytest_sessionfinish(session: pytest.Session) -> None:
     """In CI a skipped Linux-only control test is a vacuous control: fail."""
-    if os.environ.get("CI") and _skipped_sandbox_tests:
+    if _guard_tripped():
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def pytest_terminal_summary(terminalreporter: Any) -> None:
+    if _guard_tripped():
+        terminalreporter.section(f"{_SANDBOX_MARKER} tests skipped in CI", red=True)
+        for nodeid in _skipped_sandbox_tests:
+            terminalreporter.line(nodeid)
 
 
 @pytest.fixture(autouse=True)

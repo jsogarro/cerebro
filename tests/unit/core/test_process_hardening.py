@@ -81,6 +81,20 @@ def test_importing_api_main_makes_process_non_dumpable() -> None:
     assert _run([], code) == "0"
 
 
+@linux_only
+@skip_off_linux
+def test_hardened_process_can_still_read_its_own_proc_and_serve_metrics() -> None:
+    # prometheus' process collector reads /proc/self/{stat,fd,limits}.
+    code = (
+        "import os, src.api.main;"
+        "from prometheus_client import generate_latest;"
+        "assert os.listdir('/proc/self/fd');"
+        "assert 'Uid:' in open('/proc/self/status').read();"
+        "print(b'process_open_fds' in generate_latest())"
+    )
+    assert _run([], code) == "True"
+
+
 def test_make_non_dumpable_is_noop_off_linux(monkeypatch) -> None:
     from src.core import process_hardening
 
@@ -103,8 +117,8 @@ def test_api_pod_does_not_mount_service_account_token() -> None:
 
 
 GUARD_CONFTEST = (
-    "from tests.conftest import pytest_runtest_logreport, pytest_sessionfinish\n"
-    "import pytest\n"
+    "from tests.conftest import (\n"
+    "    pytest_runtest_logreport, pytest_sessionfinish, pytest_terminal_summary)\n"
 )
 SKIPPED_SANDBOX_TEST = textwrap.dedent(
     """
@@ -117,7 +131,9 @@ SKIPPED_SANDBOX_TEST = textwrap.dedent(
 )
 
 
-def _pytest_in(tmp_path: Path, *, ci: bool, source: str) -> int:
+def _pytest_in(
+    tmp_path: Path, *, ci: bool, source: str
+) -> subprocess.CompletedProcess[bytes]:
     (tmp_path / "conftest.py").write_text(GUARD_CONFTEST)
     (tmp_path / "test_x.py").write_text(source)
     (tmp_path / "pytest.ini").write_text(
@@ -133,19 +149,22 @@ def _pytest_in(tmp_path: Path, *, ci: bool, source: str) -> int:
         env=env,
         capture_output=True,
         check=False,
-    ).returncode
+    )
 
 
 def test_ci_guard_fails_session_when_a_sandbox_test_is_skipped(tmp_path) -> None:
-    assert _pytest_in(tmp_path, ci=True, source=SKIPPED_SANDBOX_TEST) != 0
+    done = _pytest_in(tmp_path, ci=True, source=SKIPPED_SANDBOX_TEST)
+    assert done.returncode != 0
+    # A red CI run must say which control went vacuous.
+    assert b"test_x.py::test_sandbox" in done.stdout
 
 
 def test_guard_is_inert_outside_ci(tmp_path) -> None:
-    assert _pytest_in(tmp_path, ci=False, source=SKIPPED_SANDBOX_TEST) == 0
+    assert _pytest_in(tmp_path, ci=False, source=SKIPPED_SANDBOX_TEST).returncode == 0
 
 
 def test_guard_passes_when_nothing_sandbox_marked_is_skipped(tmp_path) -> None:
-    assert _pytest_in(tmp_path, ci=True, source="def test_a(): ...\n") == 0
+    assert _pytest_in(tmp_path, ci=True, source="def test_a(): ...\n").returncode == 0
 
 
 def test_ci_runs_on_linux_as_non_root() -> None:
