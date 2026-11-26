@@ -16,10 +16,9 @@ skip_off_linux = pytest.mark.skipif(
     sys.platform != "linux", reason="needs Linux /proc and prctl"
 )
 
-# A helper (launched with a sentinel in its environment, which is what
-# /proc/<pid>/environ exposes), optionally hardens itself, then asks a grandchild
-# (a distinct process, as a compromised parser child would be) to read the
-# helper's /proc/<pid>/environ.
+# /proc/<pid>/environ shows the environment the process was launched with, so
+# the sentinel goes in via the launch env. The grandchild is a distinct process
+# standing in for a compromised parser child.
 HELPER = textwrap.dedent(
     """
     import os, subprocess, sys
