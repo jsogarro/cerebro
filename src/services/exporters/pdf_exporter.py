@@ -18,12 +18,12 @@ try:
     from weasyprint.text.fonts import FontConfiguration
 
     WEASYPRINT_AVAILABLE = True
-    # The report is rendered from model output: it may name any URL or local
-    # file, and only inline data: URIs (the template's SVG) are legitimate.
-    DATA_ONLY_FETCHER = URLFetcher(allowed_protocols={"data"})
+    # The report is rendered from model output, which may name any URL or local
+    # file. No protocol is allowed, data: included.
+    DENY_ALL_FETCHER = URLFetcher(allowed_protocols=set())
 except (ImportError, OSError):
     WEASYPRINT_AVAILABLE = False
-    DATA_ONLY_FETCHER = None
+    DENY_ALL_FETCHER = None
     weasyprint = None
     HTML = None
     CSS = None
@@ -64,7 +64,9 @@ class PDFExporter:
         """Validate that all required dependencies are available."""
         try:
             # Test WeasyPrint installation
-            HTML(string="<html><body>Test</body></html>").write_pdf()
+            HTML(
+                string="<html><body>Test</body></html>", url_fetcher=DENY_ALL_FETCHER
+            ).write_pdf()
         except Exception as e:
             logger.warning(f"WeasyPrint validation warning: {e}")
             # Don't fail on warnings, but log them
@@ -91,7 +93,7 @@ class PDFExporter:
             # Prepare CSS styles
             css_styles = self._build_css_styles(report, custom_css)
 
-            html_doc = HTML(string=html_content, url_fetcher=DATA_ONLY_FETCHER)
+            html_doc = HTML(string=html_content, url_fetcher=DENY_ALL_FETCHER)
 
             css_objects = []
             for css_content in css_styles:
@@ -99,7 +101,7 @@ class PDFExporter:
                     CSS(
                         string=css_content,
                         font_config=self.font_config,
-                        url_fetcher=DATA_ONLY_FETCHER,
+                        url_fetcher=DENY_ALL_FETCHER,
                     )
                 )
 

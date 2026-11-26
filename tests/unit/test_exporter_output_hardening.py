@@ -1,5 +1,6 @@
 """Model output and citation metadata must not reach TeX or WeasyPrint as markup."""
 
+import os
 import re
 import socket
 import threading
@@ -200,34 +201,55 @@ async def test_basic_html_fallback_escapes_everything() -> None:
     assert "&lt;img" in html and "&lt;link" in html
 
 
-def test_pdf_export_passes_the_data_only_fetcher_to_html_and_css(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def _stub_weasyprint(monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, MagicMock]:
     html_cls, css_cls = MagicMock(), MagicMock()
     monkeypatch.setattr(pdf_exporter, "HTML", html_cls)
     monkeypatch.setattr(pdf_exporter, "CSS", css_cls)
     monkeypatch.setattr(pdf_exporter, "WEASYPRINT_AVAILABLE", True)
     monkeypatch.setattr(pdf_exporter, "FontConfiguration", MagicMock())
-    exporter = pdf_exporter.PDFExporter(ReportSettings())
+    return html_cls, css_cls
+
+
+def _all_constructions(mock: MagicMock) -> list[object]:
+    return [call.kwargs.get("url_fetcher") for call in mock.call_args_list]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_every_weasyprint_construction_gets_the_deny_all_fetcher(
+    monkeypatch: pytest.MonkeyPatch, stream: bool
+) -> None:
+    html_cls, css_cls = _stub_weasyprint(monkeypatch)
+    exporter = pdf_exporter.PDFExporter(ReportSettings())  # constructs HTML() too
     monkeypatch.setattr(exporter, "_generate_pdf_bytes", lambda *_: b"%PDF")
-    exporter.export_to_pdf("<p>x</p>", Report(id="r", title="t", query="q"))
-    assert html_cls.call_args.kwargs["url_fetcher"] is pdf_exporter.DATA_ONLY_FETCHER
-    assert css_cls.call_args.kwargs["url_fetcher"] is pdf_exporter.DATA_ONLY_FETCHER
+    export = exporter.export_to_pdf_stream if stream else exporter.export_to_pdf
+    export("<p>x</p>", Report(id="r", title="t", query="q"), custom_css="p{}")
+    fetchers = _all_constructions(html_cls) + _all_constructions(css_cls)
+    assert len(fetchers) >= 4  # dependency probe, document, base CSS, custom CSS
+    assert all(f is pdf_exporter.DENY_ALL_FETCHER for f in fetchers)
 
 
 needs_weasyprint = pytest.mark.skipif(
-    not pdf_exporter.WEASYPRINT_AVAILABLE, reason="WeasyPrint not importable"
+    not pdf_exporter.WEASYPRINT_AVAILABLE
+    and not os.environ.get("CEREBRO_REQUIRE_WEASYPRINT"),
+    reason="WeasyPrint not importable",
 )
 
 
+@pytest.mark.skipif(
+    not os.environ.get("CEREBRO_REQUIRE_WEASYPRINT"),
+    reason="only the Linux renderer job sets CEREBRO_REQUIRE_WEASYPRINT",
+)
+def test_renderer_job_fails_when_weasyprint_is_missing() -> None:
+    assert pdf_exporter.WEASYPRINT_AVAILABLE, "renderer job needs WeasyPrint"
+
+
 @needs_weasyprint
-def test_data_only_fetcher_refuses_files_and_network() -> None:
-    fetcher = pdf_exporter.DATA_ONLY_FETCHER
+@pytest.mark.parametrize(
+    "url", ["file:///etc/passwd", "http://127.0.0.1:1/", "data:text/plain,a", "ftp://example.com/x"]
+)
+def test_deny_all_fetcher_refuses_every_scheme(url: str) -> None:
     with pytest.raises(ValueError, match="disallowed"):
-        fetcher("file:///etc/passwd")
-    with pytest.raises(ValueError, match="disallowed"):
-        fetcher("http://127.0.0.1:1/")
-    assert fetcher("data:text/plain,a") is not None
+        pdf_exporter.DENY_ALL_FETCHER(url)
 
 
 def _loopback_listener() -> tuple[socket.socket, list[int]]:
@@ -259,7 +281,7 @@ def test_render_never_connects_to_remote_hosts(
     server, hits = _loopback_listener()
     port = server.getsockname()[1]
     html = f'<html><body><img src="http://127.0.0.1:{port}/x.png"></body></html>'
-    kwargs = {"url_fetcher": pdf_exporter.DATA_ONLY_FETCHER} if hardened else {}
+    kwargs = {"url_fetcher": pdf_exporter.DENY_ALL_FETCHER} if hardened else {}
     pdf_exporter.HTML(string=html, **kwargs).write_pdf()
     server.close()
     assert len(hits) == expected_hits
