@@ -9,16 +9,20 @@ decrypted.
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar, cast
 
-from sqlalchemy import Select, delete, select, text
+from sqlalchemy import Select, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from src.core.acquisition.pdf_text import ExtractedText, PageSpan
-from src.core.memory_encryption import ENCRYPTED_TEXT_PREFIX, MemoryEncryption
-from src.models.db.uploaded_document import UploadedDocument
+from src.core.memory_encryption import (
+    ENCRYPTED_TEXT_PREFIX,
+    DocumentEncryptionUnavailable,
+    MemoryEncryption,
+)
+from src.models.db.uploaded_document import UploadedDocument, UsageLedger
 from src.repositories.tenant_scope import (
     MissingOrganizationContextError,
     normalize_organization_id,
@@ -46,15 +50,24 @@ class DocumentMeta:
     created_at: datetime
 
 
+class UndecryptableDocumentError(ValueError):
+    """The stored value was written under a key that is no longer configured."""
+
+
 class UploadedDocumentRepository:
-    def __init__(self, session: AsyncSession, cipher: MemoryEncryption) -> None:
+    def __init__(self, session: AsyncSession, cipher: MemoryEncryption | None) -> None:
         self._session = session
         self._cipher = cipher
 
     def _decrypt(self, value: str) -> str:
         if not value.startswith(ENCRYPTED_TEXT_PREFIX):
             raise ValueError("stored document value is not encrypted")
-        return cast(str, self._cipher.decrypt_text(value))
+        if self._cipher is None:
+            raise DocumentEncryptionUnavailable("no cipher was supplied")
+        try:
+            return cast(str, self._cipher.decrypt_text(value))
+        except ValueError as error:
+            raise UndecryptableDocumentError(str(error)) from None
 
     def _owned(self, query: _SelectT, org: uuid.UUID, user: uuid.UUID) -> _SelectT:
         return scope_to_owner(
@@ -99,6 +112,8 @@ class UploadedDocumentRepository:
             raise MissingOrganizationContextError(
                 "an upload needs an authenticated user"
             )
+        if self._cipher is None:
+            raise DocumentEncryptionUnavailable("no cipher was supplied")
         encrypt = self._cipher.encrypt_text
         row = UploadedDocument(
             organization_id=normalize_organization_id(organization_id),
@@ -141,7 +156,10 @@ class UploadedDocumentRepository:
         self, document_id: uuid.UUID, *, organization_id: uuid.UUID, user_id: uuid.UUID
     ) -> DocumentMeta | None:
         row = await self._get(document_id, organization_id, user_id)
-        return None if row is None else self._meta(row)
+        try:
+            return None if row is None else self._meta(row)
+        except UndecryptableDocumentError:
+            return None
 
     async def get_text(
         self, document_id: uuid.UUID, *, organization_id: uuid.UUID, user_id: uuid.UUID
@@ -149,8 +167,12 @@ class UploadedDocumentRepository:
         row = await self._get(document_id, organization_id, user_id, body=True)
         if row is None:
             return None
+        try:
+            text = self._decrypt(row.text_enc)
+        except UndecryptableDocumentError:
+            return None
         return ExtractedText(
-            text=self._decrypt(row.text_enc),
+            text=text,
             pages=tuple(PageSpan(*span) for span in row.pages),
             text_sha256=row.text_sha256,
             source_sha256=row.source_sha256,
@@ -168,8 +190,13 @@ class UploadedDocumentRepository:
             organization_id,
             user_id,
         )
-        rows = (await self._session.execute(query)).scalars()
-        return [self._meta(row) for row in rows]
+        metas: list[DocumentMeta] = []
+        for row in (await self._session.execute(query)).scalars():
+            try:
+                metas.append(self._meta(row))
+            except UndecryptableDocumentError:
+                continue
+        return metas
 
     async def delete(
         self, document_id: uuid.UUID, *, organization_id: uuid.UUID, user_id: uuid.UUID
@@ -195,3 +222,55 @@ class UploadedDocumentRepository:
             delete(UploadedDocument).where(UploadedDocument.expires_at <= now)
         )
         return result.rowcount  # type: ignore[attr-defined,no-any-return]
+
+
+class UsageLedgerRepository:
+    """Append-only usage rows that meter per-user quotas."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def reserve(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        user_id: uuid.UUID,
+        kind: str,
+        limit: int,
+        units: int = 1,
+    ) -> bool:
+        """Insert one row unless the user already has ``limit`` in the last 24 h.
+
+        The check comes before the insert, so a refusal writes nothing. On
+        Postgres a transaction-scoped advisory lock serialises concurrent
+        reservations for the same user and kind.
+        """
+        if self._session.get_bind().dialect.name == "postgresql":
+            await self._session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                {"key": f"{kind}:{user_id}"},
+            )
+        now = datetime.now(UTC)
+        used = await self._session.scalar(
+            select(func.count())
+            .select_from(UsageLedger)
+            .where(
+                UsageLedger.organization_id == organization_id,
+                UsageLedger.user_id == user_id,
+                UsageLedger.kind == kind,
+                UsageLedger.created_at >= now - timedelta(hours=24),
+            )
+        )
+        if (used or 0) >= limit:
+            return False
+        self._session.add(
+            UsageLedger(
+                organization_id=organization_id,
+                user_id=user_id,
+                kind=kind,
+                units=units,
+                created_at=now,
+            )
+        )
+        await self._session.flush()
+        return True

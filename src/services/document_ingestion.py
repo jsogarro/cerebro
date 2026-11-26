@@ -11,6 +11,7 @@ import signal
 import sys
 import unicodedata
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, cast
@@ -47,6 +48,7 @@ __all__ = [
     "extract_upload",
     "ingest",
     "require_document_key",
+    "run_purge_loop",
     "sniff_media_type",
     "store_document",
 ]
@@ -400,3 +402,23 @@ async def ingest(
     return await store_document(
         session, prepared, organization_id=organization_id, user_id=user_id
     )
+
+
+async def run_purge_loop(
+    session_factory: Callable[[], AsyncSession], interval_s: float
+) -> None:
+    """Delete expired documents now and then every ``interval_s``.
+
+    Safe to run in every worker. A failed sweep is logged and the loop goes on.
+    """
+    while True:
+        try:
+            async with session_factory() as session:
+                purged = await UploadedDocumentRepository(session, None).purge_expired(
+                    datetime.now(UTC)
+                )
+                await session.commit()
+            logger.info("documents_purged", count=purged)
+        except Exception as error:
+            logger.warning("document_purge_failed", error=type(error).__name__)
+        await asyncio.sleep(interval_s)

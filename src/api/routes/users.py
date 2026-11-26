@@ -16,6 +16,7 @@ from src.models.db.generated_report import GeneratedReport
 from src.models.db.research_project import ResearchProject
 from src.models.db.research_result import ResearchResult
 from src.models.db.session import get_session
+from src.models.db.uploaded_document import UploadedDocument, UsageLedger
 from src.models.db.user import User
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 
@@ -84,6 +85,12 @@ async def delete_user_gdpr(
     project_result = await db.execute(
         delete(ResearchProject).where(ResearchProject.user_id == user_id_text)
     )
+    document_result = await db.execute(
+        delete(UploadedDocument).where(UploadedDocument.user_id == user_id)
+    )
+    ledger_result = await db.execute(
+        delete(UsageLedger).where(UsageLedger.user_id == user_id)
+    )
     user_result = await db.execute(delete(User).where(User.id == user_id))
 
     memory_deleted = (
@@ -101,6 +108,8 @@ async def delete_user_gdpr(
             "generated_reports": report_result.rowcount or 0,  # type: ignore[attr-defined]
             "research_results": result_result.rowcount or 0,  # type: ignore[attr-defined]
             "workflow_checkpoints": checkpoint_result.rowcount or 0,  # type: ignore[attr-defined]
+            "uploaded_documents": document_result.rowcount or 0,  # type: ignore[attr-defined]
+            "usage_ledger": ledger_result.rowcount or 0,  # type: ignore[attr-defined]
             "memory": memory_deleted,
         },
     }
