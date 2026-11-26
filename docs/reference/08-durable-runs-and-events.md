@@ -128,11 +128,13 @@ Each lifecycle write returns a `DurableWriteOutcome`:
 | `run.admitted` | `execution_id`, `task_id`, `attempt_id` |
 | `run.started` | `phase` |
 | `run.attempt_failed` | `error`, `attempt` |
-| `run.succeeded` | `workers_used`, or `fixture_mode` |
-| `run.failed` | `error` |
-| `run.budget_exceeded` | `code`, `dimension`, `limit`, `used`, `requested`, `usage` |
+| `run.succeeded` | `workers_used` and `usage`, or `fixture_mode` |
+| `run.failed` | `error` and `usage` |
+| `run.budget_exceeded` | `error`, `code`, `dimension`, `limit`, `used`, `requested`, `usage` |
 | `run.cancellation_requested` | `reason` |
 | `tool.invocation.requested`, `tool.invocation.completed` | tool name and version, capability scope, input digest and trust (requested) or outcome and error code (completed), plus `task_id` and `attempt_id`; written only when tool calls use the durable audit store (see [tool boundary and evidence](09-tool-boundary-and-evidence.md)) |
+
+`usage` is the run's budget ledger at the terminal event: `tokens_used`, `cost_usd` (a decimal string), `tool_invocations` and `unknown_usage_calls`. It is present on `run.succeeded` and `run.failed` only when the run has a ledger, and always on `run.budget_exceeded`.
 
 Lifecycle events use `event_type_version` `1`; tool events use `1.0`.
 

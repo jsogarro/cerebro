@@ -77,7 +77,7 @@ pytest tests/security -v
 
 **Regression.** `tests/regression/test_golden_dataset.py` validates `tests/fixtures/golden_dataset.json` (at least 50 cases) and scores agent outputs through `src/services/evaluation_regression.py`; `test_hallucination_detector.py` checks `HallucinationDetector`. CI runs them first with `pytest -o addopts='' tests/regression -q`.
 
-**Architecture.** `tests/architecture/test_module_reachability.py` builds a static import graph from `src.api.main`, `src.cli.main` and `src.mcp.server` and fails on a module under `src/` that none of them reach, apart from the entries in its `KNOWN_UNREACHABLE` set. `tests/architecture/test_settings_read_sites.py` fails on a setting in `src/core/config.py` that nothing reads, apart from `KNOWN_UNREAD`. Both sets can only shrink: an entry that has become reachable or read also fails.
+**Architecture.** `tests/architecture/test_module_reachability.py` builds a static import graph from `src.api.main`, `src.cli.main`, `src.mcp.server` and `src.evals.pilot_runner` (the cost pilot) and fails on a module under `src/` that none of them reach, apart from the entries in its `KNOWN_UNREACHABLE` set. `tests/architecture/test_settings_read_sites.py` fails on a setting in `src/core/config.py` that nothing reads, apart from `KNOWN_UNREAD`. Both sets can only shrink: an entry that has become reachable or read also fails.
 
 **Collection guards.** `tests/test_collection_is_not_silently_empty.py` fails when a test module collects no tests, and `tests/test_dev_extra_covers_test_deps.py` fails when a module that a test passes to `pytest.importorskip` is not installed by the `dev` extra.
 
@@ -135,7 +135,7 @@ In CI, `.github/workflows/ci.yml` (`frontend-ci`) installs dependencies, lints a
 
 ## Live evaluations
 
-`evals/live/` (`test_provider_health.py`, `test_text_routing.py`, `test_structured_routing.py`, `test_multi_domain.py`) calls real providers and costs money. Every module is marked `live_eval`, so a normal `pytest` run deselects it, and `testpaths` does not include `evals/`.
+`evals/live/` (`test_provider_health.py`, `test_text_routing.py`, `test_structured_routing.py`, `test_multi_domain.py`, `test_cost_pilot.py`) calls real providers and costs money. Every module is marked `live_eval`, so a normal `pytest` run deselects it, and `testpaths` does not include `evals/`.
 
 ```bash
 export OPENROUTER_API_KEY=...
@@ -150,8 +150,31 @@ bash scripts/run_live_evals.sh
 - `LIVE_EVAL_BUDGET_USD` (default `0.25`) is enforced three ways: a check before each test, a check inside each recorded LLM call that raises once the total exceeds the budget and a check at session end.
 - The session writes `evals/out/live_eval_report.json` and a Markdown report next to it (`evals/live/report.py`), with per-call model, token counts and cost.
 - The fixtures `openrouter_spy` and `gemini_fallback_guard` record request payloads and count calls into the Gemini fallback path.
+- `test_cost_pilot.py` is part of `evals/live`, so the script collects it too, and it fails on a missing `PILOT_TRIALS` unless the variables in [Agent cost pilot](#agent-cost-pilot) are set. To skip it, run `pytest evals/live -m live_eval --no-cov --deselect evals/live/test_cost_pilot.py` instead of the script.
 
 The template [nightly workflow](ci/nightly-live-eval.yml.example) runs the script at 06:00 UTC and on manual dispatch, uploads the report and opens an issue on failure. Copy it to `.github/workflows/` to use it; it is not active from `docs/ci/`. It needs the repository secrets `OPENROUTER_API_KEY` and `GEMINI_API_KEY`.
+
+### Agent cost pilot
+
+`evals/live/test_cost_pilot.py` runs the cases in `evals/live/cost_pilot_cases.json` (four research, two analytics, two content and two finance queries) through `DirectExecutionService` and reports what an agent run costs. The harness lives in `src/evals/`: `trial_setup.py` pins each run's plan and mints one execution authority per run, `pilot_runner.py` drives the runs and reads their terminal events and claim rows back, and `cost_pilot.py` holds the arithmetic.
+
+It spends real money on the OpenRouter key, so it needs all of these:
+
+| Variable | Meaning |
+|---|---|
+| `OPENROUTER_API_KEY`, `ENABLE_LIVE_EVAL=1` | the same gates as the rest of the suite |
+| `OPENROUTER_ENABLED` | must be true, or the preflight refuses |
+| `EVAL_RUN_DATABASE_URL` | database the runs are written to. It must differ from `DATABASE_URL`, otherwise the preflight refuses |
+| `EVAL_ORGANIZATION_ID` | tenant that owns the runs |
+| `PILOT_MODEL` | OpenRouter model slug for every run |
+| `PILOT_TRIALS` | runs per case |
+| `PILOT_CONCURRENCY` | runs in flight at once |
+| `PILOT_PER_RUN_CAP_USD` | cost ceiling of each run's budget |
+| `LIVE_EVAL_BUDGET_USD` | total budget; the preflight refuses when `(runs + concurrency) * PILOT_PER_RUN_CAP_USD` exceeds it |
+| `PILOT_CASES` | optional comma-separated case ids to run a subset |
+| `PILOT_TASK_TIMEOUT_SECONDS` | optional per-task timeout, default 240 |
+
+Research runs also need `MCP_TOOL_PATH_ENABLED` to be true (its default). The test writes `evals/out/cost_pilot.json`. The report takes the unit cost from the difference in the key's all-time usage on OpenRouter before and after the runs, read once two consecutive reads 30 seconds apart agree, and compares it with the sum of the runs' ledger costs (`usage.cost_usd` on the terminal events). It marks the ledger untrusted when a run has no usage or the two differ by more than 10%. From the unit cost it estimates a nightly cost and recommends a cadence against a $12 ceiling. The test fails if any Gemini fallback call ran or if the billed total exceeds the budget.
 
 ## Adaptive routing evaluation
 
