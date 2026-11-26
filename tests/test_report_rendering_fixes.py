@@ -84,5 +84,5 @@ def test_sanitizer_nested_img_is_inert() -> None:
 
 
 def test_basic_markdown_nested_script_is_inert() -> None:
-    out = TemplateRenderer()._basic_markdown_filter("<<b>script>alert(1)<<b>/script>")
+    out = TemplateRenderer()._plain_text_filter("<<b>script>alert(1)<<b>/script>")
     assert "<script" not in out.lower()

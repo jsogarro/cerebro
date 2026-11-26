@@ -4,6 +4,7 @@ import os
 import re
 import socket
 import threading
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -16,6 +17,7 @@ from src.models.report import (
     ReportSection,
     ReportType,
 )
+from src.services import template_renderer
 from src.services.exporters import pdf_exporter
 from src.services.exporters.latex_exporter import LaTeXExporter
 from src.services.report_config import (
@@ -24,7 +26,7 @@ from src.services.report_config import (
     ReportTemplateConfig,
 )
 from src.services.report_output_generator import ReportOutputGenerator
-from src.services.template_renderer import TemplateRenderingError
+from src.services.template_renderer import TemplateRenderer, TemplateRenderingError
 
 ROOT = Path(__file__).resolve().parents[2]
 INJECTION = r"x}\input{/etc/passwd}%"
@@ -245,7 +247,13 @@ def test_renderer_job_fails_when_weasyprint_is_missing() -> None:
 
 @needs_weasyprint
 @pytest.mark.parametrize(
-    "url", ["file:///etc/passwd", "http://127.0.0.1:1/", "data:text/plain,a", "ftp://example.com/x"]
+    "url",
+    [
+        "file:///etc/passwd",
+        "http://127.0.0.1:1/",
+        "data:text/plain,a",
+        "ftp://example.com/x",
+    ],
 )
 def test_deny_all_fetcher_refuses_every_scheme(url: str) -> None:
     with pytest.raises(ValueError, match="disallowed"):
@@ -346,3 +354,56 @@ def test_report_configuration_has_no_custom_css_injection_point() -> None:
     assert "custom_css" not in ReportConfiguration.model_fields
     template = Path(ROOT / "src/templates/reports/base.html.j2").read_text()
     assert "custom_css" not in template
+
+
+def _renderer(
+    monkeypatch: pytest.MonkeyPatch, markdown_available: bool
+) -> TemplateRenderer:
+    monkeypatch.setattr(template_renderer, "MARKDOWN_AVAILABLE", markdown_available)
+    return TemplateRenderer(ReportSettings())
+
+
+@pytest.mark.parametrize("markdown_available", [False, True])
+def test_markdown_fallback_is_escaped_plain_text(
+    monkeypatch: pytest.MonkeyPatch, markdown_available: bool
+) -> None:
+    renderer = _renderer(monkeypatch, markdown_available)
+    if markdown_available:
+        monkeypatch.setattr(
+            template_renderer.markdown_module,
+            "Markdown",
+            MagicMock(side_effect=RuntimeError("boom")),
+        )
+    out = renderer._markdown_filter("a <img src=x onerror=1> **b**\n<<b>img src=y>")
+    assert "<img" not in out and "<b>" not in out
+    assert "&lt;img src=x onerror=1&gt;" in out
+    assert "<br>" in out
+
+
+@pytest.mark.parametrize(
+    ("payload", "forbidden"),
+    [
+        ("<<b>img src=x>", "<img"),
+        ("<scr<script>x</script>ipt>alert(1)</script>", "<script"),
+        ('<a href="javascript:alert(1)" onclick="x">l</a>', "javascript"),
+        ("<p onclick=x>t</p>", "onclick"),
+        ("<style>p{background:url(file:///etc/passwd)}</style>t", "file:"),
+        ("<!-- <img src=x> -->t", "<img"),
+    ],
+)
+def test_sanitizer_never_reconstructs_a_tag(
+    monkeypatch: pytest.MonkeyPatch, payload: str, forbidden: str
+) -> None:
+    out = _renderer(monkeypatch, True)._sanitize_rendered_html(payload)
+    assert forbidden not in out.lower()
+    assert "<p>" in _renderer(monkeypatch, True)._sanitize_rendered_html("<p>ok</p>")
+
+
+def test_sanitizer_work_is_linear_on_nested_tag_splices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    n = 20000
+    started = time.perf_counter()
+    out = _renderer(monkeypatch, True)._sanitize_rendered_html("<" * n + "b>" * n)
+    assert time.perf_counter() - started < 1.0
+    assert "<img" not in out
