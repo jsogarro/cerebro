@@ -129,7 +129,7 @@ Tokens carry `roles` and `permissions` lists (see [Auth endpoints](#auth-endpoin
 2. Delete, in order, the user's `generated_reports` (rows owned by the user or attached to the user's projects; `report_formats` follow through the database cascade), `research_results` and `workflow_checkpoints` of the user's projects, the user's `research_projects` and the `users` row.
 3. Return `{"user_id", "deleted": {users, research_projects, generated_reports, research_results, workflow_checkpoints, memory}}` with row counts.
 
-> **Not wired.** `MultiTierMemorySystem.purge_user_data` is called only when `app.state.memory_system` is a `MultiTierMemorySystem` (`get_memory_system`). Nothing in `src` assigns `app.state.memory_system`, so the `memory` entry of the response is always `{"working_memory": 0, "episodic_memory": 0}`.
+> **Not wired.** `MultiTierMemorySystem.purge_user_data` is called only when `app.state.memory_system` is a `MultiTierMemorySystem` (`get_memory_system`). Nothing in `src` assigns `app.state.memory_system`, so no memory is purged: the response carries `memory_purged: false` and `deleted.memory: null`.
 
 ## Settings with no effect
 

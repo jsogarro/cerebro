@@ -47,7 +47,7 @@ class _AgentService:
             "agent_metrics": {"literature-review": {"total_executions": 3}},
         }
 
-    async def get_agent_health(self, agent_type):
+    async def get_agent_health(self, agent_type, *, organization_id=None):
         return SimpleNamespace(
             agent_type=agent_type,
             status="unavailable",
@@ -331,6 +331,7 @@ async def test_list_info_and_health_preserve_legacy_discovery_and_status_shapes(
     health = await agent_api.get_agent_health(
         AgentType.LITERATURE_REVIEW,
         execution_service=service,
+        tenant_context=_TENANT,
     )
 
     assert listed.system_health == "degraded"

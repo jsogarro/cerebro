@@ -213,7 +213,7 @@ async def intelligent_research_query(
                 domains=request.domains or ["general"],
                 depth_level=ResearchDepth.COMPREHENSIVE.value,
             ),
-            user_id=request.user_id or "api_user",
+            user_id=tenant_context.user_id,
             scope=ResearchScope(),
         )
 

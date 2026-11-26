@@ -183,3 +183,20 @@ async def test_bulk_update_skips_soft_deleted_and_ignores_protected_fields(
     assert count == 1
     assert (await _row(session, a_id)).title == "x"
     assert (await _row(session, b_id)).title != "y"
+
+
+@pytest.mark.asyncio
+async def test_restore_and_hard_delete_respect_the_tenant_boundary(
+    session: AsyncSession,
+) -> None:
+    mine, theirs = uuid4(), uuid4()
+    (project,) = await _seed(session, mine, 1)
+    repo = _repo(session)
+    assert await repo.delete(project.id, organization_id=mine)
+
+    assert await repo.restore(project.id, organization_id=theirs) is None
+    assert await repo.hard_delete(project.id, organization_id=theirs) is False
+    assert (await _row(session, project.id)).deleted_at is not None
+
+    assert await repo.restore(project.id, organization_id=mine) is not None
+    assert await repo.hard_delete(project.id, organization_id=mine) is True

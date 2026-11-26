@@ -98,6 +98,8 @@ class AgentExecutionBackend(Protocol):
     async def get_agent_health(
         self,
         agent_type: AgentType,
+        *,
+        organization_id: str | None = None,
     ) -> AgentHealthStatus: ...
 
     async def get_service_stats(
@@ -263,8 +265,12 @@ class _ApplicationKernelAdapter:
     async def get_agent_health(
         self,
         agent_type: AgentType,
+        *,
+        organization_id: str | None = None,
     ) -> AgentHealthStatus:
-        return await self._agents().get_agent_health(agent_type)
+        return await self._agents().get_agent_health(
+            agent_type, organization_id=organization_id
+        )
 
     async def get_service_stats(
         self, *, organization_id: str | None = None
