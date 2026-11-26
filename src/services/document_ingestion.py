@@ -88,12 +88,12 @@ class DocumentIngestionError(Exception):
 
 
 def require_document_key(config: Settings) -> None:
-    """Refuse to start with an upload feature on and no usable key."""
-    if config.DOCUMENT_UPLOADS_ENABLED:
+    """Refuse to start with a document feature on and no usable key."""
+    if config.DOCUMENT_UPLOADS_ENABLED or config.DOCUMENT_CRITIQUE_ENABLED:
         key = config.DOCUMENT_ENCRYPTION_KEY.strip()
         if not key:
             raise DocumentEncryptionUnavailable(
-                "DOCUMENT_UPLOADS_ENABLED needs DOCUMENT_ENCRYPTION_KEY"
+                "document features need DOCUMENT_ENCRYPTION_KEY"
             )
         MemoryEncryption(key, env_fallback=False)
 

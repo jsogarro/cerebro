@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     DOCUMENT_RETENTION_DAYS: int = 30
     DOCUMENT_UPLOADS_PER_DAY: int = 20
     DOCUMENT_PURGE_INTERVAL_S: int = 3600
+
+    # Critique of an uploaded document. It sends the text to a third-party model, so
+    # it stays dark until the owner records the date the provider's terms were checked.
+    DOCUMENT_CRITIQUE_ENABLED: bool = False
+    PROVIDER_TERMS_VERIFIED_ON: str = ""
     MAX_REQUESTS_PER_MINUTE: int = 100
     ENABLE_CONTEXT_COMPACTION_TELEMETRY: bool = False
 

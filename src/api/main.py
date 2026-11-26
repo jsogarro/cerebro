@@ -36,6 +36,7 @@ from src.api.middleware.rate_limiter import (
 )
 from src.api.routes import (
     agent_api,
+    critiques,
     documents,
     health,
     masr_api,
@@ -59,7 +60,9 @@ from src.security.audit_middleware import (
     log_rejected_requests,
 )
 from src.security.security_headers import SecurityHeadersMiddleware
+from src.services.critique_service import CRITIQUE_PER_WORKER_CONCURRENCY
 from src.services.document_ingestion import require_document_key, run_purge_loop
+from src.services.document_jobs import cancel_all
 
 logger = get_logger()
 
@@ -320,6 +323,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         _start_document_purge(resources, app, durable_session_factory)
 
+        app.state.document_jobs = set()
+        app.state.critique_semaphore = asyncio.Semaphore(CRITIQUE_PER_WORKER_CONCURRENCY)
+        resources.push_async_callback(cancel_all, app.state.document_jobs)
+
         audit_logger = AuditLogger(session_factory=durable_session_factory)
         await audit_logger.start()
         resources.push_async_callback(
@@ -531,6 +538,7 @@ app.include_router(users.router, prefix="/api/v1")
 app.include_router(research.router, prefix="/api/v1", tags=["research"])
 app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
 app.include_router(documents.router, prefix="/api/v1")
+app.include_router(critiques.router, prefix="/api/v1")
 # Agent Framework APIs (Research-Informed)
 app.include_router(
     query_api.router, tags=["intelligent-query"]
