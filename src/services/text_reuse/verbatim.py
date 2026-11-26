@@ -1,0 +1,314 @@
+"""Exact shared-token runs between a document and candidate sources.
+
+A match is equality of token keys; no similarity score ever becomes a match.
+CPU-bound and synchronous: callers run it with ``asyncio.to_thread``.
+"""
+
+from __future__ import annotations
+
+import re
+import time
+import unicodedata
+from collections.abc import Iterable
+from itertools import accumulate
+
+from src.core.claims.citation_prose import (
+    CitationProseKind,
+    find_unrendered_citation_prose,
+)
+from src.services.text_alignment.alignment import normalize
+from src.services.text_reuse.types import (
+    MAX_POSITIONS_PER_SHINGLE,
+    MIN_MATCH_TOKENS,
+    SHINGLE_TOKENS,
+    Attribution,
+    Candidate,
+    ExcludedRegion,
+    ReuseBudget,
+    ReuseMatch,
+    SkipReason,
+    VerbatimResult,
+)
+
+_HEADING = r"^[ \t]*(?:#{1,6}[ \t]*)?(?:\d+\.?[ \t]*)?"
+_REFERENCES = re.compile(
+    _HEADING
+    + r"(?:references|bibliography|works cited|literature cited"
+    + r"|notes and references|references and notes)[ \t]*:?[ \t]*$",
+    re.I | re.M,
+)
+_APPENDIX = re.compile(
+    r"^[ \t]*(?:#{1,6}[ \t]*)?(?:appendix|appendices|supplementary|supplemental)\b",
+    re.I | re.M,
+)
+_STATEMENT = re.compile(
+    _HEADING
+    + r"(?:acknowledg(?:e)?ments?|funding|competing interests?"
+    + r"|conflicts? of interest|data availability|ethics(?: statement)?"
+    + r"|author contributions)[ \t]*:?[ \t]*$",
+    re.I,
+)
+_REFERENCE_ENTRY = re.compile(r"^\s*(?:\[(\d+)\]|(\d+)\.)\s", re.M)
+_DOUBLE_QUOTES = str.maketrans(dict.fromkeys("“”„‟″«»", '"'))
+_QUOTED = re.compile(r'"[^"]*"')
+_SENTENCE_END = re.compile(r"[.!?]\s")
+_QUOTED_SHARE = 0.8
+_WINDOW_BEFORE = 150
+_WINDOW_AFTER = 300
+_LINE_LOOKBACK = 200
+
+
+def _token_key(token: str) -> str:
+    key = token.casefold()
+    if key[0].isalnum() and key[-1].isalnum():
+        return key
+    lo, hi = 0, len(key)
+    while lo < hi and unicodedata.category(key[lo]).startswith("P"):
+        lo += 1
+    while hi > lo and unicodedata.category(key[hi - 1]).startswith("P"):
+        hi -= 1
+    return key[lo:hi]
+
+
+def _tokenize(raw: str) -> list[tuple[str, int, int]]:
+    norm = normalize(raw)
+    return [(k, s, e) for t, s, e in norm.tokens() if (k := _token_key(t))]
+
+
+def _fold(s: str) -> str:
+    s = unicodedata.normalize("NFKD", s)
+    return "".join(c for c in s if not unicodedata.combining(c)).casefold().strip()
+
+
+def author_key(name: str) -> tuple[str, str]:
+    """Casefolded, accent-stripped (surname, first initial)."""
+    if "," in name:
+        surname, _, given = name.partition(",")
+    else:
+        *given_parts, surname = name.split() or [""]
+        given = " ".join(given_parts)
+    return _fold(surname), _fold(given)[:1]
+
+
+def _lines(raw: str) -> list[tuple[int, int, str]]:
+    out, pos = [], 0
+    for line in raw.splitlines(keepends=True):
+        out.append((pos, pos + len(line), line.rstrip("\r\n")))
+        pos += len(line)
+    return out
+
+
+def _reference_region(raw: str) -> tuple[int, int] | None:
+    headings = list(_REFERENCES.finditer(raw))
+    if not headings:
+        return None
+    last = headings[-1]
+    appendix = _APPENDIX.search(raw, last.end())
+    return last.start(), appendix.start() if appendix else len(raw)
+
+
+def _reference_count(region: str) -> int:
+    nums = {int(a or b) for a, b in _REFERENCE_ENTRY.findall(region)}
+    count = 0
+    while count + 1 in nums:
+        count += 1
+    return count
+
+
+def _statement_ranges(raw: str) -> list[tuple[int, int]]:
+    lines = _lines(raw)
+    shaped = [
+        i
+        for i, (_, _, text) in enumerate(lines)
+        if text.strip()
+        and len(text.strip()) < 80
+        and not text.rstrip().endswith(".")
+        and (i == 0 or text.lstrip().startswith("#") or not lines[i - 1][2].strip())
+    ]
+    ranges = []
+    for n, i in enumerate(shaped):
+        if _STATEMENT.match(lines[i][2]):
+            end = lines[shaped[n + 1]][0] if n + 1 < len(shaped) else len(raw)
+            ranges.append((lines[i][0], end))
+    return ranges
+
+
+def _index(keys: list[str]) -> tuple[dict[tuple[str, ...], list[int]], int]:
+    index: dict[tuple[str, ...], list[int]] = {}
+    common: set[tuple[str, ...]] = set()
+    for j in range(len(keys) - SHINGLE_TOKENS + 1):
+        sh = tuple(keys[j : j + SHINGLE_TOKENS])
+        if sh in common:
+            continue
+        positions = index.setdefault(sh, [])
+        positions.append(j)
+        if len(positions) > MAX_POSITIONS_PER_SHINGLE:
+            del index[sh]
+            common.add(sh)
+    return index, len(common)
+
+
+def _runs(
+    doc: list[str], segments: list[tuple[int, int]], cand: list[str]
+) -> tuple[list[tuple[int, int, int, int]], int]:
+    index, common = _index(cand)
+    last_end: dict[int, int] = {}
+    runs = []
+    for lo, hi in segments:
+        for i in range(lo, hi - SHINGLE_TOKENS + 1):
+            for j in index.get(tuple(doc[i : i + SHINGLE_TOKENS]), ()):
+                d = i - j
+                if last_end.get(d, -1) > i:
+                    continue
+                i0, j0, i1, j1 = i, j, i + SHINGLE_TOKENS, j + SHINGLE_TOKENS
+                while i0 > lo and j0 > 0 and doc[i0 - 1] == cand[j0 - 1]:
+                    i0, j0 = i0 - 1, j0 - 1
+                while i1 < hi and j1 < len(cand) and doc[i1] == cand[j1]:
+                    i1, j1 = i1 + 1, j1 + 1
+                last_end[d] = i1
+                if i1 - i0 >= MIN_MATCH_TOKENS:
+                    runs.append((i0, i1, j0, j1))
+    return runs, common
+
+
+class _Attributor:
+    def __init__(
+        self, raw: str, tokens: list[tuple[str, int, int]], refs: int, body_end: int
+    ):
+        self.raw, self.refs, self.body_end = raw, refs, body_end
+        regions = [m.span() for m in _QUOTED.finditer(raw.translate(_DOUBLE_QUOTES))]
+        flags, r = [], 0
+        for _, s, e in tokens:
+            while r < len(regions) and regions[r][1] < e:
+                r += 1
+            flags.append(
+                int(r < len(regions) and regions[r][0] <= s and e <= regions[r][1])
+            )
+        self.quoted_prefix = [0, *accumulate(flags)]
+
+    def classify(self, i0: int, i1: int, start: int, end: int) -> Attribution:
+        quoted = self._quoted(i0, i1, start, end)
+        cited = self._cited(start, end)
+        if quoted:
+            return Attribution.QUOTED_AND_CITED if cited else Attribution.QUOTED_UNCITED
+        return Attribution.CITED_UNQUOTED if cited else Attribution.UNATTRIBUTED
+
+    def _quoted(self, i0: int, i1: int, start: int, end: int) -> bool:
+        if self.quoted_prefix[i1] - self.quoted_prefix[i0] >= _QUOTED_SHARE * (i1 - i0):
+            return True
+        # Bounded look-back: an unbounded rfind is quadratic on a newline-free text.
+        floor = max(0, start - _LINE_LOOKBACK)
+        line_start = self.raw.rfind("\n", floor, start) + 1
+        if line_start == 0 and floor > 0:
+            return False
+        block = self.raw[line_start:end].splitlines()
+        return all(line.lstrip().startswith(">") for line in block)
+
+    def _cited(self, start: int, end: int) -> bool:
+        lo = max(0, start - _WINDOW_BEFORE)
+        ends = list(_SENTENCE_END.finditer(self.raw, lo, start))
+        lo = ends[-1].end() if ends else lo
+        # Reference-list entries are citation-shaped; they must not cite the body.
+        hi = end + _WINDOW_AFTER
+        if start < self.body_end:
+            hi = max(end, min(hi, self.body_end))
+        window = self.raw[lo:hi]
+        for f in find_unrendered_citation_prose(window):
+            if f.kind is not CitationProseKind.NUMERIC:
+                return True
+            nums = [int(n) for n in re.findall(r"\d+", f.text)]
+            if nums and max(nums) <= self.refs:
+                return True
+        return False
+
+
+def _slice(raw: str, tokens: list[tuple[str, int, int]], a: int, b: int) -> str:
+    return raw[tokens[a][1] : tokens[b - 1][2]]
+
+
+def find_verbatim_reuse(
+    document: str,
+    candidates: Iterable[Candidate],
+    *,
+    declared_authors: Iterable[tuple[str, str]],
+    budget: ReuseBudget,
+) -> VerbatimResult:
+    started = time.monotonic()
+    doc_tokens = _tokenize(document)
+    doc_keys = [t[0] for t in doc_tokens]
+
+    segments = [(0, len(doc_keys))]
+    excluded: tuple[ExcludedRegion, ...] = ()
+    refs = 0
+    region = _reference_region(document)
+    if region:
+        inside = [i for i, t in enumerate(doc_tokens) if region[0] <= t[1] < region[1]]
+        lo, hi = (inside[0], inside[-1] + 1) if inside else (0, 0)
+        segments = [s for s in ((0, lo), (hi, len(doc_keys))) if s[1] > s[0]]
+        excluded = (ExcludedRegion("references", region[0], region[1], hi - lo),)
+        refs = _reference_count(document[region[0] : region[1]])
+
+    attributor = _Attributor(
+        document, doc_tokens, refs, region[0] if region else len(document)
+    )
+    statements = _statement_ranges(document)
+    declared = {(_fold(s), _fold(i)[:1]) for s, i in declared_authors}
+
+    matches: list[ReuseMatch] = []
+    skipped: list[tuple[str, SkipReason]] = []
+    common_total = 0
+    total_chars = 0
+    for c in candidates:
+        reason: SkipReason | None = None
+        if time.monotonic() - started >= budget.deadline_s:
+            reason = "deadline_reached"
+        elif total_chars >= budget.max_total_chars:
+            reason = "budget_exhausted"
+        elif len(c.text) > budget.max_candidate_chars:
+            reason = "too_long"
+        if reason:
+            skipped.append((c.source_id, reason))
+            continue
+        total_chars += len(c.text)
+
+        src_tokens = _tokenize(c.text)
+        runs, common = _runs(doc_keys, segments, [t[0] for t in src_tokens])
+        common_total += common
+        overlap = any(author_key(a) in declared for a in c.authors)
+        for i0, i1, j0, j1 in sorted(runs):
+            d_start, d_end = doc_tokens[i0][1], doc_tokens[i1 - 1][2]
+            doc_raw = _slice(document, doc_tokens, i0, i1)
+            src_raw = _slice(c.text, src_tokens, j0, j1)
+            verbatim = " ".join(doc_raw.split()) == " ".join(src_raw.split())
+            applied: frozenset[str] = frozenset()
+            if not verbatim:
+                applied = (
+                    normalize(doc_raw).applied
+                    | normalize(src_raw).applied
+                    | {"token_key_folding"}
+                )
+            matches.append(
+                ReuseMatch(
+                    candidate_source_id=c.source_id,
+                    kind="verbatim" if verbatim else "normalized",
+                    doc_start=d_start,
+                    doc_end=d_end,
+                    src_start=src_tokens[j0][1],
+                    src_end=src_tokens[j1 - 1][2],
+                    tokens=i1 - i0,
+                    attribution=attributor.classify(i0, i1, d_start, d_end),
+                    section="statement"
+                    if any(a <= d_start < b for a, b in statements)
+                    else "body",
+                    from_user_upload=c.origin == "own_upload",
+                    declared_author_overlap=overlap,
+                    normalizations_applied=applied,
+                )
+            )
+
+    return VerbatimResult(
+        matches=tuple(matches),
+        excluded_regions=excluded,
+        skipped=tuple(skipped),
+        skipped_common_shingles=common_total,
+    )
