@@ -20,6 +20,7 @@ from src.models.db.base import Base
 from src.models.db.document_critique import DOCUMENT_CRITIQUES, CritiqueFinding
 from src.repositories.critique_repository import CritiqueRepository, CritiqueView
 from src.services import critique_service as service
+from src.services.document_jobs import transition
 from tests.test_critique_panel import (
     DOC,
     PAGE1,
@@ -168,6 +169,21 @@ async def stored(factory: async_sessionmaker[AsyncSession]) -> uuid.UUID:
         return row.id
 
 
+async def mark_finished(
+    factory: async_sessionmaker[AsyncSession], critique_id: uuid.UUID
+) -> None:
+    async with factory() as session:
+        await transition(
+            session,
+            DOCUMENT_CRITIQUES,
+            critique_id,
+            expected="queued",
+            new="succeeded",
+            completed_at=datetime.now(UTC),
+        )
+        await session.commit()
+
+
 async def test_persist_stores_findings_encrypted_and_reads_them_back_by_severity(
     factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -179,6 +195,7 @@ async def test_persist_stores_findings_encrypted_and_reads_them_back_by_severity
     async with factory() as session:
         status, fields = await persist(session, panel)
         await session.commit()
+    await mark_finished(factory, critique_id)
     assert status == "succeeded" and "status_reason" not in fields
     assert fields["role_outcomes"]["methods"]["kept"] == 2
     async with factory() as session:
@@ -192,6 +209,23 @@ async def test_persist_stores_findings_encrypted_and_reads_them_back_by_severity
     assert view.findings[0].severity == "critical"
     assert {f.quote for f in view.findings} == {Q1, Q2}
     assert all(DOC.text[f.raw_start : f.raw_end] == f.quote for f in view.findings)
+
+
+async def test_findings_are_not_loaded_while_the_run_is_still_active(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    critique_id = await stored(factory)
+    persist = service.make_persist(
+        critique_id=critique_id, organization_id=ORG, user_id=USER
+    )
+    async with factory() as session:
+        await persist(session, await run_stub_panel())
+        await session.commit()
+    async with factory() as session:
+        view = await CritiqueRepository(session, service.document_cipher()).get(
+            critique_id, organization_id=ORG, user_id=USER
+        )
+    assert view is not None and view.status == "queued" and view.findings == ()
 
 
 async def test_all_roles_failing_records_a_reason_and_no_findings(
@@ -251,6 +285,7 @@ async def test_a_value_stored_without_the_prefix_is_refused_not_served(
         assert row is not None
         row.quote_enc = Q1
         await session.commit()
+    await mark_finished(factory, critique_id)
     async with factory() as session:
         with pytest.raises(ValueError, match="not encrypted"):
             await CritiqueRepository(session, service.document_cipher()).get(
@@ -270,8 +305,6 @@ async def rendered_view(
     )
     async with factory() as session:
         status, fields = await persist(session, panel)
-        from src.services.document_jobs import transition
-
         await transition(
             session,
             DOCUMENT_CRITIQUES,
