@@ -20,7 +20,7 @@ Cerebro reads configuration from process environment variables, optional dotenv 
 | Tracing and telemetry settings | Off by default | `get_settings()` | `src/core/config.py` (`Settings`) |
 | WebSocket development bypass settings | Off by default | `get_settings()` | `src/core/config.py` (`Settings`) |
 | Declared-only `Settings` fields | Not wired | none | `src/core/config.py` (`Settings`) |
-| Gemini client variables (`GEMINI_MODEL` and related) | Not wired | `GeminiConfig.from_env` | `src/services/gemini_config.py` (`GeminiConfig.from_env`) |
+| Gemini client variables (`GEMINI_MODEL` and related) | Wired | `GeminiConfig.from_env` | `src/services/gemini_config.py` (`GeminiConfig.from_env`) |
 | Report variables | Active | `create_report_settings()` | `src/services/report_config.py` (`ReportSettings`) |
 | CLI variables (`RESEARCH_*`) | Active | `research-cli` | `src/cli/config.py` (`CLIConfig.from_env`) |
 | Memory encryption key | Not wired | `MemoryEncryption` | `src/core/memory_encryption.py` (`MemoryEncryption`) |
@@ -208,7 +208,6 @@ The table lists all 102 fields. Together with the 62 rows above they account for
 | `MCP_PORT` | `9000` | Workers, MCP server and Temporal |
 | `MCP_TOOLS_ENABLED` | `true` | Workers, MCP server and Temporal |
 | `ENABLE_METRICS` | `true` | Monitoring and caching flags |
-| `ENABLE_TRACING` | `true` | Monitoring and caching flags |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Monitoring and caching flags |
 | `ENABLE_CACHE` | `true` | Monitoring and caching flags |
 | `JWT_ALGORITHM` | `RS256` | Authentication, sessions and OAuth |
@@ -232,7 +231,6 @@ The table lists all 102 fields. Together with the 62 rows above they account for
 | `LLAMA_ENABLED` | `false` | Provider switches and model router |
 | `GEMINI_ENABLED` | `true` | Provider switches and model router |
 | `OPENROUTER_ENABLED` | `false` | Provider switches and model router |
-| `OPENROUTER_VALIDATE_SLUGS_ON_STARTUP` | `true` | Provider switches and model router |
 | `MODEL_ROUTER_HEALTH_CHECK_INTERVAL` | `300` | Provider switches and model router |
 | `MODEL_ROUTER_MAX_RETRIES` | `3` | Provider switches and model router |
 | `MODEL_ROUTER_ENABLE_FALLBACK` | `true` | Provider switches and model router |
@@ -268,9 +266,6 @@ The table lists all 102 fields. Together with the 62 rows above they account for
 | `HIERARCHICAL_SCALE_DOWN_THRESHOLD` | `0.3` | Agent system |
 | `MULTI_DOMAIN_MERGE_STRATEGY` | `concat` | Agent system |
 | `MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT` | `4000` | Agent system |
-| `TALKHIER_MAX_REFINEMENT_ROUNDS` | `3` | Agent system |
-| `TALKHIER_CONSENSUS_THRESHOLD` | `0.95` | Agent system |
-| `TALKHIER_ENABLE_HIERARCHICAL_REFINEMENT` | `true` | Agent system |
 | `SELF_IMPROVEMENT_REFLECTION_FREQUENCY` | `100` | Learning and fine-tuning |
 | `SELF_IMPROVEMENT_PERFORMANCE_THRESHOLD` | `0.8` | Learning and fine-tuning |
 | `SELF_IMPROVEMENT_ENABLE_PROMPT_OPTIMIZATION` | `true` | Learning and fine-tuning |
@@ -306,7 +301,6 @@ Notes on specific rows:
 - `JWT_ALGORITHM` is not read; `JWTService` fixes the algorithm at RS256.
 - `LOG_LEVEL` is not read by the API process. The legacy MASR service reads the environment variable directly (see [Environment variables read outside Settings](#environment-variables-read-outside-settings)).
 - `DEEPSEEK_ENABLED`, `LLAMA_ENABLED`, `GEMINI_ENABLED` and `OPENROUTER_ENABLED` are emitted into the provider configuration, but `_build_plan_route` overwrites `enabled` with true and no other path reads them. `MODEL_PROVIDERS_ENABLED` is emitted as `providers["enabled"]`, which no code reads.
-- `OPENROUTER_VALIDATE_SLUGS_ON_STARTUP` is not emitted; `OpenRouterProvider` reads its own `validate_slugs_on_startup` key from the provider configuration, and no caller supplies it (see [LLM providers](10-llm-providers.md)).
 - `MODEL_ROUTER_*` values are not passed to `ModelRouter`, which reads `health_check_interval`, `max_retries` and `enable_fallback` from its own configuration dictionary with its own defaults.
 - `MCP_PORT` is not read by the API. The compose `mcp-server` command reads the process variable `MCP_PORT` directly (see [Compose-level variables](#compose-level-variables)).
 - `CLOUD_RUN_*`, `PERF_*`, `COST_DAILY_BUDGET_LIMIT`, `COST_ENABLE_BUDGET_ALERTS` and `COST_OPTIMIZATION_ENABLED` configure nothing. `COST_MAX_PER_REQUEST` is the only `COST_*` field read, and its value limits nothing (see the MASR table).
@@ -316,21 +310,21 @@ Notes on specific rows:
 
 ### Gemini client
 
-> **Not wired.** `GeminiConfig.from_env` reads the variables below. It runs only when `GeminiService()` is constructed with neither `api_key` nor `config`. Every production construction (`src/api/main.py`, `src/agents/llm_worker_base.py`, `src/api/services/talkhier_round_executor.py`, `src/api/services/supervisor_coordination_service.py`, `src/ai_brain/providers/gemini_provider.py`) passes `api_key`, which builds `GeminiConfig` from its dataclass defaults instead.
+`GeminiConfig.from_env` reads the variables below. `GeminiService` calls it for every construction, including the production ones that pass `api_key` (`src/api/main.py`, `src/agents/llm_worker_base.py`, `src/api/services/talkhier_round_executor.py`, `src/api/services/supervisor_coordination_service.py`), and the `api_key` argument replaces `GEMINI_API_KEY`. Explicit `model_name` and keyword arguments override the environment.
 
-| Variable | `from_env` default | Dataclass default used in production | Effect |
-|---|---|---|---|
-| `GEMINI_API_KEY` | required | the `api_key` argument | API key; `from_env` raises `ValueError` when it is empty |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | `gemini-2.5-flash` | model name |
-| `GEMINI_TEMPERATURE` | `0.7` | `0.7` | sampling temperature |
-| `GEMINI_TOP_P` | `0.9` | `0.9` | nucleus sampling |
-| `GEMINI_TOP_K` | `40` | `40` | top-k sampling |
-| `GEMINI_MAX_TOKENS` | `32768` | `32768` | `max_output_tokens` |
-| `GEMINI_RATE_LIMIT` | `10` | `10` | requests per period |
-| `GEMINI_RATE_PERIOD` | `60` | `60` | period in seconds |
-| `GEMINI_MAX_CONCURRENT` | `5` | `2` | concurrent requests |
-| `GEMINI_CACHE_ENABLED` | `true` | `true` | response cache switch |
-| `GEMINI_CACHE_TTL` | `3600` | `3600` | cache TTL in seconds |
+| Variable | Default | Effect |
+|---|---|---|
+| `GEMINI_API_KEY` | required | API key; `from_env` raises `ValueError` when it is empty |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | model name |
+| `GEMINI_TEMPERATURE` | `0.7` | sampling temperature |
+| `GEMINI_TOP_P` | `0.9` | nucleus sampling |
+| `GEMINI_TOP_K` | `40` | top-k sampling |
+| `GEMINI_MAX_TOKENS` | `32768` | `max_output_tokens` |
+| `GEMINI_RATE_LIMIT` | `10` | requests per period |
+| `GEMINI_RATE_PERIOD` | `60` | period in seconds |
+| `GEMINI_MAX_CONCURRENT` | `2` | concurrent requests |
+| `GEMINI_CACHE_ENABLED` | `true` | response cache switch |
+| `GEMINI_CACHE_TTL` | `3600` | cache TTL in seconds |
 
 No variable named `GEMINI_TIMEOUT` or `GEMINI_RETRY_*` is read anywhere in `src`.
 
@@ -415,7 +409,7 @@ Compose interpolates these variables from the shell or an `.env` file next to th
 
 The `mcp-server` service reads the process variable `MCP_PORT` (set to `9000` in the compose file) in its start command.
 
-Both compose files also set literal environment entries that no code reads: `ENABLE_DIRECT_EXECUTION` (both files), `MASR_ENABLE_ROUTING`, `MASR_ENABLE_LEARNING`, `MASR_MAX_AGENTS` and `MASR_QUALITY_THRESHOLD` (production file and the `masr-router` service), and in the production file `GUNICORN_WORKERS`, `GUNICORN_WORKER_CLASS`, `GUNICORN_MAX_REQUESTS` and `GUNICORN_MAX_REQUESTS_JITTER`. The production image starts `uvicorn` with `--workers 1`, not gunicorn.
+Both compose files also set literal environment entries that no code reads: `MASR_ENABLE_ROUTING`, `MASR_ENABLE_LEARNING`, `MASR_MAX_AGENTS` and `MASR_QUALITY_THRESHOLD` (production file and the `masr-router` service), and in the production file `GUNICORN_WORKERS`, `GUNICORN_WORKER_CLASS`, `GUNICORN_MAX_REQUESTS` and `GUNICORN_MAX_REQUESTS_JITTER`. The production image starts `uvicorn` with `--workers 1`, not gunicorn.
 
 ## Example environment files
 
@@ -425,11 +419,11 @@ Both compose files also set literal environment entries that no code reads: `ENA
 | `.env.production.example` | production template; copy and fill in |
 | `.env.cli.example` | `research-cli` settings (`RESEARCH_*`); every key is read |
 
-`.env.example` holds 57 uncommented keys, plus the commented `SOURCE_SNAPSHOT_DIR`. 25 are read by code or interpolated by a compose file. Two need a note: `GEMINI_MODEL=gemini-pro` sits on the Gemini path described above, so it does not change the model (the production default stays `gemini-2.5-flash`), and `LOG_LEVEL` is not read by the API. The other 31 are read by nothing: `ALERT_EMAIL`, `ALERT_WEBHOOK_URL`, `API_HOST`, `API_PORT`, `API_WORKERS`, `AVAILABILITY_ZONE`, `DB_HOST`, `DB_NAME`, `DB_PORT`, `DB_USER`, `ENABLE_CACHE`, `ENABLE_METRICS`, `ENABLE_TRACING`, `INSTANCE_ID`, `JWT_ALGORITHM`, `MCP_PORT`, `MCP_SERVER_HOST`, `MCP_SERVER_PORT`, `MCP_TOOLS_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `REDIS_DB`, `REDIS_HOST`, `REDIS_PORT`, `REGION`, `SECRETS_PROVIDER`, `TASK_TIMEOUT_SECONDS`, `TEMPORAL_HOST`, `TEMPORAL_NAMESPACE`, `TEMPORAL_PORT`, `VALIDATE_ENV_VARS`, `WORKER_CONCURRENCY`.
+`.env.example` holds 56 uncommented keys, plus the commented `SOURCE_SNAPSHOT_DIR`. 25 are read by code or interpolated by a compose file. One needs a note: `LOG_LEVEL` is not read by the API. The other 30 are read by nothing: `ALERT_EMAIL`, `ALERT_WEBHOOK_URL`, `API_HOST`, `API_PORT`, `API_WORKERS`, `AVAILABILITY_ZONE`, `DB_HOST`, `DB_NAME`, `DB_PORT`, `DB_USER`, `ENABLE_CACHE`, `ENABLE_METRICS`, `INSTANCE_ID`, `JWT_ALGORITHM`, `MCP_PORT`, `MCP_SERVER_HOST`, `MCP_SERVER_PORT`, `MCP_TOOLS_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `REDIS_DB`, `REDIS_HOST`, `REDIS_PORT`, `REGION`, `SECRETS_PROVIDER`, `TASK_TIMEOUT_SECONDS`, `TEMPORAL_HOST`, `TEMPORAL_NAMESPACE`, `TEMPORAL_PORT`, `VALIDATE_ENV_VARS`, `WORKER_CONCURRENCY`.
 
 The file also sets values that differ from the code defaults: `DEBUG=true` (default false), and `ENABLE_RATE_LIMITING=false` (default true).
 
-`.env.production.example` holds 72 keys. 11 are read by code or interpolated by `docker-compose.production.yml`: `CORS_ORIGINS`, `DATABASE_URL`, `DB_PASSWORD`, `DEBUG`, `ENABLE_RATE_LIMITING`, `ENVIRONMENT`, `GEMINI_API_KEY`, `MAX_REQUESTS_PER_MINUTE`, `REDIS_PASSWORD`, `REDIS_URL` and `SECRET_KEY`. `GEMINI_MODEL` and `LOG_LEVEL` fall under the same notes as above. The other 59 are read by nothing. The non-secret ones are `ALERT_EMAIL`, `ALERT_WEBHOOK_URL`, `API_HOST`, `API_PORT`, `API_WORKERS`, `AUDIT_LOG_FILE`, `AUDIT_LOGGING_ENABLED`, `AVAILABILITY_ZONE`, `BACKUP_ENABLED`, `BACKUP_RETENTION_DAYS`, `BACKUP_S3_BUCKET`, `CDN_ENABLED`, `CDN_URL`, `COMPRESSION_LEVEL`, `CSP_POLICY`, `DB_HOST`, `DB_NAME`, `DB_PORT`, `DB_USER`, `ENABLE_CACHE`, `ENABLE_HTTP2`, `ENABLE_KEEPALIVE`, `ENABLE_METRICS`, `ENABLE_RESPONSE_COMPRESSION`, `ENABLE_TRACING`, `INSTANCE_ID`, `JWT_ALGORITHM`, `JWT_EXPIRATION_MINUTES`, `KEEPALIVE_TIMEOUT`, `MAX_CONCURRENT_REQUESTS`, `MAX_REQUEST_SIZE`, `MAX_UPLOAD_SIZE`, `MAX_WEBSOCKET_CONNECTIONS`, `MCP_PORT`, `MCP_SERVER_HOST`, `MCP_SERVER_PORT`, `MCP_TOOLS_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `RATE_LIMIT_PER_DAY`, `RATE_LIMIT_PER_HOUR`, `RATE_LIMIT_PER_MINUTE`, `REDIS_DB`, `REDIS_HOST`, `REDIS_PORT`, `REGION`, `SECURITY_HEADERS_ENABLED`, `SSL_CA_FILE`, `SSL_CERT_FILE`, `TASK_TIMEOUT_SECONDS`, `TEMPORAL_HOST`, `TEMPORAL_NAMESPACE`, `TEMPORAL_PORT`, `VALIDATE_ENV_VARS` and `WORKER_CONCURRENCY`. The remainder are a JWT secret entry, a TLS key entry, `SECRETS_PROVIDER` and the secret-provider keys. JWT signing uses the RSA key files named by `JWT_PRIVATE_KEY_PATH` and `JWT_PUBLIC_KEY_PATH`, which the production compose file sets to `/run/secrets/jwt_private.pem` and `/run/secrets/jwt_public.pem`.
+`.env.production.example` holds 71 keys. 11 are read by code or interpolated by `docker-compose.production.yml`: `CORS_ORIGINS`, `DATABASE_URL`, `DB_PASSWORD`, `DEBUG`, `ENABLE_RATE_LIMITING`, `ENVIRONMENT`, `GEMINI_API_KEY`, `MAX_REQUESTS_PER_MINUTE`, `REDIS_PASSWORD`, `REDIS_URL` and `SECRET_KEY`. `LOG_LEVEL` falls under the same note as above. The other 58 are read by nothing. The non-secret ones are `ALERT_EMAIL`, `ALERT_WEBHOOK_URL`, `API_HOST`, `API_PORT`, `API_WORKERS`, `AUDIT_LOG_FILE`, `AUDIT_LOGGING_ENABLED`, `AVAILABILITY_ZONE`, `BACKUP_ENABLED`, `BACKUP_RETENTION_DAYS`, `BACKUP_S3_BUCKET`, `CDN_ENABLED`, `CDN_URL`, `COMPRESSION_LEVEL`, `CSP_POLICY`, `DB_HOST`, `DB_NAME`, `DB_PORT`, `DB_USER`, `ENABLE_CACHE`, `ENABLE_HTTP2`, `ENABLE_KEEPALIVE`, `ENABLE_METRICS`, `ENABLE_RESPONSE_COMPRESSION`, `INSTANCE_ID`, `JWT_ALGORITHM`, `JWT_EXPIRATION_MINUTES`, `KEEPALIVE_TIMEOUT`, `MAX_CONCURRENT_REQUESTS`, `MAX_REQUEST_SIZE`, `MAX_UPLOAD_SIZE`, `MAX_WEBSOCKET_CONNECTIONS`, `MCP_PORT`, `MCP_SERVER_HOST`, `MCP_SERVER_PORT`, `MCP_TOOLS_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `RATE_LIMIT_PER_DAY`, `RATE_LIMIT_PER_HOUR`, `RATE_LIMIT_PER_MINUTE`, `REDIS_DB`, `REDIS_HOST`, `REDIS_PORT`, `REGION`, `SECURITY_HEADERS_ENABLED`, `SSL_CA_FILE`, `SSL_CERT_FILE`, `TASK_TIMEOUT_SECONDS`, `TEMPORAL_HOST`, `TEMPORAL_NAMESPACE`, `TEMPORAL_PORT`, `VALIDATE_ENV_VARS` and `WORKER_CONCURRENCY`. The remainder are a JWT secret entry, a TLS key entry, `SECRETS_PROVIDER` and the secret-provider keys. JWT signing uses the RSA key files named by `JWT_PRIVATE_KEY_PATH` and `JWT_PUBLIC_KEY_PATH`, which the production compose file sets to `/run/secrets/jwt_private.pem` and `/run/secrets/jwt_public.pem`.
 
 ## Validation and environment-dependent behaviour
 

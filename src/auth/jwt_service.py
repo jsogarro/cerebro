@@ -27,6 +27,14 @@ from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 logger = structlog.get_logger(__name__)
 
 
+def _stored_email(refresh_data: Any) -> str:
+    """Email saved with the refresh record; the refresh token itself carries none."""
+    if not isinstance(refresh_data, str | bytes):
+        return ""
+    record = deserialize_from_cache(refresh_data)
+    return record.get("email") or "" if isinstance(record, dict) else ""
+
+
 class JWTServiceUnavailableError(RuntimeError):
     """Raised when token validation cannot reach a required auth store."""
 
@@ -321,6 +329,7 @@ class JWTService:
                 "user_id": user_id,
                 "device_id": device_id,
                 "organization_id": organization_id,
+                "email": email,
                 "created_at": now.isoformat(),
             }
             stored = await self.redis_client.setex(
@@ -459,6 +468,7 @@ class JWTService:
         if device_id and refresh_payload.device_id != device_id:
             raise JWTError("Device mismatch")
 
+        refresh_data = None
         if self.redis_client:
             refresh_key = f"{self.refresh_token_prefix}{refresh_payload.jti}"
             try:
@@ -474,15 +484,11 @@ class JWTService:
             if not refresh_data:
                 raise JWTError("Refresh token not found or expired")
 
-        # Get user details (would typically fetch from database)
-        # For now, we'll use the sub from refresh token
         user_id = refresh_payload.sub
 
-        # Generate new token pair
-        # In production, fetch fresh user data from database
         return await self.generate_token_pair(
             user_id=user_id,
-            email=refresh_payload.email or "",  # Would fetch from DB
+            email=_stored_email(refresh_data),
             roles=refresh_payload.roles,
             permissions=refresh_payload.permissions,
             device_id=device_id or refresh_payload.device_id,

@@ -4,6 +4,7 @@ Authentication API endpoints.
 Provides user registration, login, token management, and password reset.
 """
 
+from collections.abc import AsyncIterator
 from uuid import UUID, uuid4
 
 import redis.asyncio as redis
@@ -55,14 +56,19 @@ security = HTTPBearer()
 
 
 # Dependencies
-async def get_password_service() -> PasswordService:
-    """Get password service instance."""
+async def get_password_service() -> AsyncIterator[PasswordService]:
+    """Yield a password service whose Redis client is closed after the request."""
     redis_client = await redis.from_url(settings.REDIS_URL)
-    return PasswordService(
-        redis_client=redis_client,
-        bcrypt_rounds=settings.BCRYPT_ROUNDS,
-        min_password_length=settings.PASSWORD_MIN_LENGTH,
-    )
+    try:
+        yield PasswordService(
+            redis_client=redis_client,
+            bcrypt_rounds=settings.BCRYPT_ROUNDS,
+            min_password_length=settings.PASSWORD_MIN_LENGTH,
+            password_history_limit=settings.PASSWORD_HISTORY_LIMIT,
+            check_breaches=settings.CHECK_PASSWORD_BREACHES,
+        )
+    finally:
+        await redis_client.close()
 
 
 _login_throttle: LoginThrottle | None = None
