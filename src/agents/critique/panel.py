@@ -63,7 +63,6 @@ _PRIOR_LABEL = (
 _REFERENCE_CLAIM = re.compile(
     r"(references?|citations?)[^.]{0,80}(verified|accurate|correct|valid|exist)", re.I
 )
-_FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.S)
 
 
 class DocumentTooLongForCritique(ValueError):  # noqa: N818 - name fixed by the packet contract
@@ -218,10 +217,18 @@ def _classify_finish(reason: str) -> tuple[str, str | None] | None:
     )
 
 
+def _unfence(text: str) -> str:
+    """Strip one surrounding ``` fence (with an optional json tag); linear, no regex."""
+    body = text.strip()
+    if len(body) >= 6 and body.startswith("```") and body.endswith("```"):
+        body = body[3:-3]
+        body = body.removeprefix("json").strip()
+    return body
+
+
 def _parse(text: str) -> RoleOutput | Literal["truncated"] | None:
     """Parsed output; ``"truncated"`` when well-formed JSON lacks ``complete``; None to retry."""
-    fenced = _FENCE.match(text)
-    body = fenced.group(1) if fenced else text
+    body = _unfence(text)
     try:
         raw = json.loads(body)
     except (ValueError, RecursionError):
@@ -268,8 +275,6 @@ def _ground_issue(
     delimiter: str,
 ) -> tuple[KeptIssue | None, str | None, int]:
     """The kept issue (or the drop reason) and how many of its fields were sanitized."""
-    if delimiter in item.problem or delimiter in item.fix:
-        return None, "delimiter_echo", 0
     if item.category not in role.categories:
         return None, "unsafe_field", 0
     spans: list[_Span] = []
@@ -285,6 +290,13 @@ def _ground_issue(
         spans.append(span)
     problem, p_removed = sanitize_model_field(item.problem, PROBLEM_MAX_CHARS)
     fix, f_removed = sanitize_model_field(item.fix, FIX_MAX_CHARS)
+    if (
+        delimiter in problem
+        or delimiter in fix
+        or delimiter in item.problem
+        or delimiter in item.fix
+    ):
+        return None, "delimiter_echo", 0
     if not problem:
         return None, "unsafe_field", 0
     second_span = spans[1] if len(spans) > 1 else (None, None, None, None)

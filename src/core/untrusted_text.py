@@ -96,6 +96,28 @@ SANITIZE_PATTERNS = (
 # "<", and "//host" is a URL whatever the host looks like (IPs, "localhost").
 _STRAY_TAG_OPEN = re.compile(r"<(?=[a-z][\w-]*[\s/][^<>]*=[^<>]*>)", re.IGNORECASE)
 _ANY_HOST = re.compile(r"(?<![\w:])//[\w.-]+\S*")
+# Tag names beyond the pinned list; single letters are left to the pinned full-tag pattern
+# because they are common in comparisons ("a<b").
+_MORE_TAGS = (
+    "textarea|details|summary|video|audio|source|track|title|body|html|head|base|center|font|"
+    "label|select|option|canvas|dialog|frame|frameset|noscript|template|marquee|xmp|plaintext|"
+    "applet|bgsound|image|picture|map|area|nav|section|article|header|footer|aside|main|"
+    "figure|figcaption|fieldset|legend|caption|colgroup|thead|tbody|tfoot|kbd|samp|big|"
+    "small|strike|del|ins|mark|cite|dfn|abbr|time|output|progress|meter|slot|"
+    "img|script|style|iframe|object|embed|svg|math|link|meta|form|input|button"
+)
+_TAG_OPENER = re.compile(
+    rf"<\s*/?\s*(?=(?:{_MORE_TAGS})(?:[\s/>]|$))|<[!?]|&#x?[0-9a-f]+;?",
+    re.IGNORECASE,
+)
+# URL shapes the pinned patterns miss: ports, IP hosts, one-slash and backslash schemes,
+# long scheme names, and a bare domain followed by a query.
+_MORE_URLS = (
+    re.compile(r"\b[a-z][a-z0-9+.-]*:[/\\]+\S*", re.IGNORECASE),
+    re.compile(r"\b(?:vbscript|tel|ftp|sms|callto|ws|wss):\S+", re.IGNORECASE),
+    re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}(?:[:/?]\S*)"),
+    re.compile(r"\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?::\d+)?[/?]\S*", re.IGNORECASE),
+)
 _PRE_CAP_FACTOR = 2
 _MAX_PASSES = 4
 # The pinned link pattern with its text captured, so the text survives the removal.
@@ -116,6 +138,8 @@ _RULES = (
     ),
     (_STRAY_TAG_OPEN, ""),
     (_ANY_HOST, ""),
+    (_TAG_OPENER, ""),
+    *((pattern, "") for pattern in _MORE_URLS),
 )
 
 
@@ -142,5 +166,6 @@ def sanitize_model_field(text: str, max_len: int) -> tuple[str, bool]:
         cut = cleaned[:max_len]
         if cleaned[max_len] != " ":
             cut = cut.rpartition(" ")[0] or cut
-        cleaned = cut.rstrip()
+        # A cut can leave an unclosed tag opener at the end, which no pass saw whole.
+        cleaned = re.sub(r"<[^>]*$", "", cut).rstrip()
     return cleaned, removed

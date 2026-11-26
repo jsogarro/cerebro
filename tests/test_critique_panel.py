@@ -285,6 +285,17 @@ class TestGrounding:
         r = self.run([issue(Q1, second_quote=""), issue(Q2, second_quote="  ")])
         assert len(r.issues) == 2 and r.issues[0].second_quote is None
 
+    def test_delimiter_hidden_by_invisible_characters_is_still_an_echo(self) -> None:
+        def handler(prompt: str, n: int) -> ModelReply:
+            delim = re.search(r"<<<DOC-(\w+)", prompt).group(1)  # type: ignore[union-attr]
+            hidden = delim[:6] + "\u200b" + delim[6:]
+            if role_of(prompt) == "methods":
+                return reply([issue(Q1, fix=f"see {hidden}")])
+            return reply([])
+
+        r = only(asyncio.run(run_panel(DOC, model=Stub(handler))), "methods")
+        assert r.issues == () and r.drops["delimiter_echo"] == 1
+
     def test_unknown_category_is_dropped(self) -> None:
         r = self.run([issue(Q1, category="free text invented by the model")])
         assert r.issues == () and r.drops["unsafe_field"] == 1
@@ -445,6 +456,18 @@ class TestStatus:
     def test_exception_records_type_name_only(self) -> None:
         r, _ = self.run(ProviderCallError("ValueError"))
         assert (r.status, r.error_type) == ("failed", "ValueError")
+
+    def test_fence_lookalike_reply_does_not_stall(self) -> None:
+        import time
+
+        start = time.perf_counter()
+        r, _ = self.run(ModelReply("```" + " " * 4000 + "x", "STOP", None, None))
+        assert time.perf_counter() - start < 2 and r.status == "failed"
+
+    def test_fenced_json_is_accepted(self) -> None:
+        body = reply([issue()]).text
+        r, _ = self.run(ModelReply(f"```json\n{body}\n```", "STOP", None, None))
+        assert r.status == "succeeded" and len(r.issues) == 1
 
     def test_deeply_nested_reply_fails_the_role_not_the_panel(self) -> None:
         r, _ = self.run(ModelReply("[" * 100_000, "STOP", None, None))

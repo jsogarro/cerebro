@@ -150,3 +150,55 @@ def test_nested_markup_is_removed_or_the_field_is_dropped() -> None:
     out, removed = sanitize_model_field("<b" * 50 + ">" * 50 + " tail words here", 800)
     assert removed
     assert not re.search(r"<[a-z]", out)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "evil.com:8080/steal?d=1",
+        "10.0.0.1/admin",
+        "10.0.0.1:80/x",
+        "https:/evil.com",
+        "https:\\\\evil.com",
+        "vbscript:msgbox(1)",
+        "tel:+1555",
+        "ftp:evil.com",
+        "a" * 26 + "://evil.com",
+        "evil.com?q=1",
+    ],
+)
+def test_more_url_shapes_are_removed(text: str) -> None:
+    out, removed = sanitize_model_field(f"see {text} here", 200)
+    assert removed
+    assert not re.search(r"evil|10\.0|vbscript|tel:|ftp:|1555", out)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "<textarea>",
+        "<details open>",
+        "<video>",
+        "</title>",
+        "<!-- c -->",
+        "<![CDATA[x]]>",
+        "< script>",
+        "&#60script&#62",
+        "<img src=x onerror=alert(1)",
+    ],
+)
+def test_more_markup_shapes_are_neutralised(text: str) -> None:
+    out, removed = sanitize_model_field(f"a {text} b", 200)
+    assert removed
+    assert not re.search(r"<\s*[!/?a-z]|&#", out, re.IGNORECASE)
+
+
+def test_prose_with_single_letter_comparisons_survives() -> None:
+    prose = "if x<y and z>w, or n<30, e.g. 3.5/4 and i.e. ok, 1.2.3.4"
+    assert sanitize_model_field(prose, 200) == (prose, False)
+
+
+def test_cap_does_not_leave_a_tag_opener_at_the_end() -> None:
+    out, _ = sanitize_model_field("<imgxyz", 4)
+    assert "<" not in out
+    assert sanitize_model_field(out, 4) == (out, False)
