@@ -86,6 +86,19 @@ class Settings(BaseSettings):
     # Feature Flags
     ENABLE_CACHE: bool = True
     ENABLE_RATE_LIMITING: bool = True
+
+    # Uploaded documents. The key has no default: a feature flag with a blank
+    # key refuses to start, whatever ENVIRONMENT says. A comma-separated list
+    # rotates keys (first encrypts, all decrypt).
+    DOCUMENT_UPLOADS_ENABLED: bool = False
+    DOCUMENT_ENCRYPTION_KEY: str = ""
+    DOCUMENT_MAX_BYTES: int = 20 * 1024 * 1024
+    DOCUMENT_MAX_PAGES: int = 300
+    DOCUMENT_MAX_CHARS: int = 2_000_000
+    DOCUMENT_EXTRACT_TIMEOUT_S: int = 60
+    DOCUMENT_RETENTION_DAYS: int = 30
+    DOCUMENT_UPLOADS_PER_DAY: int = 20
+    DOCUMENT_PURGE_INTERVAL_S: int = 3600
     MAX_REQUESTS_PER_MINUTE: int = 100
     ENABLE_CONTEXT_COMPACTION_TELEMETRY: bool = False
 

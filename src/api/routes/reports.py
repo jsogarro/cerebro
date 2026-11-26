@@ -17,7 +17,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
-from src.middleware.tenant_context import TenantContext, get_tenant_context
+from src.middleware.tenant_context import (
+    TenantContext,
+    get_tenant_context,
+    owner_ids,
+)
 from src.models.db.generated_report import GeneratedReport
 from src.models.db.research_project import ResearchProject
 from src.models.db.session import get_session, get_session_factory
@@ -176,17 +180,6 @@ class ReportStatisticsResponse(BaseModel):
 # Dependency functions
 
 
-def _tenant_ids(tenant_context: TenantContext) -> tuple[UUID, UUID]:
-    """Return validated tenant identifiers, failing closed for bad claims."""
-    try:
-        return UUID(tenant_context.user_id), UUID(tenant_context.organization_id)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Authenticated tenant identifiers are invalid",
-        ) from exc
-
-
 def _validate_requested_user(
     requested_user_id: UUID | None, authenticated_user_id: UUID
 ) -> None:
@@ -276,7 +269,7 @@ async def generate_report(
     with a report ID. The actual generation happens in the background.
     """
     try:
-        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        authenticated_user_id, organization_id = owner_ids(tenant_context)
         _validate_requested_user(request.user_id, authenticated_user_id)
         trusted_project_id = await _validate_project_access(
             session,
@@ -378,7 +371,7 @@ async def get_report_statistics(
 ) -> ReportStatisticsResponse:
     """Get report generation statistics."""
     try:
-        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        authenticated_user_id, organization_id = owner_ids(tenant_context)
         _validate_requested_user(user_id, authenticated_user_id)
         _generator, storage_service, _report_repo, _format_repo = get_report_services(
             session
@@ -429,7 +422,7 @@ async def get_report(
 ) -> ReportResponse:
     """Get report details by ID."""
     try:
-        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        authenticated_user_id, organization_id = owner_ids(tenant_context)
         _generator, storage_service, _report_repo, _format_repo = get_report_services(
             session
         )
@@ -479,7 +472,7 @@ async def download_report(
 ) -> StreamingResponse:
     """Download report in specific format."""
     try:
-        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        authenticated_user_id, organization_id = owner_ids(tenant_context)
         _generator, storage_service, _report_repo, _format_repo = get_report_services(
             session
         )
@@ -552,7 +545,7 @@ async def list_reports(
 ) -> ReportListResponse:
     """List reports with filtering and pagination."""
     try:
-        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        authenticated_user_id, organization_id = owner_ids(tenant_context)
         _validate_requested_user(user_id, authenticated_user_id)
         _generator, storage_service, _report_repo, _format_repo = get_report_services(
             session
@@ -607,7 +600,7 @@ async def search_reports(
 ) -> ReportListResponse:
     """Search reports by text and filters."""
     try:
-        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        authenticated_user_id, organization_id = owner_ids(tenant_context)
         _validate_requested_user(request.user_id, authenticated_user_id)
         _generator, storage_service, _report_repo, _format_repo = get_report_services(
             session
@@ -667,7 +660,7 @@ async def delete_report(
 ) -> None:
     """Delete a report and optionally its files."""
     try:
-        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        authenticated_user_id, organization_id = owner_ids(tenant_context)
         _generator, storage_service, _report_repo, _format_repo = get_report_services(
             session
         )
@@ -712,7 +705,7 @@ async def verify_report_integrity(
 ) -> dict[str, Any]:
     """Verify the integrity of a report and its files."""
     try:
-        authenticated_user_id, organization_id = _tenant_ids(tenant_context)
+        authenticated_user_id, organization_id = owner_ids(tenant_context)
         _generator, storage_service, _report_repo, _format_repo = get_report_services(
             session
         )

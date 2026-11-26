@@ -1,6 +1,8 @@
 """Tenant context dependencies for organization-scoped requests."""
 
+import uuid
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import text
@@ -17,6 +19,27 @@ class TenantContext:
 
     user_id: str
     organization_id: str
+
+
+class OwnerIds(NamedTuple):
+    """A caller's identifiers, named so a swapped order cannot type-check."""
+
+    user_id: uuid.UUID
+    organization_id: uuid.UUID
+
+
+def owner_ids(tenant_context: TenantContext) -> OwnerIds:
+    """Return validated tenant identifiers, failing closed for bad claims."""
+    try:
+        return OwnerIds(
+            uuid.UUID(tenant_context.user_id),
+            uuid.UUID(tenant_context.organization_id),
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated tenant identifiers are invalid",
+        ) from exc
 
 
 def require_organization_id(token_payload: TokenPayload) -> str:

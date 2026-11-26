@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from fpdf import FPDF
 from pypdf import PdfWriter
+from pypdf._page import PageObject
 
 from src.core.acquisition.pdf_text import (
     NORMALIZER_VERSION,
@@ -25,6 +26,8 @@ from src.core.acquisition.pdf_text import (
     MalformedPdfError,
     NoExtractableTextError,
     NotAPdfError,
+    TooManyPagesError,
+    TooMuchTextError,
     _normalize,
     build_extracted_text_artifact,
     extract_pdf_text,
@@ -34,6 +37,8 @@ from src.core.acquisition.snapshots import FilesystemSnapshotStore
 from src.core.contracts import ArtifactStatus, TrustClassification
 from src.core.contracts.pinning import PinnedComponentKind
 from src.core.contracts.redaction import snapshot_digest
+
+SOFT_HYPHEN = chr(0xAD)
 
 
 def _pdf(pages: list[str]) -> bytes:
@@ -161,3 +166,82 @@ def test_artifact_carries_identity_and_resolves_through_the_store(
     assert meta["unidata_version"] == unicodedata.unidata_version
     assert meta["normalizer_version"] == NORMALIZER_VERSION
     assert [p["page"] for p in meta["pages"]] == [1, 2, 3]  # type: ignore[union-attr]
+
+
+def _spy_extract_text(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    calls: list[int] = []
+    original = PageObject.extract_text
+
+    def spy(self: PageObject, *args: object, **kwargs: object) -> str:
+        calls.append(1)
+        return original(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(PageObject, "extract_text", spy)
+    return calls
+
+
+def test_max_pages_refuses_before_extracting_any_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _spy_extract_text(monkeypatch)
+    with pytest.raises(TooManyPagesError):
+        extract_pdf_text(_pdf(["x"] * 301), max_pages=300)
+    assert calls == []
+
+
+def test_max_chars_stops_before_the_last_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _spy_extract_text(monkeypatch)
+    with pytest.raises(TooMuchTextError):
+        extract_pdf_text(_pdf(["a" * 40] * 5), max_chars=50)
+    assert len(calls) == 2
+
+
+def test_clean_page_runs_before_spans_and_hash() -> None:
+    pdf = _pdf([f"al{SOFT_HYPHEN}pha", "bravo"])
+    result = extract_pdf_text(
+        pdf, clean_page=lambda page: page.replace(SOFT_HYPHEN, "")
+    )
+    assert result.text.startswith("alpha\nbravo")
+    assert result.page_of(result.text.index("bravo")) == 2
+    assert result.text_sha256 == snapshot_digest(result.text.encode("utf-8"))
+
+
+def test_the_page_and_character_caps_are_inclusive() -> None:
+    pdf = _pdf(["aa", "bb", "cc"])
+    assert len(extract_pdf_text(pdf, max_pages=3).pages) == 3
+    with pytest.raises(TooManyPagesError):
+        extract_pdf_text(pdf, max_pages=2)
+    exact = len("aa\nbb\ncc")
+    assert extract_pdf_text(pdf, max_chars=exact).text == "aa\nbb\ncc"
+    with pytest.raises(TooMuchTextError):
+        extract_pdf_text(pdf, max_chars=exact - 1)
+
+
+def test_cleaned_pages_are_renormalized() -> None:
+    pdf = _pdf(["e"])
+    result = extract_pdf_text(pdf, clean_page=lambda page: page + "́")
+    assert result.text == "é"
+
+
+def test_page_of_rejects_offsets_outside_every_page() -> None:
+    result = extract_pdf_text(_pdf(["aa", "bb"]))
+    assert result.page_of(0) == 1 and result.page_of(len(result.text) - 1) == 2
+    for offset in (-1, len(result.text), 2):
+        with pytest.raises(IndexError):
+            result.page_of(offset)
+
+
+@pytest.mark.parametrize(
+    "error", [KeyError("k"), TypeError("t"), ValueError("v"), RecursionError()]
+)
+def test_reader_failures_are_malformed_pdfs(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    def boom(*_: object, **__: object) -> None:
+        raise error
+
+    monkeypatch.setattr("src.core.acquisition.pdf_text.PdfReader", boom)
+    with pytest.raises(MalformedPdfError):
+        extract_pdf_text(_pdf(["x"]))

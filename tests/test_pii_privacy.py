@@ -29,6 +29,7 @@ from src.models.db.generated_report import GeneratedReport
 from src.models.db.research_project import ResearchProject
 from src.models.db.research_result import ResearchResult
 from src.models.db.session import get_session
+from src.models.db.uploaded_document import UploadedDocument, UsageLedger
 from src.models.db.user import User
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 
@@ -192,7 +193,13 @@ async def test_gdpr_delete_purges_user_database_rows_and_memory() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(User.__table__.create)
         await conn.run_sync(ResearchProject.__table__.create)
-        for model in (GeneratedReport, ResearchResult, WorkflowCheckpoint):
+        for model in (
+            GeneratedReport,
+            ResearchResult,
+            WorkflowCheckpoint,
+            UploadedDocument,
+            UsageLedger,
+        ):
             await conn.run_sync(model.__table__.create)
 
     async with session_factory() as db_session:
@@ -282,7 +289,13 @@ async def _gdpr_delete_as(
     async with engine.begin() as conn:
         await conn.run_sync(User.__table__.create)
         await conn.run_sync(ResearchProject.__table__.create)
-        for model in (GeneratedReport, ResearchResult, WorkflowCheckpoint):
+        for model in (
+            GeneratedReport,
+            ResearchResult,
+            WorkflowCheckpoint,
+            UploadedDocument,
+            UsageLedger,
+        ):
             await conn.run_sync(model.__table__.create)
 
     async with session_factory() as db_session:

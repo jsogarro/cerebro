@@ -2,6 +2,7 @@
 Main FastAPI application for Research Platform.
 """
 
+import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import cast
@@ -11,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
 from structlog import get_logger
 
@@ -34,6 +36,7 @@ from src.api.middleware.rate_limiter import (
 )
 from src.api.routes import (
     agent_api,
+    documents,
     health,
     masr_api,
     query_api,
@@ -56,6 +59,7 @@ from src.security.audit_middleware import (
     log_rejected_requests,
 )
 from src.security.security_headers import SecurityHeadersMiddleware
+from src.services.document_ingestion import require_document_key, run_purge_loop
 
 logger = get_logger()
 
@@ -85,11 +89,41 @@ def _remove_app_state_if_owned(app: FastAPI, name: str, owned: object) -> None:
         delattr(app.state, name)
 
 
+def _start_document_purge(
+    resources: AsyncExitStack,
+    app: FastAPI,
+    session_factory: Callable[[], AsyncSession] | None,
+) -> asyncio.Task[None] | None:
+    """Run the retention sweep until shutdown, whatever the upload flag says.
+
+    Without a database nothing can be stored or expired, and uploads are
+    refused rather than kept past their retention period.
+    """
+    app.state.document_purge_active = session_factory is not None
+    resources.callback(app.state._state.pop, "document_purge_active", None)
+    if session_factory is None:
+        return None
+    task = asyncio.create_task(
+        run_purge_loop(session_factory, settings.DOCUMENT_PURGE_INTERVAL_S)
+    )
+
+    def stopped(done: asyncio.Task[None]) -> None:
+        if done.cancelled() or done.exception() is None:
+            return
+        logger.error("document_purge_stopped", error=type(done.exception()).__name__)
+        app.state.document_purge_active = False
+
+    task.add_done_callback(stopped)
+    resources.callback(task.cancel)
+    return task
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application lifecycle."""
     # Startup
     logger.info("Starting Research Platform API", environment=settings.ENVIRONMENT)
+    require_document_key(settings)
 
     async with AsyncExitStack() as resources:
         from src.middleware.auth_middleware import close_jwt_service
@@ -284,6 +318,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 outbox_relay.stop,
             )
 
+        _start_document_purge(resources, app, durable_session_factory)
+
         audit_logger = AuditLogger(session_factory=durable_session_factory)
         await audit_logger.start()
         resources.push_async_callback(
@@ -413,8 +449,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
             # Flush + stop Langfuse background export threads (no-op when disabled).
             try:
-                import asyncio
-
                 from src.core.tracing import shutdown_langfuse
 
                 await asyncio.wait_for(
@@ -496,6 +530,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")
 app.include_router(research.router, prefix="/api/v1", tags=["research"])
 app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
+app.include_router(documents.router, prefix="/api/v1")
 # Agent Framework APIs (Research-Informed)
 app.include_router(
     query_api.router, tags=["intelligent-query"]
