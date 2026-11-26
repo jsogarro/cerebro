@@ -1,8 +1,8 @@
 """GDPR erasure against real Postgres: FK-dependent rows and token revocation."""
 
 import uuid
-from datetime import UTC, datetime, timedelta
 from collections.abc import AsyncGenerator, Callable
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
