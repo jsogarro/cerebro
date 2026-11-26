@@ -16,6 +16,7 @@ from src.models.db.generated_report import GeneratedReport
 from src.models.db.research_project import ResearchProject
 from src.models.db.research_result import ResearchResult
 from src.models.db.session import get_session
+from src.models.db.similarity_check import EgressEvent
 from src.models.db.uploaded_document import UploadedDocument, UsageLedger
 from src.models.db.user import User
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint
@@ -91,6 +92,10 @@ async def delete_user_gdpr(
     ledger_result = await db.execute(
         delete(UsageLedger).where(UsageLedger.user_id == user_id)
     )
+    # Checks and matches cascade from the documents; audit rows only detach from a check.
+    egress_result = await db.execute(
+        delete(EgressEvent).where(EgressEvent.user_id == user_id)
+    )
     user_result = await db.execute(delete(User).where(User.id == user_id))
 
     # With no memory system attached nothing was purged, so say that rather
@@ -113,6 +118,7 @@ async def delete_user_gdpr(
             "workflow_checkpoints": checkpoint_result.rowcount or 0,  # type: ignore[attr-defined]
             "uploaded_documents": document_result.rowcount or 0,  # type: ignore[attr-defined]
             "usage_ledger": ledger_result.rowcount or 0,  # type: ignore[attr-defined]
+            "egress_events": egress_result.rowcount or 0,  # type: ignore[attr-defined]
             "memory": memory_deleted,
         },
     }
