@@ -16,6 +16,7 @@ import textwrap
 import time
 import zlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pypdf import PdfWriter
@@ -41,7 +42,14 @@ def _fresh_extraction_slot(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-linux_only = pytest.mark.skipif(sys.platform != "linux", reason="needs Linux rlimits")
+_ON_LINUX = pytest.mark.skipif(sys.platform != "linux", reason="needs Linux rlimits")
+
+
+def linux_only(test: Any) -> Any:
+    """Skip off Linux; CI fails the session if such a test is ever skipped."""
+    return pytest.mark.requires_linux_sandbox(_ON_LINUX(test))
+
+
 PREAMBLE = (
     "import ctypes, os, pathlib, resource, sys, time\n"
     "from src.core.acquisition.extract_child import _limit_self, guarded\n"

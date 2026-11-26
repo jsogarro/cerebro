@@ -53,8 +53,8 @@ __all__ = [
 
 _CHILD_ENV: Final = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
 _STDOUT_SLACK = 1 << 20
-# One extraction per process keeps at most one parser child alive per worker.
-# That limit belongs to the sandbox plan and may change with its approval.
+# One extraction per process: the API runs a single worker, so at most one
+# parser child is alive at a time (sandbox plan SO1).
 _EXTRACT_SLOTS = asyncio.Semaphore(1)
 _DECLARED_TYPES = {
     "application/pdf": "pdf",
