@@ -115,7 +115,6 @@ class SystemExperimentRegistry:
         Args:
             experiment: The experiment to register
         """
-        # Create lock for this experiment
         self.experiment_locks[experiment.id] = asyncio.Lock()
 
         # Register with each affected component
@@ -165,7 +164,6 @@ class SystemExperimentRegistry:
             # Wait for all components to start
             results = await asyncio.gather(*start_tasks, return_exceptions=True)
 
-            # Check for errors
             errors = [r for r in results if isinstance(r, Exception)]
             if errors:
                 # Rollback on error
@@ -195,7 +193,6 @@ class SystemExperimentRegistry:
         async with self.experiment_locks[experiment_id]:
             affected_components = self.experiment_components[experiment_id]
 
-            # Update each component
             for component in affected_components:
                 registration = self.component_registrations[component]
                 await registration.handler(
@@ -253,7 +250,6 @@ class SystemExperimentRegistry:
             experiment_id: ID of the experiment
             winning_variant: The winning variant to promote
         """
-        # Get affected components (from history if experiment is stopped)
         affected_components = self._get_experiment_components(experiment_id)
 
         # Apply winning configuration to each component
@@ -269,7 +265,6 @@ class SystemExperimentRegistry:
 
         results = await asyncio.gather(*promotion_tasks, return_exceptions=True)
 
-        # Check for errors
         errors = [r for r in results if isinstance(r, Exception)]
         if errors:
             raise RuntimeError(f"Failed to promote winner: {errors}")
@@ -473,11 +468,9 @@ class SystemExperimentRegistry:
 
     def _get_experiment_components(self, experiment_id: str) -> set[SystemComponent]:
         """Get components for an experiment (including stopped ones)."""
-        # Check active experiments first
         if experiment_id in self.experiment_components:
             return self.experiment_components[experiment_id]
 
-        # Check event history for stopped experiments
         components = set()
         for event in self.event_history:
             if (

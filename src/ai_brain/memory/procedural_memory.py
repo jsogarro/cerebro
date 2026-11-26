@@ -126,7 +126,6 @@ class ProceduralMemoryManager:
         """Initialize the procedural memory system."""
 
         try:
-            # Load existing procedures
             await self._load_procedures()
             logger.info(f"Loaded {len(self.procedures)} procedures from storage")
 
@@ -147,7 +146,6 @@ class ProceduralMemoryManager:
         """
 
         try:
-            # Update timestamp
             procedure.last_updated = datetime.now()
 
             # Store in memory
@@ -261,7 +259,6 @@ class ProceduralMemoryManager:
             if not steps:
                 return None
 
-            # Create new procedure
             procedure = Procedure(
                 name=f"Learned procedure {datetime.now().strftime('%Y%m%d_%H%M%S')}",
                 procedure_type=ProcedureType.WORKFLOW,
@@ -315,7 +312,6 @@ class ProceduralMemoryManager:
             if not procedure:
                 return False
 
-            # Update performance statistics
             procedure.usage_count += 1
             if success:
                 procedure.success_count += 1
@@ -326,7 +322,6 @@ class ProceduralMemoryManager:
                 1 - alpha
             ) * procedure.avg_performance_score + alpha * performance_score
 
-            # Update confidence based on performance
             success_rate = procedure.success_count / procedure.usage_count
             procedure.confidence = min(
                 success_rate
@@ -335,7 +330,6 @@ class ProceduralMemoryManager:
                 1.0,
             )
 
-            # Update timestamps
             procedure.last_used = datetime.now()
             procedure.last_updated = datetime.now()
 
@@ -367,7 +361,6 @@ class ProceduralMemoryManager:
             if not procedure:
                 return False
 
-            # Create optimized version
             optimized_procedure = Procedure(**asdict(procedure))
             optimized_procedure.id = str(uuid.uuid4())
             optimized_procedure.version = procedure.version + 1
@@ -460,7 +453,6 @@ class ProceduralMemoryManager:
         }
 
         if self.procedures:
-            # Calculate aggregate statistics
             total_confidence = sum(p.confidence for p in self.procedures.values())
             total_usage = sum(p.usage_count for p in self.procedures.values())
             total_success = sum(p.success_count for p in self.procedures.values())
@@ -476,7 +468,6 @@ class ProceduralMemoryManager:
                 }
             )
 
-            # Type distribution
             type_counts: dict[str, int] = {}
             for procedure in self.procedures.values():
                 ptype = procedure.procedure_type.value
@@ -513,14 +504,11 @@ class ProceduralMemoryManager:
                     with open(self.storage_path) as f:
                         data = json.load(f)
 
-                    # Convert back to Procedure objects
                     for proc_id, proc_data in data.items():
-                        # Handle enum conversion
                         proc_data["procedure_type"] = ProcedureType(
                             proc_data["procedure_type"]
                         )
 
-                        # Handle datetime conversion
                         for date_field in ["created_at", "last_updated", "last_used"]:
                             if proc_data.get(date_field):
                                 proc_data[date_field] = datetime.fromisoformat(
@@ -542,15 +530,12 @@ class ProceduralMemoryManager:
 
                 os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
 
-                # Convert to JSON-serializable format
                 data = {}
                 for proc_id, procedure in self.procedures.items():
                     proc_dict = asdict(procedure)
 
-                    # Handle enum conversion
                     proc_dict["procedure_type"] = procedure.procedure_type.value
 
-                    # Handle datetime conversion
                     for date_field in ["created_at", "last_updated", "last_used"]:
                         if proc_dict.get(date_field):
                             proc_dict[date_field] = proc_dict[date_field].isoformat()

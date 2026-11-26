@@ -20,7 +20,6 @@ from uuid import uuid4
 
 from structlog import get_logger
 
-# Import Agent Framework API components
 from src.api.services.agent_execution_service import AgentExecutionService
 from src.api.services.masr_routing_service import MASRRoutingService
 from src.api.services.supervisor_coordination_service import (
@@ -28,11 +27,8 @@ from src.api.services.supervisor_coordination_service import (
 )
 from src.api.services.talkhier_session_service import TalkHierSessionService
 
-# Import database models
 from ..core.adaptive_allocation_engine import AdaptiveAllocationEngine
 from ..core.system_experiment_registry import SystemExperimentRegistry
-
-# Import A/B Testing components
 from ..core.unified_experiment_manager import UnifiedExperimentManager
 from ..statistical.enhanced_statistical_engine import (
     EnhancedStatisticalEngine,
@@ -318,7 +314,6 @@ class AgentFrameworkExperimentor:
         """
         experiment_id = f"talkhier_{uuid4().hex[:8]}"
 
-        # Create variants for different round counts
         variants = {}
         for rounds in range(min_rounds, max_rounds + 1):
             variants[f"{rounds}_rounds"] = {
@@ -533,7 +528,6 @@ class AgentFrameworkExperimentor:
                 quality_threshold=float(config.get("consensus_threshold", 0.8)),
                 timeout_seconds=120,
             )
-            # Get primary supervisor from allocations
             primary_supervisor = (
                 routing_result.supervisor_allocations[0].supervisor_type
                 if routing_result.supervisor_allocations

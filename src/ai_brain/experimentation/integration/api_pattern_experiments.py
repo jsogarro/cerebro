@@ -106,7 +106,6 @@ class APIPatternExperimentor:
         # Results storage
         self.results: list[APIExecutionResult] = []
 
-        # Initialize handlers
         self._initialize_handlers()
 
     def _initialize_handlers(self) -> None:
@@ -138,7 +137,6 @@ class APIPatternExperimentor:
             Success status
         """
         try:
-            # Create variants for all pattern-mode combinations
             variants = []
             for pattern in config.api_patterns:
                 for mode in config.execution_modes:
@@ -195,7 +193,6 @@ class APIPatternExperimentor:
             # No experiment - use default execution
             return await self._execute_default(query, query_type, context)
 
-        # Get variant allocation
         allocation = await self.allocation_engine.allocate_variant(
             experiment_id=experiment_config.experiment_id,
             user_context={
@@ -205,7 +202,6 @@ class APIPatternExperimentor:
             },
         )
 
-        # Parse variant to get pattern and mode
         variant_parts = allocation.variant_id.split("_")
         if len(variant_parts) >= 2:
             pattern = APIPattern(
@@ -255,7 +251,6 @@ class APIPatternExperimentor:
             # Report metrics
             await self._report_metrics(exec_result, experiment_config.experiment_id)
 
-            # Add experiment metadata to result
             result["experiment_metadata"] = {
                 "pattern": pattern.value,
                 "mode": mode.value,
@@ -297,7 +292,6 @@ class APIPatternExperimentor:
         mode: ExecutionMode,
     ) -> dict[str, Any]:
         """Execute with specific pattern and mode combination."""
-        # Get handlers
         pattern_handler = self.pattern_handlers.get(pattern)
         mode_handler = self.mode_handlers.get(mode)
 
@@ -420,7 +414,6 @@ class APIPatternExperimentor:
         ):
             return bypass_result
         else:
-            # Return primary by default
             return primary_result
 
     async def _execute_chain_mode(
@@ -476,7 +469,6 @@ class APIPatternExperimentor:
     async def _execute_parallel_mode(
         self, query: str, context: dict[str, Any]
     ) -> dict[str, Any]:
-        """Execute in parallel mode."""
         # Simulate fully parallel execution
         num_agents = 4
 
@@ -495,7 +487,6 @@ class APIPatternExperimentor:
     async def _execute_hierarchical_mode(
         self, query: str, context: dict[str, Any]
     ) -> dict[str, Any]:
-        """Execute in hierarchical mode."""
         # Simulate supervisor-worker hierarchy
         supervisor_time = 0.05
         worker_time = 0.1

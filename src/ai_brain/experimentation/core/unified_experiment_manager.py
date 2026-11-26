@@ -14,7 +14,6 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
-# Import existing prompt version manager for extension
 from src.prompts.versioning import PromptVersionManager
 
 
@@ -144,7 +143,6 @@ class RandomAllocationStrategy(ExperimentAllocationStrategy):
         """Randomly assign variant based on allocation percentages."""
         import random
 
-        # Create cumulative distribution
         cumulative = 0.0
         rand = random.random()
 
@@ -172,7 +170,6 @@ class DeterministicAllocationStrategy(ExperimentAllocationStrategy):
         identifier = context.get("user_id") or context.get("session_id", "")
         hash_input = f"{experiment_id}:{identifier}"
         hash_value = hashlib.md5(hash_input.encode()).hexdigest()
-        # Convert to float between 0 and 1
         return float(int(hash_value, 16) / (16 ** len(hash_value)))
 
     async def get_variant(
@@ -234,7 +231,6 @@ class UnifiedExperimentManager:
         Returns:
             Created SystemExperiment instance
         """
-        # Parse configuration
         experiment = SystemExperiment(
             id=str(uuid.uuid4()),
             name=experiment_config["name"],
@@ -255,7 +251,6 @@ class UnifiedExperimentManager:
             metadata=experiment_config.get("metadata", {}),
         )
 
-        # Validate experiment configuration
         self._validate_experiment(experiment)
 
         # Store experiment
@@ -272,7 +267,6 @@ class UnifiedExperimentManager:
         experiment.status = ExperimentStatus.RUNNING
         experiment.start_time = datetime.now(UTC)
 
-        # Initialize tracking for each component
         await self._initialize_component_tracking(experiment)
 
     async def get_variant_for_context(
@@ -296,12 +290,10 @@ class UnifiedExperimentManager:
         if experiment.status != ExperimentStatus.RUNNING:
             return None
 
-        # Check cache first
         cache_key = self._get_cache_key(experiment_id, context)
         if cache_key in self.assignment_cache.get(experiment_id, {}):
             return self.assignment_cache[experiment_id][cache_key]
 
-        # Get variant from allocation strategy
         variant = await self.allocation_strategy.get_variant(experiment, context)
 
         # Cache assignment
@@ -414,8 +406,6 @@ class UnifiedExperimentManager:
 
         experiment.status = ExperimentStatus.WINNER_PROMOTED
 
-    # Helper methods
-
     def _parse_variant(self, variant_config: dict[str, Any]) -> ExperimentVariant:
         """Parse variant configuration."""
         return ExperimentVariant(
@@ -462,7 +452,6 @@ class UnifiedExperimentManager:
 
     def _validate_experiment(self, experiment: SystemExperiment) -> None:
         """Validate experiment configuration."""
-        # Check allocations sum to 1.0
         total_allocation = sum(v.allocation for v in experiment.variants)
         if abs(total_allocation - 1.0) > 0.001:
             raise ValueError(
@@ -475,7 +464,6 @@ class UnifiedExperimentManager:
             # Mark first variant as control
             experiment.variants[0].is_control = True
 
-        # Validate metrics exist
         if not experiment.metrics.primary_metrics:
             raise ValueError("At least one primary metric is required")
 

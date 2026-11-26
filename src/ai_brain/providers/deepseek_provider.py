@@ -100,14 +100,12 @@ class DeepSeekProvider(BaseProvider):
     async def load_configuration(self) -> None:
         """Load DeepSeek-specific configuration."""
 
-        # Load base configuration
         await super().load_configuration()
 
         # Configure API settings from provider configuration
         if self._provider_config:
             self.api_endpoint = self._provider_config.api_endpoint
 
-            # Get API key from environment if specified
             if self._provider_config.api_key_env:
                 import os
 
@@ -174,7 +172,6 @@ class DeepSeekProvider(BaseProvider):
             # Prepare request payload
             payload = self._build_request_payload(request, model_name)
 
-            # Make API request
             response = await self._make_api_request(payload)
 
             # Process response
@@ -244,17 +241,14 @@ class DeepSeekProvider(BaseProvider):
     ) -> dict[str, Any]:
         """Build API request payload."""
 
-        # Convert messages or prompt to chat format
         if request.messages:
             messages = request.messages.copy()
         else:
             messages = [{"role": "user", "content": request.prompt}]
 
-        # Add system message if provided
         if request.system_prompt:
             messages.insert(0, {"role": "system", "content": request.system_prompt})
 
-        # Get max tokens from configuration or legacy specs
         max_tokens = request.max_tokens
         if self._config_loaded and model_name in self._model_specs:
             configured_max: int = self._model_specs[model_name].max_output_tokens
@@ -267,7 +261,6 @@ class DeepSeekProvider(BaseProvider):
             legacy_max = legacy_max_obj if isinstance(legacy_max_obj, int) else 8000
             max_tokens = min(request.max_tokens, legacy_max)
 
-        # Build payload
         payload = {
             "model": model_name,
             "messages": messages,
@@ -277,7 +270,6 @@ class DeepSeekProvider(BaseProvider):
             "stream": request.stream,
         }
 
-        # Add DeepSeek-specific parameters
         if request.response_format == ResponseFormat.JSON:
             payload["response_format"] = {"type": "json_object"}
 
@@ -337,7 +329,6 @@ class DeepSeekProvider(BaseProvider):
         completion_tokens = usage.get("completion_tokens", 0)
         total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
 
-        # Calculate metrics
         end_time = datetime.now()
         latency_ms = int((end_time - start_time).total_seconds() * 1000)
         cost = self._calculate_cost(prompt_tokens, completion_tokens, model_name)
@@ -347,7 +338,6 @@ class DeepSeekProvider(BaseProvider):
             content, finish_reason, request, response_data
         )
 
-        # Parse structured content if JSON response
         structured_content = None
         if request.response_format == ResponseFormat.JSON:
             try:
@@ -403,7 +393,6 @@ class DeepSeekProvider(BaseProvider):
             # For complex queries, DeepSeek is very capable
             base_confidence += 0.1
 
-        # Check for mathematical content (DeepSeek's strength)
         if any(
             keyword in content.lower()
             for keyword in ["equation", "formula", "calculate", "proof", "theorem"]
@@ -427,14 +416,12 @@ class DeepSeekProvider(BaseProvider):
             response = await self.generate(test_request)
             latency = (datetime.now() - start_time).total_seconds() * 1000
 
-            # Update health status
             self.health_status.healthy = response.success
             self.health_status.last_check = datetime.now()
             self.health_status.avg_latency_ms = latency
 
             # DeepSeek-specific health indicators
             if response.success:
-                # Check if response demonstrates reasoning capability
                 if "4" in response.content and len(response.content) > 10:
                     self.health_status.api_status = "operational"
                 else:
@@ -458,7 +445,6 @@ class DeepSeekProvider(BaseProvider):
         if request.max_tokens > 8000:
             return False  # DeepSeek max output limit
 
-        # Check context window usage
         estimated_tokens = len((request.prompt or "").split()) * 1.3
         return estimated_tokens <= 200000  # DeepSeek context limit
 

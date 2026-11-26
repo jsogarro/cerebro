@@ -230,7 +230,6 @@ class BaseProvider(ABC):
             return
 
         try:
-            # Load provider configuration
             self._provider_config = (
                 await self.model_config_manager.get_provider_configuration(
                     self.provider_name
@@ -246,12 +245,10 @@ class BaseProvider(ABC):
                 self._config_loaded = True
                 return
 
-            # Load model specifications for this provider
             self._model_specs = await self.model_config_manager.get_models_for_provider(
                 self.provider_name
             )
 
-            # Update supported models and capabilities
             self.supported_models = list(self._model_specs.keys())
 
             # Collect all capabilities from models
@@ -368,7 +365,6 @@ class BaseProvider(ABC):
             response = await self.generate(test_request)
             latency = (datetime.now() - start_time).total_seconds() * 1000
 
-            # Update health status
             self.health_status.healthy = response.success
             self.health_status.last_check = datetime.now()
             self.health_status.avg_latency_ms = latency
@@ -420,7 +416,6 @@ class BaseProvider(ABC):
     def _get_model_context_window(self, model_name: str) -> int:
         """Get context window size for a specific model."""
 
-        # Try to get from dynamic configuration first
         if self._config_loaded and model_name in self._model_specs:
             return int(self._model_specs[model_name].context_window)
 
@@ -430,7 +425,6 @@ class BaseProvider(ABC):
     def _get_model_cost(self, model_name: str) -> float:
         """Get cost per 1K tokens for a specific model."""
 
-        # Try to get from dynamic configuration first
         if self._config_loaded and model_name in self._model_specs:
             return float(self._model_specs[model_name].cost_per_1k_tokens)
 
@@ -456,7 +450,6 @@ class BaseProvider(ABC):
         return None
 
     def get_provider_configuration(self) -> Optional["ProviderConfiguration"]:
-        """Get provider configuration."""
         return self._provider_config
 
     async def ensure_configuration_loaded(self) -> None:
@@ -480,18 +473,15 @@ class BaseProvider(ABC):
         self, response: ModelResponse, request: ModelRequest
     ) -> ModelResponse:
         """Postprocess response before returning."""
-        # Update performance metrics
         self.request_count += 1
         if not response.success:
             self.error_count += 1
         self.total_latency_ms += response.latency_ms
 
-        # Calculate success rate
         self.health_status.success_rate = (self.request_count - self.error_count) / max(
             self.request_count, 1
         )
 
-        # Calculate average latency
         if self.request_count > 0:
             self.health_status.avg_latency_ms = (
                 self.total_latency_ms / self.request_count
@@ -529,7 +519,6 @@ class BaseProvider(ABC):
     def _create_error_response(
         self, request: ModelRequest, error: Exception, error_type: str = "unknown"
     ) -> ModelResponse:
-        """Create an error response."""
         return ModelResponse(
             request_id=request.request_id,
             model_name=getattr(request, "model_name", "unknown"),
