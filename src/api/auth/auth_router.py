@@ -252,6 +252,10 @@ async def login(
     user = await user_repo.get_by_email(request.email)
 
     if not user or not user.verify_password(request.password):
+        if user:
+            # The audit trail keys failed-login alerts on the account, not on
+            # the submitted address.
+            req.state.audit_subject_id = user.id
         logger.warning(
             "Failed login attempt",
             email=request.email,

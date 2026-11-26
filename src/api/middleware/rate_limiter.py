@@ -17,6 +17,8 @@ from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
 from src.api.client_ip import client_ip
 from src.api.middleware.error_envelope import build_error_payload
+from src.models.db.audit_log import AuditEventType
+from src.security.audit_middleware import audit_rejection
 
 logger = structlog.get_logger(__name__)
 
@@ -179,6 +181,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         result = await self.check_request(request)
         if not result.allowed:
+            audit_rejection(request, AuditEventType.RATE_LIMIT_EXCEEDED, "rate limit")
             return JSONResponse(
                 status_code=HTTP_429_TOO_MANY_REQUESTS,
                 content=build_error_payload(

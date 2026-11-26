@@ -1,0 +1,53 @@
+"""Global audit-event and security-alert reads, superuser only.
+
+Scoped per organization later; until audit rows carry an organization these
+are deliberately global and therefore not available to tenant users.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.middleware.auth_middleware import require_superuser
+from src.models.db.audit_log import AuditEventType, AuditLog
+from src.models.db.security_alert import AlertStatus, AlertType, SecurityAlert
+from src.models.db.session import get_session
+
+router = APIRouter(
+    prefix="/admin", tags=["admin"], dependencies=[Depends(require_superuser())]
+)
+
+
+@router.get("/audit-events")
+async def list_audit_events(
+    event_type: AuditEventType | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    query = select(AuditLog).order_by(AuditLog.created_at.desc())
+    if event_type is not None:
+        query = query.where(AuditLog.event_type == event_type)
+    rows = (await db.execute(query.limit(limit).offset(offset))).scalars().all()
+    return {"items": [row.to_dict() for row in rows], "limit": limit, "offset": offset}
+
+
+@router.get("/alerts")
+async def list_security_alerts(
+    alert_type: AlertType | None = None,
+    status: AlertStatus | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    query = select(SecurityAlert).order_by(SecurityAlert.created_at.desc())
+    if alert_type is not None:
+        query = query.where(SecurityAlert.alert_type == alert_type)
+    if status is not None:
+        query = query.where(SecurityAlert.status == status)
+    rows = (await db.execute(query.limit(limit).offset(offset))).scalars().all()
+    return {"items": [row.to_dict() for row in rows], "limit": limit, "offset": offset}
