@@ -34,7 +34,11 @@ from tests.test_document_ingestion import _pdf
 @pytest.fixture(autouse=True)
 def _fresh_extraction_slot(monkeypatch: pytest.MonkeyPatch) -> None:
     """A contended semaphore binds to one event loop; each test has its own."""
-    monkeypatch.setattr(di, "_EXTRACT_SLOTS", asyncio.Semaphore(1))
+    monkeypatch.setattr(
+        di,
+        "_EXTRACT_SLOTS",
+        asyncio.Semaphore(di._EXTRACT_SLOTS._value),
+    )
 
 
 linux_only = pytest.mark.skipif(sys.platform != "linux", reason="needs Linux rlimits")
