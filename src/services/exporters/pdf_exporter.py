@@ -14,12 +14,16 @@ from structlog import get_logger
 
 try:
     import weasyprint
-    from weasyprint import CSS, HTML
+    from weasyprint import CSS, HTML, URLFetcher
     from weasyprint.text.fonts import FontConfiguration
 
     WEASYPRINT_AVAILABLE = True
+    # The report is rendered from model output: it may name any URL or local
+    # file, and only inline data: URIs (the template's SVG) are legitimate.
+    DATA_ONLY_FETCHER = URLFetcher(allowed_protocols={"data"})
 except (ImportError, OSError):
     WEASYPRINT_AVAILABLE = False
+    DATA_ONLY_FETCHER = None
     weasyprint = None
     HTML = None
     CSS = None
@@ -87,12 +91,16 @@ class PDFExporter:
             # Prepare CSS styles
             css_styles = self._build_css_styles(report, custom_css)
 
-            html_doc = HTML(string=html_content, base_url=".")
+            html_doc = HTML(string=html_content, url_fetcher=DATA_ONLY_FETCHER)
 
             css_objects = []
             for css_content in css_styles:
                 css_objects.append(
-                    CSS(string=css_content, font_config=self.font_config)
+                    CSS(
+                        string=css_content,
+                        font_config=self.font_config,
+                        url_fetcher=DATA_ONLY_FETCHER,
+                    )
                 )
 
             # Generate PDF
