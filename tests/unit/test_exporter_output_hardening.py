@@ -272,19 +272,74 @@ def _loopback_listener() -> tuple[socket.socket, list[int]]:
     return server, hits
 
 
+def _hostile_html(sentinel: Path, port: int) -> str:
+    # Each reference is a different WeasyPrint fetch path: attachment, image,
+    # stylesheet import and a CSS background.
+    return (
+        "<html><head>"
+        f'<link rel="attachment" href="{sentinel.as_uri()}">'
+        f'<link rel="stylesheet" href="http://127.0.0.1:{port}/a.css">'
+        f'<style>@import url("{sentinel.as_uri()}");'
+        f'p{{background:url("http://127.0.0.1:{port}/b.png")}}</style></head>'
+        f'<body><p>x</p><img src="http://127.0.0.1:{port}/c.png"></body></html>'
+    )
+
+
 @needs_weasyprint
-@pytest.mark.parametrize(("hardened", "expected_hits"), [(True, 0), (False, 1)])
-def test_render_never_connects_to_remote_hosts(
-    hardened: bool, expected_hits: int
+@pytest.mark.parametrize(("hardened", "leaks"), [(True, False), (False, True)])
+def test_hostile_html_reaches_neither_file_nor_socket(
+    tmp_path: Path, hardened: bool, leaks: bool
 ) -> None:
-    # The control run (hardened=False) proves the listener would see a fetch.
+    # hardened=False is the control: it proves the sentinel and the listener
+    # would see a fetch, so the hardened run cannot pass because WeasyPrint is
+    # inert or the detector is blind.
+    sentinel = tmp_path / "sentinel.txt"
+    sentinel.write_text("SENTINEL-MARKER")
+    server, hits = _loopback_listener()
+    html = _hostile_html(sentinel, server.getsockname()[1])
+    if hardened:
+        exporter = pdf_exporter.PDFExporter(ReportSettings())
+        pdf = exporter.export_to_pdf(html, Report(id="r", title="t", query="q"))
+        pdf_bytes = pdf.content
+    else:
+        pdf_bytes = pdf_exporter.HTML(string=html).write_pdf()
+    server.close()
+    assert isinstance(pdf_bytes, bytes)
+    assert (b"EmbeddedFile" in pdf_bytes) is leaks
+    assert bool(hits) is leaks
+
+
+@needs_weasyprint
+@pytest.mark.parametrize("template_fails", [False, True])
+async def test_hostile_report_pdf_embeds_nothing_and_connects_nowhere(
+    tmp_path: Path, template_fails: bool
+) -> None:
+    sentinel = tmp_path / "sentinel.txt"
+    sentinel.write_text("SENTINEL-MARKER")
     server, hits = _loopback_listener()
     port = server.getsockname()[1]
-    html = f'<html><body><img src="http://127.0.0.1:{port}/x.png"></body></html>'
-    kwargs = {"url_fetcher": pdf_exporter.DENY_ALL_FETCHER} if hardened else {}
-    pdf_exporter.HTML(string=html, **kwargs).write_pdf()
+    payload = (
+        f'<link rel="attachment" href="{sentinel.as_uri()}">'
+        f'<img src="http://127.0.0.1:{port}/c.png">'
+    )
+    report = Report(
+        id="r",
+        title=payload,
+        query="q",
+        executive_summary=payload,
+        sections=[ReportSection(title=payload, content=payload)],
+    )
+    generator = _generator()
+    if template_fails:
+        generator.template_renderer = MagicMock()
+        generator.template_renderer.render_report.side_effect = TemplateRenderingError(
+            "x"
+        )
+    pdf = (await generator.generate_pdf(report)).content
     server.close()
-    assert len(hits) == expected_hits
+    assert isinstance(pdf, bytes) and pdf.startswith(b"%PDF")
+    assert b"EmbeddedFile" not in pdf
+    assert not hits
 
 
 def test_report_configuration_has_no_custom_css_injection_point() -> None:
