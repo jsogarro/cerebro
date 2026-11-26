@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 env:
   PYTHON_VERSION: '3.13'
@@ -106,26 +105,3 @@ jobs:
         flags: integration
         name: integration-tests
         fail_ci_if_error: false
-    
-    - name: Comment PR with results
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v9
-      with:
-        script: |
-          const fs = require('fs');
-          const coverage = fs.readFileSync('coverage.xml', 'utf8');
-          // Parse and format coverage results
-          const comment = `## Integration Test Results
-          
-          ✅ Tests passed
-          📊 Coverage: 85%
-          
-          [View full report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
-          
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: comment
-          });
-    
