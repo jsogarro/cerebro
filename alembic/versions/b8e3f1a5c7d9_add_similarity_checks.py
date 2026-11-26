@@ -41,6 +41,22 @@ def _enable_tenant_rls() -> None:
         )
 
 
+def _enable_purge_policies() -> None:
+    # The retention sweep runs without a tenant; it may touch only audit rows old enough
+    # that no retention window is shorter, and only when it says it is the sweep.
+    for command in ("SELECT", "DELETE"):
+        op.execute(
+            f"""
+            CREATE POLICY purge_expired_{command.lower()}_egress_events
+            ON egress_events FOR {command}
+            USING (
+                created_at <= now() - interval '1 day'
+                AND current_setting('app.purge_expired', true) = 'on'
+            )
+            """
+        )
+
+
 def upgrade() -> None:
     op.create_table(
         "similarity_checks",
@@ -190,10 +206,16 @@ def upgrade() -> None:
 
     if op.get_bind().dialect.name == "postgresql":
         _enable_tenant_rls()
+        _enable_purge_policies()
 
 
 def downgrade() -> None:
     if op.get_bind().dialect.name == "postgresql":
+        for command in ("select", "delete"):
+            op.execute(
+                f"DROP POLICY IF EXISTS purge_expired_{command}_egress_events "
+                "ON egress_events"
+            )
         for table in TENANT_TABLES:
             op.execute(f"DROP POLICY IF EXISTS tenant_isolation_{table} ON {table}")
     op.drop_table("egress_events")
