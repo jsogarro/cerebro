@@ -15,6 +15,7 @@ from src.core.contracts.redaction import snapshot_digest
 from src.core.memory_encryption import MemoryEncryption
 from src.models.db.base import Base
 from src.models.db.uploaded_document import UploadedDocument, UsageLedger
+from src.models.db.user import User  # noqa: F401 - the FK target must be in the metadata
 from src.repositories.tenant_scope import MissingOrganizationContextError
 from src.repositories.uploaded_document_repository import UploadedDocumentRepository
 

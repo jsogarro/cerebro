@@ -62,6 +62,12 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
+        sa.ForeignKeyConstraint(
+            ["user_id"],
+            ["users.id"],
+            name="fk_uploaded_documents_user_id_users",
+            ondelete="CASCADE",
+        ),
         sa.CheckConstraint(
             "media_type IN ('pdf', 'markdown', 'plain')",
             name="ck_uploaded_documents_media_type",
@@ -89,6 +95,12 @@ def upgrade() -> None:
             sa.DateTime(timezone=True),
             nullable=False,
             server_default=sa.func.now(),
+        ),
+        sa.ForeignKeyConstraint(
+            ["user_id"],
+            ["users.id"],
+            name="fk_usage_ledger_user_id_users",
+            ondelete="CASCADE",
         ),
         sa.CheckConstraint(
             "kind IN ('upload', 'critique', 'similarity_check', "

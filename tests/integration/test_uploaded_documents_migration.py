@@ -1,5 +1,6 @@
 """The uploaded-documents migration enforces what the ORM declares."""
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -11,11 +12,12 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import CheckConstraint, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
 from src.models.db.base import Base
 from src.models.db.uploaded_document import UploadedDocument, UsageLedger  # noqa: F401
+from src.models.db.user import User
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
@@ -127,11 +129,26 @@ async def test_every_orm_index_exists_in_the_migrated_database(
     assert declared <= {(r[0], r[1]) for r in rows}
 
 
+async def _insert_user(connection: AsyncConnection) -> uuid.UUID:
+    user_id = uuid.uuid4()
+    async with AsyncSession(bind=connection, expire_on_commit=False) as session:
+        session.add(
+            User(
+                id=user_id,
+                email=f"{user_id}@example.com",
+                username=str(user_id),
+                hashed_password="x",
+            )
+        )
+        await session.flush()
+    return user_id
+
+
 async def _insert_document(connection: AsyncConnection, **override: object) -> None:
     values = {
         "id": uuid.uuid4(),
         "org": uuid.uuid4(),
-        "usr": uuid.uuid4(),
+        "usr": override.pop("usr", None) or await _insert_user(connection),
         "media": "pdf",
         "chars": 5,
         **override,
@@ -163,9 +180,9 @@ async def test_ledger_kind_check_rejects_an_unknown_kind(
         await connection.execute(
             text(
                 "INSERT INTO usage_ledger (id, organization_id, user_id, kind, units) "
-                "VALUES (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), "
-                "'bogus', 1)"
-            )
+                "VALUES (gen_random_uuid(), gen_random_uuid(), :usr, 'bogus', 1)"
+            ),
+            {"usr": await _insert_user(connection)},
         )
 
 
@@ -184,3 +201,64 @@ async def test_downgrade_removes_tables_and_policies(
     finally:
         await engine.dispose()
         _alembic(url, "upgrade", "head")
+
+
+async def test_documents_and_ledger_rows_need_an_existing_user(
+    connection: AsyncConnection,
+) -> None:
+    with pytest.raises(IntegrityError):
+        await _insert_document(connection, usr=uuid.uuid4())
+
+
+async def test_deleting_a_user_cascades_to_documents_and_ledger(
+    connection: AsyncConnection,
+) -> None:
+    user_id = await _insert_user(connection)
+    await _insert_document(connection, usr=user_id)
+    await connection.execute(
+        text(
+            "INSERT INTO usage_ledger (id, organization_id, user_id, kind, units) "
+            "VALUES (gen_random_uuid(), gen_random_uuid(), :usr, 'upload', 1)"
+        ),
+        {"usr": user_id},
+    )
+    await connection.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
+    for count_sql in (
+        "SELECT count(*) FROM uploaded_documents WHERE user_id = :id",
+        "SELECT count(*) FROM usage_ledger WHERE user_id = :id",
+    ):
+        assert await connection.scalar(text(count_sql), {"id": user_id}) == 0
+
+
+async def test_an_upload_in_flight_during_erasure_does_not_survive_it(
+    migrated: str,
+) -> None:
+    engine = create_async_engine(
+        migrated.replace("postgresql://", "postgresql+asyncpg://")
+    )
+    try:
+        async with engine.begin() as setup:
+            user_id = await _insert_user(setup)
+
+        async def erase() -> None:
+            async with engine.begin() as erasing:
+                await erasing.execute(
+                    text("DELETE FROM users WHERE id = :id"), {"id": user_id}
+                )
+
+        async with engine.connect() as uploading:
+            transaction = await uploading.begin()
+            await _insert_document(uploading, usr=user_id)
+            eraser = asyncio.create_task(erase())
+            await asyncio.sleep(0.5)
+            await transaction.commit()
+            await eraser
+
+        async with engine.connect() as check:
+            left = await check.scalar(
+                text("SELECT count(*) FROM uploaded_documents WHERE user_id = :id"),
+                {"id": user_id},
+            )
+        assert left == 0
+    finally:
+        await engine.dispose()

@@ -1,6 +1,7 @@
 """Owner-private uploaded documents and the usage ledger that meters them.
 
-Text, filename and declared authors are stored encrypted (``*_enc``); the
+Both tables cascade from ``users``, so erasure leaves nothing behind even for an
+upload still in flight. Text, filename and declared authors are stored encrypted (``*_enc``); the
 original bytes are discarded after extraction. ``usage_ledger`` rows carry ids
 and numbers only and outlive the documents they count, so deleting and
 re-uploading cannot reset a quota.
@@ -13,6 +14,7 @@ from sqlalchemy import (
     JSON,
     CheckConstraint,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     String,
@@ -42,7 +44,9 @@ class UploadedDocument(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(UUID(), nullable=False)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     filename_enc: Mapped[str] = mapped_column(Text, nullable=False)
     media_type: Mapped[str] = mapped_column(String(20), nullable=False)
     source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -84,7 +88,9 @@ class UsageLedger(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(UUID(), nullable=False)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     kind: Mapped[str] = mapped_column(String(30), nullable=False)
     units: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
