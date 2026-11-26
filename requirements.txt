@@ -4,7 +4,7 @@
 # [project].dependencies so contributors without uv can bootstrap a local
 # environment with:
 #
-#   python3.11 -m venv .venv
+#   python3.13 -m venv .venv
 #   . .venv/bin/activate
 #   python -m pip install -r requirements-dev.txt
 

@@ -12,7 +12,7 @@ permissions:
   pull-requests: write
 
 env:
-  PYTHON_VERSION: '3.11'
+  PYTHON_VERSION: '3.13'
   POSTGRES_VERSION: '16'
   REDIS_VERSION: '7'
 

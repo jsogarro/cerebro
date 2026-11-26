@@ -124,7 +124,7 @@ EOF
     "strict": true,
     "contexts": [
       "CI Pipeline / Lint Code",
-      "CI Pipeline / Test Suite (3.11)",
+      "CI Pipeline / Test Suite (3.13)",
       "CI Pipeline / Security Scan"
     ]
   },
