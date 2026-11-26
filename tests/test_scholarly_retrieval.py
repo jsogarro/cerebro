@@ -120,6 +120,7 @@ def para(words: list[str]) -> str:
 
 DOC = "\n\n".join(
     [
+        "A Short Title",
         para(
             [
                 "quantum",
@@ -157,7 +158,9 @@ POOL = [
     "tunneling",
     "magnetization",
 ]
-DOC_MANY = "\n\n".join(para([POOL[(i + k) % 8] for k in range(4)]) for i in range(8))
+DOC_MANY = "A Short Title\n\n" + "\n\n".join(
+    para([POOL[(i + k) % 8] for k in range(4)]) for i in range(8)
+)
 
 
 def work(wid="W1", title="A paper", abstract=("alpha", "beta"), **kw) -> dict:
@@ -605,7 +608,7 @@ async def test_dedup_and_ranking_by_hits_then_year(httpx_mock, run):
 
 def test_terms_outside_the_whitelist_are_never_sent():
     odd = ["tiny", "snake_case", "x" * 41, "12345", "caf\u00e9ine", 'quo"te', "ok-term"]
-    text = "\n\n".join(
+    text = "A Short Title\n\n" + "\n\n".join(
         para(["alphabet", "wordlist", "gamma-ray", *odd]) for _ in range(3)
     )
     terms = {t for q in build_queries(text) for t in q}
@@ -764,7 +767,9 @@ async def test_event_duration_excludes_the_spacing_sleep(httpx_mock, run, events
 
 
 def test_typographic_punctuation_does_not_drop_a_term():
-    text = "\n\n".join(['“quantum” —lattice— and "photonic"'] * 3)
+    text = "A Short Title\n\n" + "\n\n".join(
+        ['“quantum” the —lattice— the "photonic" the “oscillator”'] * 3
+    )
     plan = sr.plan_queries(text)
     assert plan.terms_dropped_non_ascii == 0 and plan.queries
 
@@ -876,7 +881,7 @@ async def test_author_list_is_capped(httpx_mock, run):
     assert len(c.authors) == sr.MAX_AUTHORS
 
 
-async def test_invisible_characters_are_stripped_from_abstracts_and_full_text(
+async def test_invisible_characters_are_stripped_from_abstracts(
     httpx_mock, run, monkeypatch
 ):
     from src.core.acquisition.pdf_text import ExtractedText, PageSpan
@@ -895,7 +900,7 @@ async def test_invisible_characters_are_stripped_from_abstracts_and_full_text(
     )
     httpx_mock.add_response(url="https://arxiv.org/pdf/2101.00001", content=b"%PDF-x")
     (c,) = (await run(budget=RetrievalBudget(max_queries=1))).candidates
-    assert c.text == "fulltext"
+    assert c.text.startswith("full")
     search_ok(httpx_mock, work(wid="W5", abstract=("abs\u200btract",)))
     (c2,) = (
         await run(budget=RetrievalBudget(max_queries=1, max_fulltext=0))
@@ -904,7 +909,7 @@ async def test_invisible_characters_are_stripped_from_abstracts_and_full_text(
 
 
 def test_stopwords_are_never_sent():
-    text = "\n\n".join(
+    text = "A Short Title\n\n" + "\n\n".join(
         [para(["results", "discussion", "quantum", "lattice", "photonic"])] * 3
     )
     terms = {t for q in build_queries(text) for t in q}
@@ -945,3 +950,210 @@ async def test_full_text_fetched_from_arxiv_never_inherits_the_openalex_licence(
     (c,) = (await run(budget=RetrievalBudget(max_queries=1))).candidates
     assert c.text_kind == "full_text"
     assert c.licence.declared_by.value == "undeclared"
+
+
+# -- independent review ------------------------------------------------------
+
+
+async def test_the_client_asks_for_identity_so_a_compressing_server_still_answers(
+    clock, events
+):
+    import gzip
+
+    seen: list[str] = []
+
+    def handler(request):
+        accepted = request.headers.get("accept-encoding", "")
+        seen.append(accepted)
+        body = json.dumps({"results": [work()]}).encode()
+        if "gzip" in accepted:
+            return httpx.Response(
+                200, headers={"content-encoding": "gzip"}, content=gzip.compress(body)
+            )
+        return httpx.Response(200, content=body)
+
+    res = await _run_with(handler, clock, events, budget=RetrievalBudget(max_queries=1))
+    assert seen == ["identity"]
+    assert len(res.candidates) == 1 and res.openalex.failures == {}
+
+
+def test_a_phrase_from_another_paragraph_is_never_sent_reordered():
+    first = para(["quantum", "entanglement", "decoherence"]).replace(" the ", " ")
+    rest = [
+        para(
+            [
+                "quantum",
+                "lattice",
+                "entanglement",
+                "oscillator",
+                "decoherence",
+                "photonic",
+            ]
+        ),
+        para(["quantum", "photonic", "lattice", "oscillator", "tunneling"]),
+        para(["quantum", "decoherence", "tunneling", "lattice", "oscillator"]),
+    ]
+    text = "\n\n".join([first, *rest])
+    for query in build_queries(text):
+        assert not {"quantum", "entanglement", "decoherence"} <= set(query)
+
+
+def test_the_title_is_never_sent_as_a_query():
+    title = "Magnetization tunneling oscillator photonic lattice"
+    body = [
+        para(["magnetization", "tunneling", "oscillator", "photonic", "lattice"])
+    ] * 3
+    for query in build_queries("\n\n".join([title, *body])):
+        assert len(set(query) & set(title.lower().split())) < 3
+
+
+async def test_a_request_cancelled_while_pacing_is_still_audited(clock, events):
+    class SleepsForever(Pacer):
+        entered = asyncio.Event()
+
+        async def sleep(self, seconds):
+            self.entered.set()
+            await asyncio.Event().wait()
+
+    pacer = SleepsForever(clock)
+
+    async def record(event):
+        events.append(event)
+
+    def handler(request):
+        return httpx.Response(200, json={"results": [work()]})
+
+    async with _transport_client(handler) as http:
+        task = asyncio.create_task(
+            retrieve_candidates(
+                DOC,
+                budget=RetrievalBudget(max_queries=1),
+                http=http,
+                record_egress=record,
+                pacer=pacer,
+            )
+        )
+        await pacer.entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert [e.status for e in events] == [200]
+
+
+async def test_a_request_cancelled_in_flight_is_audited_as_cancelled(clock, events):
+    class Hangs(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            await asyncio.Event().wait()
+            yield b""
+
+    started = asyncio.Event()
+
+    def handler(request):
+        started.set()
+        return httpx.Response(200, stream=Hangs())
+
+    async def record(event):
+        events.append(event)
+
+    async with _transport_client(handler) as http:
+        task = asyncio.create_task(
+            retrieve_candidates(
+                DOC,
+                budget=RetrievalBudget(max_queries=1),
+                http=http,
+                record_egress=record,
+                pacer=Pacer(clock),
+            )
+        )
+        await started.wait()
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert [e.status for e in events] == ["cancelled"]
+
+
+async def test_slow_pdf_extraction_makes_the_run_partial_not_failed(
+    httpx_mock, run, monkeypatch
+):
+    async def hangs(data):
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(sr, "extract_pdf_sandboxed", hangs)
+    search_ok(httpx_mock, arxiv_work())
+    httpx_mock.add_response(url="https://arxiv.org/pdf/2101.00001", content=b"%PDF-x")
+    res = await run(budget=RetrievalBudget(max_queries=1, deadline_s=2.0))
+    assert res.arxiv.deadline_reached is True
+    assert [c.text_kind for c in res.candidates] == ["abstract"]
+
+
+async def test_fetched_full_text_is_used_as_the_sandbox_returned_it(
+    httpx_mock, run, monkeypatch
+):
+    from src.core.acquisition.pdf_text import ExtractedText, PageSpan
+
+    async def returns(data):
+        text = "kept as is"
+        return ExtractedText(text, (PageSpan(1, 0, len(text)),), "a" * 64, "b" * 64), 0
+
+    monkeypatch.setattr(sr, "extract_pdf_sandboxed", returns)
+    search_ok(httpx_mock, arxiv_work())
+    httpx_mock.add_response(url="https://arxiv.org/pdf/2101.00001", content=b"%PDF-x")
+    (c,) = (await run(budget=RetrievalBudget(max_queries=1))).candidates
+    assert c.text == "kept as is"
+
+
+@pytest.mark.parametrize("year", [10**12, -5, 0, 99999, True, "2020"])
+async def test_an_implausible_publication_year_is_dropped_not_stored(
+    httpx_mock, run, year
+):
+    search_ok(httpx_mock, work(publication_year=year))
+    (c,) = (await run(budget=RetrievalBudget(max_queries=1))).candidates
+    assert c.year is None
+
+
+async def test_http_500_counts_toward_the_breaker(httpx_mock, run):
+    for _ in range(3):
+        httpx_mock.add_response(url=OPENALEX, status_code=500)
+    res = await run(DOC_MANY, budget=RetrievalBudget(max_queries=4))
+    assert res.openalex.failures == {"http_500": 3, "breaker_open": 1}
+
+
+async def test_the_json_cap_is_inclusive(clock, events, monkeypatch):
+    body = json.dumps({"results": []}).encode()
+    padded = body + b" " * 10
+    monkeypatch.setattr(sr, "MAX_JSON_BYTES", len(padded))
+    ok = await _run_with(
+        lambda request: httpx.Response(200, content=padded),
+        clock,
+        events,
+        budget=RetrievalBudget(max_queries=1),
+    )
+    assert ok.openalex.failures == {} and ok.openalex.responses_ok == 1
+    over = await _run_with(
+        lambda request: httpx.Response(200, content=padded + b" "),
+        clock,
+        events,
+        budget=RetrievalBudget(max_queries=1),
+    )
+    assert over.openalex.failures == {"oversize": 1}
+
+
+async def test_a_fetch_that_hits_the_deadline_counts_as_a_failure(clock, monkeypatch):
+    async def record(event):
+        pass
+
+    async with make_client() as http:
+        session = sr._Session(http, Pacer(clock), record, 10)
+        monkeypatch.setattr(session, "remaining", lambda: 0.05)
+
+        async def hangs(request, breaker):
+            await asyncio.sleep(60)
+
+        monkeypatch.setattr(session, "_fetch", hangs)
+        request = sr._Request(
+            "api.openalex.org", "https://api.openalex.org/works", {}, 1, "search", 1
+        )
+        for _ in range(3):
+            await session.get(request)
+    assert sr._BREAKERS.for_tool("api.openalex.org").allows(clock.now()) is False

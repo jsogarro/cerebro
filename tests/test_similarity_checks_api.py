@@ -316,7 +316,8 @@ async def test_a_consent_mismatch_is_409_with_the_server_values_and_a_preview(
 ) -> None:
     document_id = await make_document(
         factory,
-        text="\n\n".join(["quantum the entanglement the lattice the photonic"] * 3),
+        text="A Short Title\n\n"
+        + "\n\n".join(["quantum the entanglement the lattice the photonic"] * 3),
     )
     response = await start(client, document_id, {"open_sources": consent(**override)})
     assert response.status_code == 409

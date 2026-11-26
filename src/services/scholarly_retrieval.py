@@ -63,6 +63,7 @@ MIN_QUERY_TERMS = 3
 MIN_TERM_PARAGRAPHS = 2
 TERM_RE = re.compile(r"[a-z0-9-]{5,40}")
 
+_TITLE_WORDS = 25
 _SPACING_S = {ARXIV_HOST: 3.0, OPENALEX_HOST: 0.5}
 _PER_PAGE = 10
 _SELECT = (
@@ -187,7 +188,8 @@ def plan_queries(text: str, limit: int = MAX_CANDIDATES) -> QueryPlan:
     body = text[: region[0]] + text[region[1] :] if region else text
     paragraphs = [p for p in _PARAGRAPHS.split(body) if p.strip()]
     dropped = 0
-    per_paragraph: list[tuple[set[str], set[frozenset[str]]]] = []
+    per_paragraph: list[set[str]] = []
+    all_words: list[list[str]] = []
     for paragraph in paragraphs:
         terms: set[str] = set()
         words: list[str] = []
@@ -201,17 +203,15 @@ def plan_queries(text: str, limit: int = MAX_CANDIDATES) -> QueryPlan:
             words.append(term)
             if _sendable(term):
                 terms.add(term)
-        phrases = {frozenset(words[i : i + 3]) for i in range(len(words) - 2)}
-        per_paragraph.append((terms, phrases))
+        per_paragraph.append(terms)
+        all_words.append(words)
 
-    frequency = Counter(t for terms, _ in per_paragraph for t in terms)
+    frequency = Counter(t for terms in per_paragraph for t in terms)
+    eligible = {t for t, n in frequency.items() if n >= MIN_TERM_PARAGRAPHS}
+    phrases = _document_phrases(all_words, eligible)
     scored: list[tuple[int, int, tuple[str, ...]]] = []
-    for index, (terms, phrases) in enumerate(per_paragraph):
-        weights = {
-            t: frequency[t] * min(len(t), 12)
-            for t in terms
-            if frequency[t] >= MIN_TERM_PARAGRAPHS
-        }
+    for index, terms in enumerate(per_paragraph):
+        weights = {t: frequency[t] * min(len(t), 12) for t in terms if t in eligible}
         top = sorted(weights, key=lambda t: (-weights[t], t))[:QUERY_TERMS]
         query = _without_phrases(sorted(top), phrases)
         if len(query) >= MIN_QUERY_TERMS:
@@ -223,6 +223,23 @@ def plan_queries(text: str, limit: int = MAX_CANDIDATES) -> QueryPlan:
             seen.add(ranked_query)
             queries.append(ranked_query)
     return QueryPlan(tuple(queries[:limit]), dropped)
+
+
+def _document_phrases(
+    all_words: list[list[str]], eligible: set[str]
+) -> set[frozenset[str]]:
+    """Every three adjacent words of the document that a query could reproduce, plus the
+    title's words: a query may never hold three of them, in any order."""
+    phrases = {
+        frozenset(words[i : i + 3])
+        for words in all_words
+        for i in range(len(words) - 2)
+        if all(w in eligible for w in words[i : i + 3])
+    }
+    first = all_words[0] if all_words else []
+    title = {w for w in first if w in eligible} if len(first) <= _TITLE_WORDS else set()
+    phrases.update(frozenset(trio) for trio in combinations(sorted(title), 3))
+    return phrases
 
 
 def build_queries(text: str, limit: int = MAX_CANDIDATES) -> list[tuple[str, ...]]:
@@ -247,7 +264,7 @@ def make_client() -> httpx.AsyncClient:
         follow_redirects=False,
         trust_env=False,
         timeout=httpx.Timeout(15.0),
-        headers={"User-Agent": _USER_AGENT},
+        headers={"User-Agent": _USER_AGENT, "Accept-Encoding": "identity"},
         event_hooks={"request": [_enforce_host_policy]},
     )
 
@@ -302,18 +319,14 @@ class _Session:
             return _Reply(None, "breaker_open")
         judged = False
         try:
-            reply, received, elapsed_ms = await self._paced_fetch(request, breaker)
+            reply = await self._paced_fetch(request, breaker)
             judged = True
         finally:
             if not judged:
                 breaker.record_abandoned()
-        if elapsed_ms is not None:
-            await self._emit(request, reply.status, received, elapsed_ms)
         return reply
 
-    async def _paced_fetch(
-        self, request: _Request, breaker: CircuitBreaker
-    ) -> tuple[_Reply, int, int | None]:
+    async def _paced_fetch(self, request: _Request, breaker: CircuitBreaker) -> _Reply:
         async with AsyncExitStack() as stack:
             try:
                 await asyncio.wait_for(
@@ -322,18 +335,25 @@ class _Session:
                 )
             except TimeoutError:
                 breaker.record_abandoned()
-                return _Reply(None, "deadline_reached"), 0, None
+                return _Reply(None, "deadline_reached")
             started = self.pacer.now()
+            received = 0
             try:
                 reply, received = await asyncio.wait_for(
                     self._fetch(request, breaker), max(self.remaining(), 0.001)
                 )
             except TimeoutError:
                 breaker.record_failure(self.pacer.now())
-                reply, received = _Reply(None, "deadline_reached", "timeout"), 0
+                reply = _Reply(None, "deadline_reached", "timeout")
+            except asyncio.CancelledError:
+                # The request may already have left; the audit row must exist anyway.
+                await asyncio.shield(self._emit(request, "cancelled", 0, 0))
+                raise
             elapsed = int((self.pacer.now() - started).total_seconds() * 1000)
+            # Before the spacing sleep, so a cancellation there cannot lose the row.
+            await asyncio.shield(self._emit(request, reply.status, received, elapsed))
             await self.pacer.sleep(_SPACING_S[request.host])
-        return reply, received, elapsed
+        return reply
 
     async def _fetch(
         self, request: _Request, breaker: CircuitBreaker
@@ -452,6 +472,10 @@ def _licence(record: dict[str, Any]) -> SourceLicense:
     return SourceLicense(None, LicenseDeclaration.UNDECLARED)
 
 
+def _plausible_year(year: Any) -> bool:
+    return isinstance(year, int) and not isinstance(year, bool) and 1000 <= year <= 2100
+
+
 def _safe_doi(doi: Any) -> str | None:
     """A DOI with markup characters is dropped; the rest of the record is kept."""
     bare = _DOI_PREFIX.sub("", doi) if isinstance(doi, str) else ""
@@ -474,7 +498,7 @@ def _candidate(record: Any) -> Candidate:
         origin="openalex",
         title=_clean(record.get("title"), MAX_TITLE_CHARS),
         authors=tuple(n for n in names if n),
-        year=year if isinstance(year, int) and not isinstance(year, bool) else None,
+        year=year if _plausible_year(year) else None,
         doi=_safe_doi(doi),
         arxiv_id=_arxiv_id(record),
         licence=_licence(record),
@@ -626,11 +650,17 @@ async def _upgrade_to_full_text(
             continue
         coverage.responses_ok += 1
         try:
-            extracted, _ = await extract_pdf_sandboxed(reply.body)
+            extracted, _ = await asyncio.wait_for(
+                extract_pdf_sandboxed(reply.body), max(session.remaining(), 0.001)
+            )
+        except TimeoutError:
+            coverage.deadline_reached = True
+            break
         except DocumentIngestionError:
             coverage.fail("extract_error")
             continue
-        text = strip_invisible(extracted.text)[0]
+        # The sandbox has already removed invisible characters.
+        text = extracted.text
         # The licence OpenAlex reported describes its best open copy, not this arXiv PDF.
         chosen[index] = replace(
             candidate,
