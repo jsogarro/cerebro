@@ -92,6 +92,11 @@ SANITIZE_PATTERNS = (
     r"\bwww\.\S+",
     r"\b[\w-]+\.[a-z]{2,}/\S*",
 )
+# Beyond the pinned patterns: any leftover tag-shaped opener (attributes follow) loses its
+# "<", and "//host" is a URL whatever the host looks like (IPs, "localhost").
+_STRAY_TAG_OPEN = re.compile(r"<(?=[a-z!?/][^<>]*[\s/=])", re.IGNORECASE)
+_ANY_HOST = re.compile(r"(?<![\w:])//[\w.-]+\S*")
+_PRE_CAP_FACTOR = 8
 _COMPILED = tuple(re.compile(p, re.IGNORECASE) for p in SANITIZE_PATTERNS)
 _MARKDOWN_LINK = re.compile(r"!?\[([^\]\n]{0,200})\]\([^)\s]{1,500}\)")
 _MARKDOWN_LINK_INDEX = 2
@@ -99,8 +104,11 @@ _MARKDOWN_LINK_INDEX = 2
 
 def sanitize_model_field(text: str, max_len: int) -> tuple[str, bool]:
     """Reduce model-written text to plain prose; also report whether anything was removed."""
-    cleaned = strip_invisible(text)[0]
-    removed = cleaned != text
+    # Bounds regex work on hostile input; the cap below would discard most of it anyway.
+    window = text[: max_len * _PRE_CAP_FACTOR]
+    visible = strip_invisible(window)[0]
+    removed = len(window) < len(text) or visible != window
+    cleaned = " ".join(visible.split())
     # Removing one construct can splice its neighbours into a new one ("<<b>b>"), so repeat.
     changed = True
     while changed:
@@ -110,6 +118,9 @@ def sanitize_model_field(text: str, max_len: int) -> tuple[str, bool]:
                 cleaned, n = _MARKDOWN_LINK.subn(r"\1", cleaned)
             else:
                 cleaned, n = pattern.subn("", cleaned)
+            changed = changed or n > 0
+        for extra in (_STRAY_TAG_OPEN, _ANY_HOST):
+            cleaned, n = extra.subn("", cleaned)
             changed = changed or n > 0
         removed = removed or changed
     cleaned = " ".join(cleaned.split())

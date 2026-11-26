@@ -263,6 +263,16 @@ class TestGrounding:
         r = self.run([issue(Q1)], gap)
         assert r.issues == () and r.drops["off_page"] == 1
 
+    def test_five_tokens_that_normalize_to_one_word_are_too_short(self) -> None:
+        doc = make_doc("x and then some other words follow here to pad the page out.")
+        r = self.run([issue("x\u200b \u200b \u200b \u200b")], doc)
+        assert r.issues == () and r.drops["too_short"] == 1
+
+    def test_whole_document_quote_is_too_long(self) -> None:
+        doc = make_doc(" ".join(f"w{i}" for i in range(500)))
+        r = self.run([issue(doc.text)], doc)
+        assert r.issues == () and r.drops["too_long"] == 1
+
     def test_second_quote_must_also_ground(self) -> None:
         ok = self.run([issue(Q1, second_quote=Q2)]).issues[0]
         assert ok.second_quote == Q2 and ok.second_page == 2
@@ -410,6 +420,10 @@ class TestStatus:
     def test_exception_records_type_name_only(self) -> None:
         r, _ = self.run(ProviderCallError("ValueError"))
         assert (r.status, r.error_type) == ("failed", "ValueError")
+
+    def test_deeply_nested_reply_fails_the_role_not_the_panel(self) -> None:
+        r, _ = self.run(ModelReply("[" * 100_000, "STOP", None, None))
+        assert r.status == "failed"
 
     def test_two_unparseable_replies_fail_after_two_calls(self) -> None:
         r, stub = self.run(ModelReply("not json at all", "STOP", None, None))

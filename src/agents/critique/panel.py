@@ -43,6 +43,7 @@ logger = get_logger()
 CRITIQUE_MAX_CHARS = 1_500_000
 MAX_ISSUES_PER_ROLE = 8
 MIN_QUOTE_WORDS = 5
+MAX_QUOTE_WORDS = 200
 PRIOR_FINDINGS_MAX_CHARS = 40_000
 PROBLEM_MAX_CHARS = 800
 FIX_MAX_CHARS = 600
@@ -213,7 +214,7 @@ def _parse(text: str) -> RoleOutput | Literal["truncated"] | None:
     body = fenced.group(1) if fenced else text
     try:
         raw = json.loads(body)
-    except ValueError:
+    except (ValueError, RecursionError):
         return None
     if isinstance(raw, dict) and raw.get("complete") is not True:
         return "truncated"
@@ -235,16 +236,18 @@ def _ground_quote(
     match = locate_prepared(quote.strip(), prepared)
     if match.raw_start is None or match.raw_end is None:
         return "not_found"
+    # The stored text is the source slice, so the bounds apply to it, not to the model's quote.
+    sliced = document.text[match.raw_start : match.raw_end]
+    words = len(sliced.split())
+    if words < MIN_QUOTE_WORDS:
+        return "too_short"
+    if words > MAX_QUOTE_WORDS:
+        return "too_long"
     try:
         page = document.page_of(match.raw_start)
     except IndexError:
         return "off_page"
-    return (
-        document.text[match.raw_start : match.raw_end],
-        match.raw_start,
-        match.raw_end,
-        page,
-    )
+    return sliced, match.raw_start, match.raw_end, page
 
 
 def ground_role(
