@@ -22,8 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Academic search results persisted as run-owned evidence, and claim spans bound to citations from sourced metadata (#224, #223).
 - Literature-review results persisted as evidence by default: `MCP_TOOL_PATH_ENABLED` now defaults to `true`, the literature agent searches through the tool path before analysis, and a failed search returns no sources with `data_source` `no_evidence` (#249).
 - A required reason code on abstained evaluation results (#131).
+- An agent cost pilot in `evals/live/test_cost_pilot.py`, with its harness in `src/evals/` and the `EVAL_RUN_DATABASE_URL` setting, which keeps evaluation runs out of the application database (#253).
 
 ### Changed
+- Put the run's budget ledger usage (`tokens_used`, `cost_usd`, `tool_invocations`, `unknown_usage_calls`) in the `run.succeeded` and `run.failed` event payloads, as `run.budget_exceeded` already did (#251).
 - Redesigned the web workbench. The design tokens in `cerebro/web/src/index.css` now give a warm cream and teal light theme with one teal accent, and a warm, non-navy dark theme built on a stepped ladder of surface colors. The Tailwind `.dark` class switches themes. The app loads Fraunces (display), IBM Plex Sans (UI) and IBM Plex Mono (data), and `cerebro/web/tailwind.config.js` points its font families at them.
 - Rebuilt the web landing page (`/`). It now has a hero, the six core primitives, a `research-cli agents` command reference, a traceability priorities ledger and an open-source closing section. Removed the mock terminal demo, the invented testimonials and the "beta" pill. Every CLI command shown is real and runs as written.
 - Restyled the workflow launch page (`/app/workflows`). Workflow attributes render in hairline grids, maturity is a pill, and provenance and status chips share one pill style. The page has a single primary action ("Start controlled run"), and the per-card configure control is a secondary toggle that reports its state through `aria-pressed`.

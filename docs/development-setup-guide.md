@@ -258,6 +258,7 @@ src/
   cli/              research-cli (click commands, API client, formatters)
   core/             Settings, environment loading, kernel, contracts, capabilities, claims, tools
   costs/            Cost tracker, budget manager, forecaster, and optimizer classes
+  evals/            Agent cost pilot: runner, trial setup, cost arithmetic (used by evals/live)
   improvement/      Feedback, reward-model, and prompt-optimizer classes
   mcp/              MCP server, client, registry, and tools
   memory/           Working, episodic, semantic, and procedural memory service classes

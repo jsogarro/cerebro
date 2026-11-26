@@ -15,6 +15,7 @@ Cerebro reads configuration from process environment variables, optional dotenv 
 | Memory-informed routing settings | Not wired | `get_settings()` | `src/core/config.py` (`Settings`) |
 | Providers settings | Active | `get_settings()` | `src/core/config.py` (`Settings`) |
 | MCP tool path settings | Active | `get_settings()` | `src/core/config.py` (`Settings`) |
+| Evaluation run settings | Active (evaluation harness only) | `get_settings()` | `src/core/config.py` (`Settings`) |
 | Constraint pinning settings | Off by default | `get_settings()` | `src/core/config.py` (`Settings`) |
 | Tracing and telemetry settings | Off by default | `get_settings()` | `src/core/config.py` (`Settings`) |
 | WebSocket development bypass settings | Off by default | `get_settings()` | `src/core/config.py` (`Settings`) |
@@ -144,6 +145,12 @@ A field is listed here when a production module outside `src/core/config.py` rea
 | `MCP_TOOL_PATH_ENABLED` | `true` | `src/ai_brain/integration/masr_supervisor_bridge.py` (`_mcp_tool_path_enabled`, `_execute_plan_worker`) | when true (the default), plan workers are configured with an `MCPIntegration` (capability grants, audit store, evidence recorder); when false, the bridge adds no such configuration |
 | `SOURCE_SNAPSHOT_DIR` | `data/source_snapshots` | `src/ai_brain/integration/masr_supervisor_bridge.py` (`_execute_plan_worker`) | root of the filesystem snapshot store for cited sources; the validator resolves a relative path against the working directory at startup |
 
+### Evaluation runs
+
+| Setting | Default | Read by | Effect |
+|---|---|---|---|
+| `EVAL_RUN_DATABASE_URL` | unset | `src/evals/trial_setup.py` (`build_harvest_service`), `src/evals/cost_pilot.py` (`preflight`) | database the agent cost pilot writes its runs to; the API never reads it. The pilot refuses to start when it is unset or names the same database as `DATABASE_URL` (see [Live evaluations](../testing-guide.md#live-evaluations)) |
+
 ### Constraint pinning
 
 > **Off by default.** With `ENABLE_CONSTRAINT_PINNING=true`, supervisors extract constraints before compaction and only log what they find.
@@ -185,7 +192,7 @@ See [LLM providers](10-llm-providers.md) for how workers choose a provider.
 
 > **Not wired.** These fields are declared on `Settings`, and some are copied into `get_ai_brain_config()`. No production code reads them (the only caller of `get_ai_brain_config` reads just its `providers` entries), so setting them changes nothing.
 
-The table lists all 102 fields. Together with the 61 rows above they account for all 163 fields of `Settings`.
+The table lists all 102 fields. Together with the 62 rows above they account for all 164 fields of `Settings`.
 
 | Setting | Default | Family |
 |---|---|---|
