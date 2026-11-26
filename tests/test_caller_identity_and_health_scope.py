@@ -155,3 +155,22 @@ async def test_gdpr_erase_does_not_claim_memory_purged_when_none_attached() -> N
 
     assert body["memory_purged"] is False
     assert body["deleted"]["memory"] is None
+
+
+@pytest.mark.asyncio
+async def test_system_health_label_ignores_other_tenants_failures() -> None:
+    service = AgentExecutionService()
+    failed = AgentExecutionResponse.model_construct(
+        execution_time_seconds=1.0, quality_score=0.0
+    )
+    for agent in AgentType:
+        await service._update_agent_metrics(
+            agent, failed, False, organization_id=ORG_OTHER
+        )
+        await service._update_agent_metrics(agent, failed, True, organization_id=ORG)
+
+    other = await service.get_service_stats(organization_id=ORG_OTHER)
+    mine = await service.get_service_stats(organization_id=ORG)
+
+    assert other["system_health"] == "unhealthy"
+    assert mine["system_health"] == "healthy"

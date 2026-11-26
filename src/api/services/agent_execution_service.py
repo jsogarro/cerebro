@@ -1078,7 +1078,7 @@ class AgentExecutionService:
                 }
                 for agent_type, metrics in agent_metrics.items()
             },
-            "system_health": await self._get_system_health(),
+            "system_health": await self._get_system_health(organization_id),
         }
 
     async def get_active_execution_snapshot(
@@ -1095,13 +1095,15 @@ class AgentExecutionService:
             self.max_concurrent_executions,
         )
 
-    async def _get_system_health(self) -> str:
+    async def _get_system_health(self, organization_id: str | None = None) -> str:
         """Calculate overall system health."""
 
         health_statuses = []
 
         for agent_type in AgentType:
-            health = await self.get_agent_health(agent_type)
+            health = await self.get_agent_health(
+                agent_type, organization_id=organization_id
+            )
             health_statuses.append(health.status)
 
         if all(status == "healthy" for status in health_statuses):
