@@ -30,6 +30,7 @@ from src.middleware.tenant_context import (
     owner_ids,
 )
 from src.models.db.document_critique import DOCUMENT_CRITIQUES
+from src.models.db.job_constants import ACTIVE_STATUSES
 from src.models.db.session import get_session, get_session_factory
 from src.repositories.critique_repository import (
     CRITIQUE_DEADLINE_S,
@@ -55,6 +56,8 @@ router = APIRouter(tags=["critiques"])
 
 ModelFactory = Callable[[], ReviewModel]
 NO_STORE = "no-store"
+# Queued tasks each hold a built model and wait on one slot per worker.
+MAX_QUEUED_PER_WORKER = 4
 
 
 class CritiqueRequest(BaseModel):
@@ -255,6 +258,8 @@ async def start_critique(
     if document.char_count > service.CRITIQUE_MAX_CHARS:
         raise _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "too_long_for_critique")
 
+    if len(request.app.state.document_jobs) >= MAX_QUEUED_PER_WORKER:
+        raise _error(status.HTTP_429_TOO_MANY_REQUESTS, "worker_busy")
     # Built before anything is reserved, so a setup failure leaves no row and no spent quota.
     model = model_factory()
     units = service.reserved_units(document.char_count)
@@ -342,14 +347,15 @@ async def list_critiques(
 
 async def _owned_critique(
     critique_id: uuid.UUID, session: AsyncSession, tenant: TenantContext
-) -> CritiqueView:
+) -> tuple[CritiqueView, DocumentMeta]:
+    """A critique is readable only while its document is: an expired one reads as missing."""
     ids = owner_ids(tenant)
     view = await _repository(session).get(
         critique_id, organization_id=ids.organization_id, user_id=ids.user_id
     )
     if view is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return view
+    return view, await _owned_document(session, view.document_id, ids)
 
 
 @router.get(
@@ -362,7 +368,8 @@ async def get_critique(
     session: AsyncSession = Depends(get_session),
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> CritiqueOut:
-    return CritiqueOut.of(await _owned_critique(critique_id, session, tenant))
+    view, _ = await _owned_critique(critique_id, session, tenant)
+    return CritiqueOut.of(view)
 
 
 @router.get("/critiques/{critique_id}/report", dependencies=[Depends(_enabled)])
@@ -371,11 +378,9 @@ async def get_report(
     session: AsyncSession = Depends(get_session),
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> Response:
-    view = await _owned_critique(critique_id, session, tenant)
-    if view.status in ("queued", "running"):
+    view, document = await _owned_critique(critique_id, session, tenant)
+    if view.status in ACTIVE_STATUSES:
         raise _error(status.HTTP_409_CONFLICT, "not_finished")
-    ids = owner_ids(tenant)
-    document = await _owned_document(session, view.document_id, ids)
     return Response(
         service.render_report(view, document.text_sha256),
         media_type="text/plain; charset=utf-8",

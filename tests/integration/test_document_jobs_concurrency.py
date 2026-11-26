@@ -255,7 +255,7 @@ def counting_both_kinds_after_a_meeting() -> Any:
 
     async def count(session: AsyncSession, org: uuid.UUID, now: datetime) -> int:
         try:
-            await asyncio.wait_for(meeting.wait(), 1)
+            await asyncio.wait_for(meeting.wait(), 3)
         except (TimeoutError, asyncio.BrokenBarrierError):
             pass
         return int(

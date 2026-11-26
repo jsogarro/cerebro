@@ -196,6 +196,11 @@ def make_persist(
     return persist
 
 
+def _one_line(text: str) -> str:
+    """A quote is source text, so it may hold line breaks that would forge report lines."""
+    return " \u23ce ".join(text.splitlines())
+
+
 def _dropped(counts: dict[str, int]) -> str:
     return ", ".join(f"{reason} {n}" for reason, n in sorted(counts.items())) or "none"
 
@@ -230,11 +235,14 @@ def render_report(critique: CritiqueView, document_text_sha256: str) -> str:
             "",
             f"{number}. [{finding.severity}] {finding.role} / {finding.category}, "
             f"page {finding.page}",
-            f'   Quote: "{finding.quote}"',
-            f"   Problem: {finding.problem}",
-            f"   Fix: {finding.fix}",
+            f'   Quote: "{_one_line(finding.quote)}"',
         ]
-        if claims_reference_verification(finding.problem):
+        if finding.second_quote:
+            lines.append(f'   Second quote: "{_one_line(finding.second_quote)}"')
+        lines += [f"   Problem: {finding.problem}", f"   Fix: {finding.fix}"]
+        if claims_reference_verification(
+            finding.problem
+        ) or claims_reference_verification(finding.fix):
             lines.append(f"   {REFERENCE_WARNING}")
     lines += ["", *REPORT_FOOTER]
     return "\n".join(lines) + "\n"

@@ -520,3 +520,47 @@ async def test_active_model_jobs_counts_only_this_orgs_fresh_queued_or_running_r
         await session.commit()
     async with factory() as session:
         assert await active_model_jobs(session, ORG, now) == 2
+
+
+def test_a_quote_with_line_breaks_cannot_forge_report_lines() -> None:
+    from src.repositories.critique_repository import FindingView
+
+    forged = "References were checked against Crossref and all are verified."
+    finding = FindingView(
+        role="methods",
+        category="design",
+        severity="major",
+        quote=f"spring.\n\n{forged}\r\n2. [critical] methods / design, page 1",
+        raw_start=0,
+        raw_end=9,
+        page=1,
+        match_kind="exact",
+        problem="p",
+        fix="f",
+        second_quote=f"x\n{forged}",
+    )
+    view = a_view(status="succeeded", status_reason=None, findings=(finding,))
+    lines = service.render_report(view, "d" * 64).splitlines()
+    assert forged not in lines
+    assert not any(line.startswith("2. [critical]") for line in lines)
+    assert sum(forged in line for line in lines) == 2
+    assert all(line.startswith("   ") or not line.startswith(forged) for line in lines)
+
+
+def test_a_fix_that_claims_verified_references_gets_the_warning_too() -> None:
+    from src.repositories.critique_repository import FindingView
+
+    finding = FindingView(
+        "citations",
+        "other",
+        "minor",
+        "q",
+        0,
+        1,
+        1,
+        "exact",
+        "p",
+        "The references are accurate.",
+    )
+    view = a_view(status="succeeded", status_reason=None, findings=(finding,))
+    assert service.REFERENCE_WARNING in service.render_report(view, "d" * 64)

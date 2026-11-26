@@ -852,6 +852,49 @@ async def test_a_future_terms_date_does_not_open_the_gate(
     assert (await client.get("/api/v1/critique-config")).json()["enabled"] is False
 
 
+async def test_a_critique_of_an_expired_document_reads_as_missing_but_can_be_deleted(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    from src.models.db.uploaded_document import UploadedDocument
+
+    document_id = await make_document(factory)
+    critique_id = await run_to_end(client, document_id)
+    async with factory() as session:
+        document = await session.get(UploadedDocument, document_id)
+        assert document is not None
+        document.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        await session.commit()
+    assert (await client.get(f"/api/v1/critiques/{critique_id}")).status_code == 404
+    assert (
+        await client.get(f"/api/v1/critiques/{critique_id}/report")
+    ).status_code == 404
+    assert (
+        await client.get(f"/api/v1/documents/{document_id}/critiques")
+    ).status_code == 404
+    assert (await client.delete(f"/api/v1/critiques/{critique_id}")).status_code == 204
+
+
+async def test_a_worker_with_a_full_queue_refuses_before_reserving_anything(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    model: GatedModel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.api.routes import critiques as routes
+
+    monkeypatch.setattr(routes, "MAX_QUEUED_PER_WORKER", 1)
+    model.gate.clear()
+    document_id = await make_document(factory)
+    assert (await start(client, document_id)).status_code == 202
+    ledger_before = await count(factory, UsageLedger)
+    response = await start(client, document_id)
+    assert response.status_code == 429
+    assert response.json()["error"]["code"] == "worker_busy"
+    assert await count(factory, UsageLedger) == ledger_before
+    model.gate.set()
+    await drain()
+
+
 # ---- lifespan -------------------------------------------------------------------------
 
 
