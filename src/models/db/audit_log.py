@@ -17,8 +17,6 @@ from src.models.db.base import BaseModel
 
 
 class AuditEventType(StrEnum):
-    """Audit event types."""
-
     # Authentication events
     LOGIN_SUCCESS = "login_success"
     LOGIN_FAILED = "login_failed"
@@ -285,7 +283,6 @@ class AuditLog(BaseModel):
         # Determine event category from event type
         event_category = cls._get_event_category(event_type)
 
-        # Check if suspicious
         is_suspicious = cls._is_suspicious_event(event_type, result, metadata)
 
         return cls(

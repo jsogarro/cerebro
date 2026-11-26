@@ -51,7 +51,6 @@ class CLIConfig(BaseModel):
     @field_validator("output_format")
     @classmethod
     def validate_output_format(cls, v: str) -> str:
-        """Validate output format."""
         valid_formats = ["table", "json", "yaml", "csv"]
         if v not in valid_formats:
             raise ValueError(f"Invalid output format. Must be one of: {valid_formats}")
@@ -69,7 +68,6 @@ class CLIConfig(BaseModel):
     @classmethod
     def from_env(cls) -> "CLIConfig":
         """Load configuration from environment variables."""
-        # Load from .env file if exists
         env_file = Path.home() / ".research-cli.env"
         if env_file.exists():
             load_dotenv(env_file)
@@ -77,7 +75,6 @@ class CLIConfig(BaseModel):
             # Try loading from current directory
             load_dotenv(".env.cli")
 
-        # Build config from environment variables
         config_dict: dict[str, Any] = {}
 
         if api_url := os.getenv("RESEARCH_API_URL"):

@@ -227,7 +227,6 @@ class AuditLogger:
             }
         )
 
-        # Create audit log entry
         log_entry = {
             "event_type": event_type,
             "action": action,
@@ -247,7 +246,6 @@ class AuditLogger:
             **kwargs,
         }
 
-        # Add to buffer
         with self.buffer_lock:
             self.log_buffer.append(log_entry)
             self.metrics["events_logged"] += 1
@@ -258,7 +256,6 @@ class AuditLogger:
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
 
-        # Log to structured logger as well
         self.logger.info(
             f"Audit event: {event_type.value}",
             event_type=event_type.value,
@@ -268,12 +265,9 @@ class AuditLogger:
             severity=severity.value,
         )
 
-        # Check if alert should be generated
         await self._check_alert_conditions(log_entry)
 
-        # Generate and return event ID
-        event_id = f"{event_type.value}_{datetime.now(UTC).timestamp()}"
-        return event_id
+        return f"{event_type.value}_{datetime.now(UTC).timestamp()}"
 
     async def flush_buffer(self) -> None:
         """Flush buffered events to durable storage.
@@ -296,7 +290,6 @@ class AuditLogger:
                 raise AuditPersistenceError(message)
             return
 
-        # Get logs to flush
         with self.buffer_lock:
             if not self.log_buffer:
                 return
@@ -379,7 +372,6 @@ class AuditLogger:
         _severity = log_entry.get("severity")
         user_id = log_entry.get("user_id")
 
-        # Check for immediate alert conditions
         immediate_alert_events = [
             AuditEventType.SYSTEM_BREACH,
             AuditEventType.DATA_EXFILTRATION,
@@ -392,7 +384,6 @@ class AuditLogger:
             await self._generate_security_alert(log_entry, AlertSeverity.CRITICAL)
             return
 
-        # Check for threshold-based alerts
         if event_type == AuditEventType.LOGIN_FAILED and user_id:
             # Count recent failed login attempts
             count = await self._count_recent_events(
@@ -436,7 +427,6 @@ class AuditLogger:
         Returns:
             Event count
         """
-        # Check cache first
         cache_key = f"audit:count:{identifier}:{event_type.value}"
         if self.cache:
             cached_count = await self.cache.get(cache_key)
@@ -518,7 +508,6 @@ class AuditLogger:
             else:
                 alert_type = AlertType.UNUSUAL_ACTIVITY
 
-        # Create alert
         alert = SecurityAlert.create_alert(
             alert_type=alert_type,
             title=f"{alert_type.value.replace('_', ' ').title()} Detected",
@@ -697,7 +686,6 @@ class AuditLogger:
                 ]
             )
 
-            # Check for violations
             for log in logs:
                 if (
                     log.event_type == AuditEventType.DATA_EXPORTED
@@ -713,7 +701,6 @@ class AuditLogger:
                         }
                     )
 
-        # Add recommendations based on findings
         if report["violations"]:
             report["recommendations"].append(
                 "Implement consent verification for all data exports"

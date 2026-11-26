@@ -18,7 +18,6 @@ from src.models.db.base import BaseModel
 
 logger = get_logger()
 
-# Type variable for model classes
 ModelType = TypeVar("ModelType", bound=BaseModel)
 _Scoped = TypeVar("_Scoped", bound="Select[Any] | Update")
 
@@ -86,7 +85,6 @@ class BaseRepository(Generic[ModelType]):
         if not include_deleted:
             query = query.where(self.model.deleted_at.is_(None))
 
-        # Add eager loading for relationships
         if load_relationships:
             for rel in load_relationships:
                 query = query.options(selectinload(getattr(self.model, rel)))
@@ -143,7 +141,6 @@ class BaseRepository(Generic[ModelType]):
         if not include_deleted:
             query = query.where(self.model.deleted_at.is_(None))
 
-        # Add eager loading
         if load_relationships:
             for rel in load_relationships:
                 query = query.options(selectinload(getattr(self.model, rel)))
@@ -192,12 +189,10 @@ class BaseRepository(Generic[ModelType]):
         if not entity:
             return None
 
-        # Update fields
         for key, value in data.items():
             if hasattr(entity, key) and key not in ["id", "created_at"]:
                 setattr(entity, key, value)
 
-        # Set audit fields
         entity.updated_at = datetime.now(UTC)
         if updated_by:
             entity.updated_by = updated_by
@@ -503,7 +498,6 @@ class BaseRepository(Generic[ModelType]):
         query = select(self.model)
         query = self.apply_organization_scope(query, organization_id)
 
-        # Build search conditions
         search_conditions = []
         for field in search_fields:
             if hasattr(self.model, field):

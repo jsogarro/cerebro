@@ -96,7 +96,6 @@ class AcademicSearchTool(BaseMCPTool):
             if not query:
                 return {"success": False, "error": "Query is required"}
 
-            # Validate databases
             valid_databases = ["pubmed", "arxiv", "semantic_scholar"]
             invalid_dbs = [db for db in databases if db not in valid_databases]
             if invalid_dbs:
@@ -121,7 +120,6 @@ class AcademicSearchTool(BaseMCPTool):
                 all_results.extend(results)
                 sources_used.append(db)
 
-            # Return aggregated results
             if len(databases) == 1:
                 return {
                     "success": True,
@@ -158,7 +156,6 @@ class AcademicSearchTool(BaseMCPTool):
             List of results
         """
         try:
-            # Build query with filters
             search_query = query
             if filters.get("year_start"):
                 search_query += f" AND {filters['year_start']}[pdat]"
@@ -244,10 +241,8 @@ class AcademicSearchTool(BaseMCPTool):
             List of results
         """
         try:
-            # Build query parameters
             search_query = f"all:{query}"
 
-            # Add category filter
             if filters.get("categories"):
                 cat_query = " OR ".join([f"cat:{cat}" for cat in filters["categories"]])
                 search_query += f" AND ({cat_query})"
@@ -265,7 +260,6 @@ class AcademicSearchTool(BaseMCPTool):
                 logger.error(f"arXiv search failed: {response.status_code}")
                 return []
 
-            # Parse XML response
             root = ET.fromstring(response.text)
             ns = {"atom": "http://www.w3.org/2005/Atom"}
 
@@ -355,7 +349,6 @@ class AcademicSearchTool(BaseMCPTool):
                 "fields": "paperId,title,abstract,authors,year,venue,citationCount",
             }
 
-            # Add year filter
             if filters.get("year_start") or filters.get("year_end"):
                 year_filter = ""
                 if filters.get("year_start"):

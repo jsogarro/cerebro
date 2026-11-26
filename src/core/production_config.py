@@ -205,11 +205,9 @@ class ProductionValidation:
         for var in required_vars:
             validations[f"env_{var}"] = bool(os.getenv(var))
 
-        # Check service connectivity
         validations["database_url_valid"] = bool(app_config.database.url)
         validations["redis_url_valid"] = bool(app_config.redis.url)
 
-        # Check security settings
         try:
             validate_production_jwt_keypair(
                 os.getenv("JWT_PRIVATE_KEY_PATH"),
@@ -221,14 +219,12 @@ class ProductionValidation:
         validations["cors_configured"] = bool(app_config.security.cors_origins)
         validations["rate_limiting_enabled"] = app_config.security.rate_limiting_enabled
 
-        # Check monitoring settings
         validations["metrics_enabled"] = app_config.monitoring.metrics_enabled
         validations["tracing_enabled"] = app_config.monitoring.tracing_enabled
         validations["health_checks_enabled"] = (
             app_config.monitoring.health_check_enabled
         )
 
-        # Check feature flags
         validations["production_features"] = (
             app_config.features.get("debug_endpoints", True) is False
         )
@@ -254,7 +250,6 @@ class ProductionValidation:
         return is_ready, issues
 
 
-# Create singleton instances
 production_settings = ProductionSettings()
 production_optimizations = ProductionOptimizations()
 production_validation = ProductionValidation()

@@ -67,7 +67,6 @@ def create_engine(
     # For async engines, use AsyncAdaptedQueuePool (default) or NullPool
     poolclass = NullPool if use_null_pool else AsyncAdaptedQueuePool
 
-    # Build engine kwargs
     engine_kwargs: dict[str, Any] = {
         "echo": echo,
         "echo_pool": echo_pool,
@@ -80,10 +79,8 @@ def create_engine(
         engine_kwargs["pool_pre_ping"] = True
         engine_kwargs["pool_recycle"] = 3600
 
-    # Create engine
     engine = create_async_engine(database_url, **engine_kwargs)
 
-    # Add event listeners for debugging
     if echo_pool:
 
         @event.listens_for(engine.sync_engine, "connect")
@@ -122,10 +119,8 @@ async def init_db(database_url: str | None = None, **engine_kwargs: Any) -> None
     if "sqlite" in url:
         engine_kwargs.setdefault("use_null_pool", True)
 
-    # Create engine
     _engine = create_engine(database_url, **engine_kwargs)
 
-    # Create session factory
     _async_session_factory = async_sessionmaker(
         _engine,
         class_=AsyncSession,
@@ -358,7 +353,6 @@ class DatabaseManager:
         Returns:
             Index analysis results
         """
-        # Get unused indexes
         unused_query = """
         SELECT
             schemaname,
@@ -374,7 +368,6 @@ class DatabaseManager:
         ORDER BY pg_relation_size(indexrelid) DESC
         """
 
-        # Get index hit rate
         hit_rate_query = """
         SELECT 
             sum(idx_blks_hit) / NULLIF(sum(idx_blks_hit + idx_blks_read), 0)::float AS index_hit_rate
@@ -382,14 +375,12 @@ class DatabaseManager:
         """
 
         async with self.engine.begin() as conn:
-            # Get unused indexes
             result = await conn.execute(text(unused_query))
             unused = [
                 {"table": row.tablename, "index": row.indexname, "size": row.index_size}
                 for row in result.fetchall()
             ]
 
-            # Get hit rate
             result = await conn.execute(text(hit_rate_query))
             hit_rate = result.scalar()
 

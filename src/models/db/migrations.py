@@ -80,7 +80,6 @@ class MigrationManager:
         """
         from src.models.db.session import get_database_url
 
-        # Create synchronous engine for Alembic
         db_url = get_database_url()
         if "asyncpg" in db_url:
             db_url = db_url.replace("postgresql+asyncpg", "postgresql")
@@ -154,7 +153,6 @@ class MigrationManager:
         else:
             command.revision(self.config, message=message)
 
-        # Get the newly created revision
         head = self.get_head_revision()
         script = self.script_dir.get_revision(head)
 
@@ -201,10 +199,8 @@ class MigrationManager:
             True if migrations are valid
         """
         try:
-            # Check if we can get status
             status = self.check_migration_status()
 
-            # Try to generate SQL for pending migrations (dry run)
             if status["pending_migrations"]:
                 logger.info(
                     "pending_migrations_found",

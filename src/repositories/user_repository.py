@@ -129,17 +129,14 @@ class UserRepository(BaseRepository[User]):
         Returns:
             Created user
         """
-        # Check if email already exists
         existing = await self.get_by_email(email)
         if existing:
             raise ValueError(f"User with email {email} already exists")
 
-        # Check if username already exists
         existing = await self.get_by_username(username)
         if existing:
             raise ValueError(f"Username {username} already taken")
 
-        # Create user with hashed password
         user = User.create_with_password(
             email=email,
             username=username,

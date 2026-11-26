@@ -215,7 +215,6 @@ class OAuthAccount(BaseModel):
         Returns:
             OAuthAccount instance
         """
-        # Calculate token expiration
         access_token_expires_at = None
         if expires_in:
             access_token_expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)

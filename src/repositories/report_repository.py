@@ -196,7 +196,6 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         *,
         organization_id: UUID | str,
     ) -> list[GeneratedReport]:
-        """Get public reports."""
         query = self._scoped_query(organization_id=organization_id).where(
             and_(
                 GeneratedReport.is_public.is_(True),
@@ -234,20 +233,17 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         Returns:
             Tuple of (reports, total_count)
         """
-        # Build search filter
         search_filter = or_(
             GeneratedReport.title.ilike(f"%{search_term}%"),
             GeneratedReport.query.ilike(f"%{search_term}%"),
             GeneratedReport.content_preview.ilike(f"%{search_term}%"),
         )
 
-        # Build base query
         query = self._scoped_query(
             organization_id=organization_id,
             user_id=user_id,
         ).where(search_filter)
 
-        # Add additional filters
         if report_type:
             query = query.where(GeneratedReport.report_type == report_type)
 
@@ -257,12 +253,10 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         # Only include completed reports
         query = query.where(GeneratedReport.generation_status == "completed")
 
-        # Get total count
         count_query = query.with_only_columns(func.count(GeneratedReport.id))
         count_result = await self.session.execute(count_query)
         total_count = count_result.scalar() or 0
 
-        # Get results with pagination
         query = query.order_by(desc(GeneratedReport.created_at))
         query = query.offset(offset).limit(limit)
 
@@ -756,7 +750,6 @@ class ReportFormatRepository(BaseRepository[ReportFormat]):
         organization_id: UUID | str,
         user_id: UUID | str | None = None,
     ) -> list[ReportFormat]:
-        """Get all formats for a report."""
         query = (
             select(ReportFormat)
             .join(GeneratedReport, ReportFormat.report_id == GeneratedReport.id)

@@ -186,14 +186,12 @@ class BaseMCPTool(ABC):
             Tool execution result
         """
         try:
-            # Validate parameters
             if not await self.validate_parameters(**kwargs):
                 return await self.handle_error(ValueError("Invalid parameters"), kwargs)
 
             # Execute tool
             result = await self.execute(**kwargs)
 
-            # Log execution
             self.log_execution(kwargs, result)
 
             return result

@@ -101,7 +101,6 @@ class MCPServer:
         # Register with internal registry
         self.registry.register(tool)
 
-        # Create MCP tool wrapper
         metadata = tool.get_metadata()
 
         # Register tool with FastMCP
@@ -201,7 +200,6 @@ class MCPServer:
             Health check result
         """
         try:
-            # Check if tools are accessible
             tool_count = len(self.get_registered_tools())
 
             return {

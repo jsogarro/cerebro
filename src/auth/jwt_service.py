@@ -70,7 +70,6 @@ class JWTService:
         self.access_token_expire_minutes = settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
         self.refresh_token_expire_days = settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS
 
-        # Load or generate RSA keys
         resolved_private_key_path = (
             private_key_path
             if private_key_path is not None
@@ -278,7 +277,6 @@ class JWTService:
             "device_id": device_id,
         }
 
-        # Add additional claims
         if additional_claims:
             base_payload.update(additional_claims)
 
@@ -416,7 +414,6 @@ class JWTService:
                 if user_revoked:
                     raise JWTError("Token has been revoked")
 
-            # Create token payload
             return TokenPayload(
                 sub=payload["sub"],
                 email=payload.get("email"),
@@ -456,14 +453,12 @@ class JWTService:
         Raises:
             JWTError: If refresh token is invalid
         """
-        # Validate refresh token
         refresh_payload = await self.validate_token(refresh_token, token_type="refresh")
 
         # Verify device ID if provided
         if device_id and refresh_payload.device_id != device_id:
             raise JWTError("Device mismatch")
 
-        # Check if refresh token exists in Redis
         if self.redis_client:
             refresh_key = f"{self.refresh_token_prefix}{refresh_payload.jti}"
             try:
@@ -520,9 +515,7 @@ class JWTService:
             if self.redis_client is None:
                 return False
 
-            # Add to blacklist
             if self.redis_client:
-                # Calculate remaining TTL
                 exp = payload.get("exp")
                 if exp:
                     ttl = max(0, exp - datetime.now(UTC).timestamp())

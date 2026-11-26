@@ -39,7 +39,6 @@ class CostTracker:
         input_tokens: int,
         output_tokens: int,
     ) -> CostTransaction:
-        """Record usage."""
         import uuid
 
         pricing = self.PRICING.get(model_id, {"input": 0.0, "output": 0.0})
@@ -59,7 +58,6 @@ class CostTracker:
         )
 
     async def get_current_spend(self, scope_type: str, scope_id: str) -> dict[str, Any]:
-        """Get current spend."""
         return {"total_spend_usd": Decimal("0.00"), "total_tokens": 0}
 
 
@@ -81,7 +79,6 @@ class BudgetManager:
     async def create_budget(
         self, scope_type: str, scope_id: str, amount: Decimal, period: str
     ) -> Budget:
-        """Create budget."""
         import uuid
 
         return Budget(
@@ -114,7 +111,6 @@ class CostForecaster:
     async def estimate_query_cost(
         self, query: str, domains: list[str], depth: str
     ) -> dict[str, Any]:
-        """Estimate cost."""
         return {
             "estimated_cost": 0.5,
             "recommended_model": "openrouter/moonshotai/kimi-k2.5",
@@ -127,7 +123,6 @@ class CostOptimizer:
     async def get_optimization_suggestions(
         self, organization_id: str
     ) -> list[dict[str, Any]]:
-        """Get suggestions."""
         return []
 
     async def auto_downgrade(
