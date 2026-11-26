@@ -37,6 +37,7 @@ from src.models.db.security_alert import (
     SecurityAlert,
 )
 from src.models.db.tool_invocation import AgentToolInvocation
+from src.models.db.uploaded_document import UploadedDocument, UsageLedger
 from src.models.db.user import User
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 
@@ -75,6 +76,8 @@ __all__ = [
     "ResearchProject",
     "ResearchResult",
     "SecurityAlert",
+    "UploadedDocument",
+    "UsageLedger",
     "User",
     "WorkflowCheckpoint",
 ]

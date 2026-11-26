@@ -21,6 +21,7 @@ source says nothing".
 import io
 import unicodedata
 from bisect import bisect_right
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Final
@@ -52,6 +53,8 @@ __all__ = [
     "NotAPdfError",
     "PageSpan",
     "PdfExtractionError",
+    "TooManyPagesError",
+    "TooMuchTextError",
     "build_extracted_text_artifact",
     "extract_pdf_text",
     "extractor_pin",
@@ -82,6 +85,14 @@ class MalformedPdfError(PdfExtractionError):
 
 class NoExtractableTextError(PdfExtractionError):
     """No page produced any text (e.g. a scanned, image-only document)."""
+
+
+class TooManyPagesError(PdfExtractionError):
+    """The PDF has more pages than the caller allows."""
+
+
+class TooMuchTextError(PdfExtractionError):
+    """The extracted text passed the caller's character cap."""
 
 
 @dataclass(frozen=True)
@@ -133,8 +144,40 @@ def _normalize(text: str) -> str:
     return unicodedata.normalize("NFC", text.replace("\r\n", "\n").replace("\r", "\n"))
 
 
-def extract_pdf_text(data: bytes) -> ExtractedText:
-    """Extract normalized text and a page offset map from PDF bytes."""
+def _page_texts(
+    reader: PdfReader,
+    max_pages: int | None,
+    max_chars: int | None,
+    clean_page: Callable[[str], str] | None,
+) -> list[str]:
+    if max_pages is not None and len(reader.pages) > max_pages:
+        raise TooManyPagesError(f"PDF has more than {max_pages} pages")
+    page_texts: list[str] = []
+    total = 0
+    for page in reader.pages:
+        page_text = _normalize(page.extract_text() or "")
+        if clean_page is not None:
+            page_text = _normalize(clean_page(page_text))
+        total += len(page_text) + bool(page_texts)
+        if max_chars is not None and total > max_chars:
+            raise TooMuchTextError(f"PDF text is longer than {max_chars} characters")
+        page_texts.append(page_text)
+    return page_texts
+
+
+def extract_pdf_text(
+    data: bytes,
+    *,
+    max_pages: int | None = None,
+    max_chars: int | None = None,
+    clean_page: Callable[[str], str] | None = None,
+) -> ExtractedText:
+    """Extract normalized text and a page offset map from PDF bytes.
+
+    ``max_pages`` is checked before any page is read and ``max_chars`` as soon
+    as the running total passes it. ``clean_page`` runs on each page before
+    the spans and hash are computed, so a cleanup never shifts an offset.
+    """
 
     if _installed_pypdf_version != PINNED_PYPDF_VERSION:
         raise RuntimeError(
@@ -147,7 +190,7 @@ def extract_pdf_text(data: bytes) -> ExtractedText:
         reader = PdfReader(io.BytesIO(data))
         if reader.is_encrypted:
             raise EncryptedPdfError("PDF is encrypted")
-        page_texts = [_normalize(page.extract_text() or "") for page in reader.pages]
+        page_texts = _page_texts(reader, max_pages, max_chars, clean_page)
     except PdfExtractionError:
         raise
     except (PyPdfError, ValueError, KeyError, TypeError, RecursionError) as error:

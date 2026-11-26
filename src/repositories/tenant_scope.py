@@ -46,6 +46,31 @@ def scope_to_organization(
     return query.where(column == normalize_organization_id(organization_id))  # type: ignore[return-value]
 
 
+def scope_to_owner(
+    query: _SelectT,
+    *,
+    org_column: InstrumentedAttribute[uuid.UUID],
+    user_column: InstrumentedAttribute[uuid.UUID],
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> _SelectT:
+    """Filter ``query`` to rows owned by one user of one organization.
+
+    Unlike :func:`scope_to_organization` there is no unscoped path: owner-private
+    data must never be readable because a caller forgot an identity, so a
+    missing ``organization_id`` or ``user_id`` raises.
+    """
+
+    if user_id is None:
+        raise MissingOrganizationContextError(
+            "an owner-scoped read requires an authenticated user"
+        )
+    return query.where(  # type: ignore[return-value]
+        org_column == normalize_organization_id(organization_id),
+        user_column == user_id,
+    )
+
+
 async def get_run_organization_id(
     session: AsyncSession, run_id: str
 ) -> uuid.UUID | None:
@@ -146,4 +171,5 @@ __all__ = [
     "get_run_organization_id",
     "normalize_organization_id",
     "scope_to_organization",
+    "scope_to_owner",
 ]

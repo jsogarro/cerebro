@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
 from src.utils.serialization import deserialize, serialize
 
@@ -16,13 +16,17 @@ ENCRYPTED_TEXT_PREFIX = "fernet:"
 class MemoryEncryption:
     """Fernet-backed encryption for persisted memory payloads."""
 
-    def __init__(self, key: str | bytes | None = None) -> None:
-        self._key = key or os.getenv("MEMORY_ENCRYPTION_KEY")
-        self._fernet = (
-            Fernet(self._key.encode() if isinstance(self._key, str) else self._key)
-            if self._key
-            else None
+    def __init__(
+        self, key: str | bytes | None = None, *, env_fallback: bool = True
+    ) -> None:
+        self._key = key or (
+            os.getenv("MEMORY_ENCRYPTION_KEY") if env_fallback else None
         )
+        self._fernet: Fernet | MultiFernet | None = None
+        if self._key:
+            raw = self._key.decode() if isinstance(self._key, bytes) else self._key
+            keys = [Fernet(part.strip().encode()) for part in raw.split(",")]
+            self._fernet = keys[0] if len(keys) == 1 else MultiFernet(keys)
 
     @property
     def enabled(self) -> bool:
@@ -81,4 +85,20 @@ class MemoryEncryption:
         )
 
 
-__all__ = ["MemoryEncryption"]
+class DocumentEncryptionUnavailable(RuntimeError):  # noqa: N818
+    """No usable ``DOCUMENT_ENCRYPTION_KEY``; a disabled cipher would store plaintext."""
+
+
+def document_cipher() -> MemoryEncryption:
+    """Return the cipher for uploaded-document columns, or fail closed."""
+    from src.core.config import settings
+
+    cipher = MemoryEncryption(
+        settings.DOCUMENT_ENCRYPTION_KEY.strip(), env_fallback=False
+    )
+    if not cipher.enabled:
+        raise DocumentEncryptionUnavailable("DOCUMENT_ENCRYPTION_KEY is not set")
+    return cipher
+
+
+__all__ = ["DocumentEncryptionUnavailable", "MemoryEncryption", "document_cipher"]
