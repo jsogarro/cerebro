@@ -211,8 +211,9 @@ class AuditLogger:
                     severity=AuditSeverity.WARNING,
                 )
                 await self.flush_buffer()
-            except Exception as exc:
-                self.logger.error("rejection_audit_failed", error=type(exc).__name__)
+            except AuditPersistenceError:
+                # Already counted and logged by ``flush_buffer``; the worker must keep draining.
+                pass
             finally:
                 self._rejections.task_done()
 

@@ -101,7 +101,7 @@ class AuditTrailMiddleware:
             event_type=self._event_type(request, status_code),
             action=f"{request.method} {request.url.path}",
             request=request,
-            # Set by the login route for a failure against a real account.
+            # Only the login route knows which account a failed login targeted.
             user_id=getattr(request.state, "audit_subject_id", None),
             result=(
                 ("admitted" if phase == "admission" else "success")
