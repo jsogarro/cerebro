@@ -921,3 +921,9 @@ async def test_a_document_deleted_before_the_check_row_is_written_is_a_404(
     document_id = await make_document(factory)
     assert (await start(client, document_id)).status_code == 404
     assert await count(factory, UsageLedger) == 0
+
+
+def test_the_global_open_source_cap_defaults_to_what_a_free_key_affords():
+    # $1/day at $0.001 per search, 20 searches per check: 50 checks a day.
+    assert service.OPEN_SOURCE_LIMITS.global_daily_count == 50
+    assert settings.SIMILARITY_OPEN_SOURCE_GLOBAL_DAILY == 50

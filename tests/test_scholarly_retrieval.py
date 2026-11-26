@@ -849,7 +849,7 @@ async def test_openalex_requests_are_spaced_and_carry_the_documented_params(
     enters = [t for k, h, t in clock.log if k == "enter"]
     assert enters[1] - enters[0] >= 0.5
     first = httpx_mock.get_requests()[0].url.params
-    assert first["api_key"] == SENTINEL_KEY and first["per-page"] == "10"
+    assert "api_key" not in first and first["per-page"] == "10"
     assert first["select"] == sr._SELECT and first["search"]
 
 
@@ -1157,3 +1157,25 @@ async def test_a_fetch_that_hits_the_deadline_counts_as_a_failure(clock, monkeyp
         for _ in range(3):
             await session.get(request)
     assert sr._BREAKERS.for_tool("api.openalex.org").allows(clock.now()) is False
+
+
+async def test_the_key_travels_in_a_bearer_header_never_in_the_url(
+    httpx_mock, run, monkeypatch
+):
+    monkeypatch.setattr(sr.settings, "OPENALEX_API_KEY", SENTINEL_KEY)
+    search_ok(httpx_mock, work())
+    await run(budget=RetrievalBudget(max_queries=1))
+    (request,) = httpx_mock.get_requests()
+    assert SENTINEL_KEY not in str(request.url)
+    assert request.headers["authorization"] == f"Bearer {SENTINEL_KEY}"
+
+
+async def test_no_authorization_is_sent_without_a_key_or_to_arxiv(
+    httpx_mock, run, monkeypatch, extract_spy
+):
+    monkeypatch.setattr(sr.settings, "OPENALEX_API_KEY", SENTINEL_KEY)
+    search_ok(httpx_mock, arxiv_work())
+    httpx_mock.add_response(url="https://arxiv.org/pdf/2101.00001", content=b"%PDF-x")
+    await run(budget=RetrievalBudget(max_queries=1))
+    arxiv = [r for r in httpx_mock.get_requests() if r.url.host == "arxiv.org"]
+    assert arxiv and "authorization" not in arxiv[0].headers

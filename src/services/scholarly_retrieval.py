@@ -293,6 +293,8 @@ class _Request:
     cap: int
     request_class: str
     term_count: int
+    # Credentials ride in a header: OpenAlex retains full request URLs.
+    headers: dict[str, str] | None = field(default=None, repr=False)
 
 
 class _Session:
@@ -361,7 +363,7 @@ class _Session:
         received = 0
         try:
             async with self.http.stream(
-                "GET", request.url, params=request.params
+                "GET", request.url, params=request.params, headers=request.headers
             ) as response:
                 status = response.status_code
                 if status >= 300:
@@ -554,8 +556,11 @@ async def _search(
         "per-page": _PER_PAGE,
         "select": _SELECT,
     }
-    if settings.OPENALEX_API_KEY:
-        params["api_key"] = settings.OPENALEX_API_KEY
+    headers = (
+        {"Authorization": f"Bearer {settings.OPENALEX_API_KEY}"}
+        if settings.OPENALEX_API_KEY
+        else None
+    )
     reply = await session.get(
         _Request(
             OPENALEX_HOST,
@@ -564,6 +569,7 @@ async def _search(
             MAX_JSON_BYTES,
             "search",
             len(terms),
+            headers,
         )
     )
     if reply.failure == "deadline_reached":
