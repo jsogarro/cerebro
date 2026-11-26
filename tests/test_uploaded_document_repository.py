@@ -23,7 +23,7 @@ ORG_A = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
 ORG_B = uuid.UUID("00000000-0000-0000-0000-0000000000bb")
 USER_A = uuid.UUID("00000000-0000-0000-0000-00000000000a")
 USER_B = uuid.UUID("00000000-0000-0000-0000-00000000000b")
-NOW = datetime(2026, 11, 26, 12, 0, tzinfo=UTC)
+NOW = datetime.now(UTC).replace(microsecond=0)
 TEXT = "alpha\nbravo"
 
 
@@ -159,12 +159,12 @@ async def test_purge_expired_deletes_only_expired_rows_and_is_idempotent(
     session: AsyncSession, cipher: MemoryEncryption
 ) -> None:
     repo = UploadedDocumentRepository(session, cipher)
-    expired = await _create(repo, expires_at=NOW)
-    await _create(repo, expires_at=NOW + timedelta(seconds=1))
+    await _create(repo, expires_at=NOW)
+    kept = await _create(repo, expires_at=NOW + timedelta(hours=1))
     assert await repo.purge_expired(NOW) == 1
     assert await repo.purge_expired(NOW) == 0
-    assert await repo.get_meta(expired, organization_id=ORG_A, user_id=USER_A) is None
-    assert len(await repo.list_recent(organization_id=ORG_A, user_id=USER_A)) == 1
+    remaining = (await session.execute(select(UploadedDocument.id))).scalars().all()
+    assert remaining == [kept]
 
 
 async def test_authors_are_stored_as_encrypted_json(
