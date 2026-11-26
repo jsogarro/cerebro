@@ -1,5 +1,7 @@
 """Model output and citation metadata must not reach TeX or WeasyPrint as markup."""
 
+import ast
+import html as html_lib
 import os
 import re
 import shutil
@@ -499,3 +501,53 @@ def test_compile_failure_control_detects_broken_tex(tmp_path: Path) -> None:
         tex.replace("\\maketitle", "\\maketitle\\undefinedcommand"), tmp_path
     )
     assert result.returncode != 0
+
+
+def _empty_report(report_type: ReportType) -> Report:
+    report = Report(id="r", title="Empty", query="q")
+    report.configuration.type = report_type
+    return report
+
+
+@pytest.mark.parametrize("hostile", [True, False])
+@pytest.mark.parametrize("report_type", list(ReportType))
+def test_real_templates_render_every_report_type_and_autoescape(
+    report_type: ReportType, hostile: bool
+) -> None:
+    # Calls the renderer directly: the generator would hide a template failure
+    # behind the escaped fallback and let the escaping assertions pass vacuously.
+    report = _hostile_report(report_type) if hostile else _empty_report(report_type)
+    html = TemplateRenderer(ReportSettings()).render_report(report)
+    assert html_lib.escape(report.title) in html
+    if hostile:
+        assert "<img src=x>" not in html
+
+
+def test_template_environment_autoescapes_j2_html_templates() -> None:
+    renderer = TemplateRenderer(ReportSettings())
+    template = renderer.env.from_string("{{ v }}")
+    assert template.render(v="<b>") == "&lt;b&gt;"
+    assert renderer._get_template("base.html.j2").environment.autoescape("x.html.j2")
+
+
+EXPORTERS = (ROOT / "src/services/exporters").glob("*.py")
+
+
+@pytest.mark.parametrize("path", sorted(EXPORTERS), ids=lambda p: p.name)
+def test_exporters_cannot_run_a_subprocess_or_compiler(path: Path) -> None:
+    tree = ast.parse(path.read_text())
+    imported = {
+        alias.name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    } | {
+        node.module.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+    assert not imported & {"subprocess", "pty", "multiprocessing"}, path.name
+    assert not any(
+        isinstance(n, ast.Attribute) and n.attr in {"system", "popen", "spawn"}
+        for n in ast.walk(tree)
+    ), path.name
