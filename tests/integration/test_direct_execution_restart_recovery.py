@@ -240,7 +240,7 @@ async def test_restart_recovers_non_terminal_run_into_active_executions(
     assert restored_count == 1
     assert execution_id in service_b.active_executions
     recovered = service_b.active_executions[execution_id]
-    assert recovered.status == "running"
+    assert recovered.status == "failed"
     assert recovered.run_id == run_id
     assert recovered.project_id == str(project.id)
 

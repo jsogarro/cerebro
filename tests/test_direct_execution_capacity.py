@@ -11,6 +11,9 @@ from src.api.services.direct_execution_service import (
     DirectExecutionService,
     ExecutionStatus,
 )
+from src.api.services.execution_authority_resolver import (
+    PersistedExecutionAuthorityResolver,
+)
 from src.models.execution_authority import ExecutionAuthorityReference
 from tests.test_direct_execution_authority import (
     OWNING_ORGANIZATION,
@@ -171,4 +174,26 @@ async def test_cancelled_workflow_task_records_its_cancellation(
         await task
 
     assert recorded == ["exec-1"]
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_admission_loads_an_authority_the_cache_has_not_seen() -> None:
+    resolver = PersistedExecutionAuthorityResolver()
+
+    async def load_authority(reference) -> None:
+        resolver.cache_binding(_binding())
+
+    resolver.load_authority = load_authority  # type: ignore[method-assign]
+    service, router = _service(resolver=resolver)
+    router.route.return_value = _Decision()
+
+    async def finished(*args, **kwargs) -> None:
+        return None
+
+    service._execute_research_workflow = finished  # type: ignore[method-assign]
+    execution_id = await _admit(service)
+
+    assert execution_id in service.active_executions
+    await _drain(service)
     await service.close()

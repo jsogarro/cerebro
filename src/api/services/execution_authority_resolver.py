@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Mapping
+from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Protocol
@@ -225,10 +226,11 @@ class PersistedExecutionAuthorityResolver:
       cache in one pass, for a cold start (a fresh process has an empty
       cache and no other way to learn what's durable).
 
-    A ``resolve`` call that misses the cache raises
+    ``resolve`` itself never queries: a miss raises
     ``ExecutionAuthorityUnavailableError`` even if the binding exists in the
-    database — this resolver does not fall back to a live query. Callers
-    that need that guarantee must warm the cache before serving requests.
+    database. Async callers that should see rows written after startup (by
+    another replica) call :meth:`load_authority` first when a
+    ``session_factory`` was supplied.
 
     The cache spans every tenant, because a cold start has to load whatever
     is durable without a caller to scope it to. The tenant boundary is
@@ -241,7 +243,10 @@ class PersistedExecutionAuthorityResolver:
         *,
         clock: Callable[[], datetime] | None = None,
         plan_id_factory: Callable[[], str] | None = None,
+        session_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]]
+        | None = None,
     ) -> None:
+        self._session_factory = session_factory
         self._bindings: dict[tuple[str, str], ExecutionAuthorityBinding] = {}
         self._clock: Callable[[], datetime] = clock or (lambda: datetime.now(UTC))
         self._plan_id_factory: Callable[[], str] = plan_id_factory or (
@@ -267,6 +272,36 @@ class PersistedExecutionAuthorityResolver:
     def cache_binding(self, binding: ExecutionAuthorityBinding) -> None:
         """Populate the in-process cache without touching persistence."""
         self._bindings[(binding.authority_id, binding.authority_version)] = binding
+
+    async def load_authority(self, reference: ExecutionAuthorityReference) -> None:
+        """Cache the referenced authority from its snapshot if it is not cached.
+
+        Tenant scoping still happens in :meth:`resolve`, so loading another
+        tenant's row here exposes nothing.
+        """
+        key = (reference.authority_id, reference.authority_version)
+        if key in self._bindings or self._session_factory is None:
+            return
+        from src.repositories.run_config_snapshot_repository import (
+            RunConfigSnapshotRepository,
+        )
+
+        async with self._session_factory() as session:
+            snapshots = await RunConfigSnapshotRepository(session).find_by_authority(
+                authority_id=reference.authority_id,
+                authority_version=reference.authority_version,
+            )
+        if snapshots:
+            snapshot = snapshots[0]
+            self.cache_binding(
+                deserialize_execution_authority_binding(
+                    snapshot.configuration,
+                    authority_id=snapshot.authority_id,
+                    authority_version=snapshot.authority_version,
+                    clock=self._clock,
+                    plan_id_factory=self._plan_id_factory,
+                )
+            )
 
     async def register(
         self,

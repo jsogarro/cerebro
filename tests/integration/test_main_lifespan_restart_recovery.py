@@ -273,7 +273,7 @@ async def test_main_lifespan_warms_authority_and_restores_active_executions(
 
             assert execution_id in service.active_executions
             recovered = service.active_executions[execution_id]
-            assert recovered.status == "running"
+            assert recovered.status == "failed"
             assert recovered.run_id == run_id
             assert recovered.project_id == project_id
     finally:

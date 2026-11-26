@@ -111,6 +111,7 @@ from .execution_authority_resolver import (
     ExecutionAuthorityRequiredError,
     ExecutionAuthorityResolver,
     ExecutionAuthorityUnavailableError,
+    PersistedExecutionAuthorityResolver,
     serialize_execution_authority_binding,
     tenant_owns_authority,
 )
@@ -142,6 +143,7 @@ _RUN_STATUS_TO_EXECUTION_STATUS: dict[str, str] = {
 # the run's outcome. Declared once because two things depend on agreeing
 # about it: the ``@retry`` decorator, and the failure path's decision about
 # whether a terminal FAILED may be persisted yet.
+INTERRUPTED_BY_RESTART = "interrupted by restart"
 _WORKFLOW_MAX_ATTEMPTS = 3
 
 
@@ -1743,7 +1745,9 @@ class DirectExecutionService:
         before any authenticated request context exists. Only non-terminal
         runs are restored; a run that reached a terminal status before the
         restart already has its outcome durably recorded and does not need
-        an in-memory placeholder.
+        an in-memory placeholder. A restored run has no live task and is not
+        resumed, so it is recorded as failed with reason "interrupted by
+        restart".
 
         Returns:
             The number of executions rehydrated.
@@ -1764,6 +1768,24 @@ class DirectExecutionService:
                     execution_id = execution_status.execution_id
                     if execution_id in self.active_executions:
                         continue
+                    # Nothing in this process is running the work, and nothing
+                    # resumes it (see issue #296), so a restored placeholder
+                    # would read "running" forever and hold a concurrency slot.
+                    outcome = await self._persist_transition(
+                        execution_status,
+                        run_target=RunStatus.FAILED,
+                        task_target=TaskStatus.FAILED,
+                        attempt_target=AttemptStatus.FAILED,
+                        event_type="run.interrupted",
+                        payload={"reason": INTERRUPTED_BY_RESTART},
+                        reason=INTERRUPTED_BY_RESTART,
+                    )
+                    self._settle_terminal_state(
+                        execution_status,
+                        outcome=outcome,
+                        status="failed",
+                        phase="failed",
+                    )
                     self.active_executions[execution_id] = execution_status
                     self._execution_ids_by_run_id[run_row.run_id] = execution_id
                     restored += 1
@@ -1999,6 +2021,10 @@ class DirectExecutionService:
         if self.closed:
             raise RuntimeError("Direct execution service is closed")
 
+        if authority_reference is not None and isinstance(
+            self.execution_authority_resolver, PersistedExecutionAuthorityResolver
+        ):
+            await self.execution_authority_resolver.load_authority(authority_reference)
         binding = self._resolve_execution_authority(
             authority_reference, organization_id=organization_id
         )

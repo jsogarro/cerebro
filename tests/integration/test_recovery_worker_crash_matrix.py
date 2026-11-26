@@ -300,7 +300,7 @@ async def test_worker_crash_mid_flight_recovers_as_active_never_fabricating_succ
     await fresh.restore_active_executions()
 
     recovered = fresh.active_executions[execution_id]
-    assert recovered.status == "running"
+    assert recovered.status == "failed"
     assert recovered.final_output is None
     assert recovered.agent_results == {}
 

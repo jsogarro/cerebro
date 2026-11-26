@@ -52,7 +52,10 @@ from ...models.agent_api_models import (
     MixtureOfAgentsResponse,
 )
 from ...models.execution_authority import ExecutionAuthorityReference
-from ..services.execution_authority_resolver import ExecutionAuthorityError
+from ..services.execution_authority_resolver import (
+    ExecutionAuthorityError,
+    PersistedExecutionAuthorityResolver,
+)
 from ..services.research_kernel import (
     AgentExecutionBackend,
     AgentKernelOperations,
@@ -79,6 +82,24 @@ def _resolved_agent_operations(
     else:
         kernel = get_legacy_agent_research_kernel(execution_service)
     return get_kernel_agent_operations(kernel)
+
+
+async def _load_agent_execution_authority(
+    execution_service: ApplicationResearchKernel | AgentExecutionBackend,
+    reference: ExecutionAuthorityReference | None,
+) -> None:
+    """Let the durable resolver see an authority written after startup."""
+
+    backend: Any = (
+        getattr(execution_service.executor, "backend", None)
+        if isinstance(execution_service, ResearchKernel)
+        else None
+    )
+    resolver = getattr(backend, "execution_authority_resolver", None)
+    if reference is not None and isinstance(
+        resolver, PersistedExecutionAuthorityResolver
+    ):
+        await resolver.load_authority(reference)
 
 
 def _require_agent_execution_authority(
@@ -251,6 +272,9 @@ async def execute_agent(
             query_preview=redact_pii(request.query)[:100],
         )
 
+        await _load_agent_execution_authority(
+            execution_service, request.authority_reference
+        )
         _require_agent_execution_authority(
             execution_service,
             request.authority_reference,
@@ -307,6 +331,9 @@ async def execute_chain_of_agents(
             f"Starting Chain-of-Agents execution: {[a.value for a in request.agent_chain]}"
         )
 
+        await _load_agent_execution_authority(
+            execution_service, request.authority_reference
+        )
         _require_agent_execution_authority(
             execution_service,
             request.authority_reference,
@@ -360,6 +387,9 @@ async def execute_mixture_of_agents(
             f"Starting Mixture-of-Agents execution: {[a.value for a in request.agent_types]}"
         )
 
+        await _load_agent_execution_authority(
+            execution_service, request.authority_reference
+        )
         _require_agent_execution_authority(
             execution_service,
             request.authority_reference,

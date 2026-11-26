@@ -284,7 +284,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 PersistedExecutionAuthorityResolver,
             )
 
-            persisted_resolver = PersistedExecutionAuthorityResolver()
+            persisted_resolver = PersistedExecutionAuthorityResolver(
+                session_factory=durable_session_factory
+            )
             try:
                 async with durable_session_factory() as warm_session:
                     warmed = await persisted_resolver.warm_from_snapshots(warm_session)
