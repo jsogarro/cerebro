@@ -176,13 +176,10 @@ def _strip_edge_punctuation(token: str) -> str:
 
 
 def _sendable(term: str) -> bool:
-    mixed = any(c.isdigit() for c in term) and any(c.isalpha() for c in term)
-    return (
-        bool(TERM_RE.fullmatch(term))
-        and not mixed
-        and not term.isdigit()
-        and term not in _STOPWORDS
-    )
+    if term in _STOPWORDS or not TERM_RE.fullmatch(term) or term.isdigit():
+        return False
+    # Letters mixed with digits look like identifiers or secrets, not vocabulary.
+    return not (any(c.isdigit() for c in term) and any(c.isalpha() for c in term))
 
 
 def plan_queries(text: str, limit: int = MAX_CANDIDATES) -> QueryPlan:
@@ -264,7 +261,11 @@ _BREAKERS = BreakerRegistry(
 class _Reply:
     body: bytes | None
     failure: str | None = None
-    status: int | str = 0
+    status: int | str = ""
+
+    def __post_init__(self) -> None:
+        if self.status == "":
+            self.status = self.failure or 0
 
 
 @dataclass(frozen=True)
@@ -306,13 +307,13 @@ class _Session:
         finally:
             if not judged:
                 breaker.record_abandoned()
-        if reply.status != 0:
+        if elapsed_ms is not None:
             await self._emit(request, reply.status, received, elapsed_ms)
         return reply
 
     async def _paced_fetch(
         self, request: _Request, breaker: CircuitBreaker
-    ) -> tuple[_Reply, int, int]:
+    ) -> tuple[_Reply, int, int | None]:
         async with AsyncExitStack() as stack:
             try:
                 await asyncio.wait_for(
@@ -321,7 +322,7 @@ class _Session:
                 )
             except TimeoutError:
                 breaker.record_abandoned()
-                return _Reply(None, "deadline_reached"), 0, 0
+                return _Reply(None, "deadline_reached"), 0, None
             started = self.pacer.now()
             try:
                 reply, received = await asyncio.wait_for(
@@ -359,21 +360,21 @@ class _Session:
                     received += len(chunk)
                     if received > request.cap:
                         breaker.record_abandoned()
-                        return _Reply(None, "oversize", "oversize"), received
+                        return _Reply(None, "oversize"), received
                     chunks.append(chunk)
         except httpx.TimeoutException:
             breaker.record_failure(self.pacer.now())
-            return _Reply(None, "timeout", "timeout"), received
+            return _Reply(None, "timeout"), received
         except httpx.RequestError:
             breaker.record_failure(self.pacer.now())
-            return _Reply(None, "network_error", "network_error"), received
+            return _Reply(None, "network_error"), received
         breaker.record_success()
         return _Reply(b"".join(chunks), None, status), received
 
     def _refusal(self, status: int, breaker: CircuitBreaker) -> _Reply:
         if status < 400:
             breaker.record_abandoned()
-            return _Reply(None, "redirect", "redirect")
+            return _Reply(None, "redirect")
         if status == 429 or status >= 500:
             breaker.record_failure(self.pacer.now())
         else:
@@ -507,7 +508,9 @@ async def retrieve_candidates(
         raise ValueError("http client must come from make_client()")
     session = _Session(http, pacer, record_egress, budget.deadline_s)
     openalex, arxiv = SourceCoverage(), SourceCoverage()
-    plan = plan_queries(document_text, min(budget.max_queries, MAX_CANDIDATES))
+    plan = await asyncio.to_thread(
+        plan_queries, document_text, min(budget.max_queries, MAX_CANDIDATES)
+    )
     openalex.terms_dropped_non_ascii = plan.terms_dropped_non_ascii
 
     found: dict[tuple[str, str], Candidate] = {}
