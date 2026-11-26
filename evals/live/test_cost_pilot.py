@@ -26,7 +26,7 @@ from src.evals.pilot_runner import (
 )
 from src.evals.trial_setup import build_harvest_service
 
-pytestmark = pytest.mark.live_eval
+pytestmark = [pytest.mark.live_eval, pytest.mark.cost_pilot]
 
 CASES = Path(__file__).with_name("cost_pilot_cases.json")
 REPORT = Path("evals/out/cost_pilot.json")
