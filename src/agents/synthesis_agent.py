@@ -39,14 +39,12 @@ class SynthesisAgent(LLMWorkerAgentBase):
             AgentResult containing integrated findings
         """
         try:
-            # Validate input
             agent_outputs = task.input_data.get("agent_outputs", {})
             if not agent_outputs:
                 return self.handle_error(
                     task, ValueError("Agent outputs required for synthesis")
                 )
 
-            # Check cache first
             cache_key = self._generate_cache_key(task)
             cached_result = await self.get_cached_result(cache_key)
             if cached_result:
@@ -61,7 +59,6 @@ class SynthesisAgent(LLMWorkerAgentBase):
                 schema_result = await self._generate_structured_with_routing(
                     prompt, SynthesisSchema, task=task
                 )
-                # Convert Pydantic model to dict for compatibility
                 synthesis = schema_result.model_dump()
             except Exception as e:
                 # Fallback for testing without configured LLM
@@ -70,10 +67,8 @@ class SynthesisAgent(LLMWorkerAgentBase):
                 )
                 synthesis = self._generate_mock_synthesis(agent_outputs)
 
-            # Calculate confidence score
             confidence = self._calculate_confidence(synthesis, agent_outputs)
 
-            # Build output
             output = {
                 "integrated_findings": synthesis.get("integrated_findings", []),
                 "cross_agent_patterns": synthesis.get("cross_agent_patterns", []),
@@ -143,7 +138,6 @@ class SynthesisAgent(LLMWorkerAgentBase):
         elif len(agent_outputs) >= 2:
             confidence += 0.1
 
-        # Check synthesis completeness
         if len(synthesis.get("integrated_findings", [])) > 0:
             confidence += 0.15
         if len(synthesis.get("meta_insights", [])) > 0:

@@ -152,7 +152,6 @@ Provide a comprehensive comparative analysis with comparison matrix, strengths/w
 def generate_methodology_agent_prompt(
     research_question: str, context: dict[str, Any]
 ) -> str:
-    """Generate prompt for Methodology Agent."""
     system_prompt = create_system_prompt(
         role="Research Methodology Expert",
         context="You specialize in designing appropriate research methodologies and approaches.",
@@ -194,7 +193,6 @@ Provide detailed methodological recommendations including design, data collectio
 
 
 def generate_synthesis_agent_prompt(agent_outputs: dict[str, Any]) -> str:
-    """Generate prompt for Synthesis Agent."""
     system_prompt = create_system_prompt(
         role="Research Synthesis Agent",
         context="You specialize in integrating outputs from multiple research agents into coherent insights.",
@@ -242,7 +240,6 @@ Create a comprehensive synthesis that integrates all findings into a coherent re
 def generate_citation_agent_prompt(
     sources: list[dict[str, Any]], style: str = "APA"
 ) -> str:
-    """Generate prompt for Citation Agent."""
     system_prompt = create_system_prompt(
         role="Citation and Verification Agent",
         context="You specialize in proper academic citation formatting and source verification.",

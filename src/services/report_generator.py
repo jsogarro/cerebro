@@ -61,7 +61,6 @@ class ReportGenerator:
         self.format_config = format_config or create_format_config(self.settings)
         self.quality_config = quality_config or create_quality_config(self.settings)
 
-        # Initialize storage directory
         self._ensure_storage_directory()
 
         self.output_generator = ReportOutputGenerator(
@@ -103,7 +102,6 @@ class ReportGenerator:
             # Extract and validate input data
             input_data = await self._extract_input_data(request)
 
-            # Build report structure
             report = await self._build_report_structure(
                 input_data, request.configuration, report_id
             )
@@ -111,16 +109,13 @@ class ReportGenerator:
             # Generate outputs in requested formats
             outputs = await self._generate_formats(report, request.formats)
 
-            # Save outputs if requested
             if request.save_to_storage:
                 await self._save_outputs(report, outputs)
 
-            # Calculate metrics
             generation_time = time.time() - start_time
             word_count = report.get_word_count()
             page_count = report.estimate_page_count()
 
-            # Build response
             response = ReportGenerationResponse(
                 report_id=report_id,
                 status="completed",
@@ -231,7 +226,6 @@ class ReportGenerator:
         query = input_data.get("query", "")
         domains = input_data.get("domains", [])
 
-        # Create report instance
         report = Report(
             id=report_id,
             title=title,
@@ -242,7 +236,6 @@ class ReportGenerator:
             configuration=config,
         )
 
-        # Build sections based on report type
         await self._build_sections(report, input_data)
 
         # Process citations
@@ -252,7 +245,6 @@ class ReportGenerator:
         if config.include_visualizations:
             await self._generate_visualizations(report, input_data)
 
-        # Build metadata
         await self._build_metadata(report, input_data)
 
         # Generate executive summary
@@ -271,13 +263,11 @@ class ReportGenerator:
     async def _build_introduction_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build introduction section."""
         return await self.structure_builder.build_introduction_section(report, results)
 
     async def _build_methodology_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build methodology section."""
         return await self.structure_builder.build_methodology_section(report, results)
 
     async def _build_literature_section(
@@ -289,31 +279,26 @@ class ReportGenerator:
     async def _build_findings_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build findings section."""
         return await self.structure_builder.build_findings_section(report, results)
 
     async def _build_analysis_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build analysis section."""
         return await self.structure_builder.build_analysis_section(report, results)
 
     async def _build_discussion_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build discussion section."""
         return await self.structure_builder.build_discussion_section(report, results)
 
     async def _build_conclusions_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build conclusions section."""
         return await self.structure_builder.build_conclusions_section(report, results)
 
     async def _build_recommendations_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build recommendations section."""
         return await self.structure_builder.build_recommendations_section(
             report, results
         )
@@ -321,7 +306,6 @@ class ReportGenerator:
     async def _build_limitations_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build limitations section."""
         return await self.structure_builder.build_limitations_section(report, results)
 
     async def _build_abstract_section(
@@ -345,7 +329,6 @@ class ReportGenerator:
     async def _build_insights_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build insights section."""
         return await self.structure_builder.build_insights_section(report, results)
 
     async def _process_citations(
@@ -443,7 +426,6 @@ class ReportGenerator:
                         )
                         f.write(content_str)
 
-                # Update output with file path and size
                 output.file_path = file_path
                 output.file_size = os.path.getsize(file_path)
 

@@ -42,7 +42,6 @@ def generate_query_decomposition_prompt(query: Any) -> str:
         depth = query.get("depth_level", "comprehensive")
         scope = query.get("scope")
 
-    # Create system prompt
     system_prompt = create_system_prompt(
         role="expert research planner",
         context="You specialize in breaking down complex research questions into manageable, structured research plans.",
@@ -62,7 +61,6 @@ def generate_query_decomposition_prompt(query: Any) -> str:
         scope=scope.model_dump() if scope and hasattr(scope, "model_dump") else scope,
     )
 
-    # Main task description
     task = f"""
 Please decompose the research question into a structured research plan.
 
@@ -76,7 +74,6 @@ Your task is to create a comprehensive research plan that:
 5. Identifies potential challenges and mitigation strategies
 """
 
-    # Define output schema
     schema = {
         "research_plan": {
             "main_question": str,

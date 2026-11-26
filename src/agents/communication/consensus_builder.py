@@ -145,10 +145,8 @@ class ConsensusBuilder:
             # Extract responses for analysis
             responses = [msg.talkhier_content for msg in messages]
 
-            # Calculate overall consensus
             overall_score = await self._calculate_overall_consensus(responses)
 
-            # Calculate confidence variance
             confidence_scores = [r.confidence_score for r in responses]
             confidence_variance = (
                 statistics.variance(confidence_scores)
@@ -161,7 +159,6 @@ class ConsensusBuilder:
                 responses
             )
 
-            # Calculate detailed consensus scores
             content_consensus = await self._calculate_content_consensus(responses)
             methodology_consensus = await self._calculate_methodology_consensus(
                 responses
@@ -240,17 +237,14 @@ class ConsensusBuilder:
             is_valid = True
             validation_errors = []
 
-            # Check content presence
             if not response.content.strip():
                 is_valid = False
                 validation_errors.append("Empty content")
 
-            # Check confidence range
             if not 0.0 <= response.confidence_score <= 1.0:
                 is_valid = False
                 validation_errors.append("Invalid confidence score range")
 
-            # Calculate quality scores
             factual_accuracy = await self._assess_factual_accuracy(response)
             logical_consistency = await self._assess_logical_consistency(response)
             evidence_support = await self._assess_evidence_support(response)
@@ -366,7 +360,6 @@ class ConsensusBuilder:
         for response in responses:
             words = set(response.content.lower().split())
 
-            # Check overlap with other responses
             overlaps = []
             for other_response in responses:
                 if other_response == response:
@@ -425,7 +418,6 @@ class ConsensusBuilder:
         method_scores = []
 
         for response in responses:
-            # Check if methodology is mentioned in background or intermediate outputs
             background_lower = response.background.lower()
             intermediate_text = str(response.intermediate_outputs).lower()
 
@@ -473,9 +465,7 @@ class ConsensusBuilder:
         )
 
         # Higher variance = lower consensus
-        consensus = max(0.0, 1.0 - variance_evidence)
-
-        return consensus
+        return max(0.0, 1.0 - variance_evidence)
 
     async def _detect_conflicts(
         self, responses: list[TalkHierContent]
@@ -550,7 +540,6 @@ class ConsensusBuilder:
                 suggestions.append("Require evidence support from all agents")
                 suggestions.append("Cross-validate evidence sources")
 
-            # Add severity-based suggestions
             if severity == "high":
                 suggestions.append("Consider additional expert consultation")
 
@@ -588,12 +577,10 @@ class ConsensusBuilder:
     async def _assess_response_completeness(
         self, responses: list[TalkHierContent]
     ) -> float:
-        """Assess response completeness."""
 
         completeness_scores = []
 
         for response in responses:
-            # Check if all sections are filled
             score = 0.0
 
             if response.content.strip():
@@ -620,7 +607,6 @@ class ConsensusBuilder:
         for response in responses:
             score = 0.5  # Base score
 
-            # Check for logical indicators
             logical_indicators = [
                 "because",
                 "therefore",
@@ -649,14 +635,12 @@ class ConsensusBuilder:
         """Assess factual accuracy of response."""
         # Simplified implementation - in production would use fact-checking tools
 
-        # Check for evidence support
         if response.evidence:
             return 0.8 + (len(response.evidence) / 10.0) * 0.2
         else:
             return 0.5  # Medium confidence without evidence
 
     async def _assess_logical_consistency(self, response: TalkHierContent) -> float:
-        """Assess logical consistency."""
         # Check for contradictory statements (simplified)
 
         content_lower = response.content.lower()

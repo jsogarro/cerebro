@@ -457,7 +457,6 @@ If a paper exists but with slightly different details, mark exists=true and prov
         self, content: str, langgraph_state: dict[str, Any]
     ) -> dict[str, Any]:
         """Run verification by borrowing the supervisor's _run_verification method."""
-        # Get the supervisor from the langgraph state context
         supervisor = langgraph_state.get("supervisor_instance")
         if supervisor and hasattr(supervisor, "_run_verification"):
             result: dict[str, Any] = await supervisor._run_verification(content)

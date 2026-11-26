@@ -44,12 +44,10 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             AgentResult containing sources, findings, and gaps
         """
         try:
-            # Validate input
             query = task.input_data.get("query", "").strip()
             if not query:
                 return self.handle_error(task, ValueError("Query cannot be empty"))
 
-            # Check cache first
             cache_key = self._generate_cache_key(task)
             cached_result = await self.get_cached_result(cache_key)
             if cached_result:
@@ -98,7 +96,6 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                             task.input_data, academic_sources, task
                         )
                     )
-                # Convert to structured format
                 from src.agents.schemas import LiteratureAnalysisSchema
 
                 literature_analysis = LiteratureAnalysisSchema(
@@ -133,7 +130,6 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 gaps, ranked_sources, knowledge_graph
             )
 
-            # Calculate confidence score with MCP-enhanced data
             confidence = self._calculate_confidence(
                 sources=ranked_sources,
                 quality=literature_analysis.quality_assessment,
@@ -141,7 +137,6 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 mcp_data_quality=academic_sources.get("success", False),
             )
 
-            # Build enhanced output from Pydantic model
             output = {
                 "sources_found": ranked_sources,
                 "key_findings": literature_analysis.key_findings,
@@ -165,7 +160,6 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 "mcp_integration_status": self._get_mcp_status(),
             }
 
-            # Handle depth level
             depth_level = task.input_data.get(
                 "depth_level", ResearchDepth.COMPREHENSIVE.value
             )
@@ -219,7 +213,6 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 self.log_warning(f"Missing required field: {field}")
                 return False
 
-        # Validate sources
         sources = output.get("sources_found", [])
         if not isinstance(sources, list):
             return False
@@ -273,7 +266,6 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             "priority_gaps": gaps[:3] if gaps else [],  # Top 3 priority gaps
         }
 
-        # Add knowledge graph insights if available
         if knowledge_graph and knowledge_graph.get("success"):
             entities = knowledge_graph.get("entities", [])
             analysis["knowledge_graph_insights"] = {
@@ -495,7 +487,6 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         # Determine databases based on domains
         databases = self._determine_databases(domains)
 
-        # Build search filters
         filters = {}
         if input_data.get("year_start"):
             filters["year_start"] = input_data["year_start"]
@@ -542,7 +533,6 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             academic_sources.get("sources", [])
         )
 
-        # Create enhanced prompt with real sources
         enhanced_input = input_data.copy()
         enhanced_input["found_sources"] = sources_text
         enhanced_input["source_count"] = len(academic_sources.get("sources", []))
@@ -590,7 +580,6 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             if abstract:
                 text_for_analysis += abstract + " "
 
-        # Add key findings
         key_findings = literature_analysis.get("key_findings", [])
         text_for_analysis += " ".join(key_findings)
 
@@ -625,7 +614,6 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         if not sources:
             return {"success": True, "citations": []}
 
-        # Convert sources to citation format
         citation_sources = []
         for source in sources:
             citation_source = {
@@ -887,7 +875,6 @@ Requirements:
         try:
             self.log_info(f"Searching for sources via Gemini: {query[:80]}...")
 
-            # Create minimal task if not provided
             if task is None:
                 task = AgentTask(
                     id="fallback_search",
@@ -905,7 +892,6 @@ Requirements:
 
             parsed = parse_json_response(content)
 
-            # Handle various Gemini response formats
             if "sources" in parsed:
                 sources = parsed["sources"]
             elif isinstance(parsed, list):

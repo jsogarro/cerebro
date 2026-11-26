@@ -139,7 +139,6 @@ class AgentMetrics:
         failed = self.failed_tasks + (1 if result.status == "failed" else 0)
         timeout = self.timeout_tasks + (1 if result.status == "timeout" else 0)
 
-        # Update averages
         avg_time = (
             self.average_execution_time * self.total_tasks + result.execution_time
         ) / total

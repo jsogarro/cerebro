@@ -110,7 +110,6 @@ class ArithmeticTool(AgentTool[ArithmeticParams]):
         if not expression:
             raise ValueError("Expression cannot be empty")
 
-        # Parse into AST
         try:
             tree = ast.parse(expression, mode="eval")
         except SyntaxError as exc:

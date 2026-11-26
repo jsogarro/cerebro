@@ -48,7 +48,6 @@ class LaTeXExporter:
             ["geometry", "graphicx", "hyperref", "cite", "amsmath", "amsfonts"],
         )
 
-        # Check if pdflatex is available for compilation
         self.pdflatex_available = self._check_pdflatex_availability()
 
     def _check_pdflatex_availability(self) -> bool:
@@ -134,7 +133,6 @@ class LaTeXExporter:
             sections.append("\\tableofcontents")
             sections.append("\\newpage")
 
-        # Main content sections
         for section in report.sections:
             sections.append(self._generate_section(section))
 
@@ -407,30 +405,22 @@ class LaTeXExporter:
         # Convert headers (already handled at section level)
         latex_text = re.sub(r"^#{1,6}\s+(.+)$", r"\1", latex_text, flags=re.MULTILINE)
 
-        # Convert bold text
         latex_text = re.sub(r"\*\*(.*?)\*\*", r"\\textbf{\1}", latex_text)
         latex_text = re.sub(r"__(.*?)__", r"\\textbf{\1}", latex_text)
 
-        # Convert italic text
         latex_text = re.sub(r"\*(.*?)\*", r"\\textit{\1}", latex_text)
         latex_text = re.sub(r"_(.*?)_", r"\\textit{\1}", latex_text)
 
-        # Convert code spans
         latex_text = re.sub(r"`(.*?)`", r"\\texttt{\1}", latex_text)
 
-        # Convert unordered lists
         latex_text = self._convert_lists_to_latex(latex_text)
 
-        # Convert links
         latex_text = re.sub(r"\[([^\]]+)\]\(([^\)]+)\)", r"\\href{\2}{\1}", latex_text)
 
-        # Convert line breaks
         latex_text = latex_text.replace("\n\n", "\n\n\\par\n")
 
         # Escape remaining LaTeX special characters
-        latex_text = self._escape_latex(latex_text)
-
-        return latex_text
+        return self._escape_latex(latex_text)
 
     def _convert_lists_to_latex(self, text: str) -> str:
         """Convert markdown lists to LaTeX."""
@@ -442,7 +432,6 @@ class LaTeXExporter:
         for line in lines:
             stripped = line.strip()
 
-            # Check for list items
             if re.match(r"^[-*+]\s+", stripped):  # Unordered list
                 if not in_list or list_type != "itemize":
                     if in_list:
@@ -571,7 +560,6 @@ class LaTeXExporter:
                 except subprocess.TimeoutExpired:
                     raise LaTeXExportError("pdflatex compilation timed out") from None
 
-            # Read generated PDF
             pdf_file = os.path.join(temp_dir, "document.pdf")
             if not os.path.exists(pdf_file):
                 raise LaTeXExportError("PDF file was not generated")
@@ -583,7 +571,6 @@ class LaTeXExporter:
         """Validate LaTeX content and return warnings."""
         warnings = []
 
-        # Check for unmatched braces
         open_braces = latex_content.count("{")
         close_braces = latex_content.count("}")
         if open_braces != close_braces:
@@ -591,7 +578,6 @@ class LaTeXExporter:
                 f"Unmatched braces: {open_braces} open, {close_braces} close"
             )
 
-        # Check for common LaTeX errors
         error_patterns = [
             (
                 r"\\begin\{(\w+)\}(?!.*\\end\{\1\})",

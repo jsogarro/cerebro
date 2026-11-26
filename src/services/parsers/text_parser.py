@@ -30,11 +30,9 @@ def parse_markdown_sections(text: str) -> dict[str, str]:
         # Strip line for header checking
         stripped_line = line.strip()
 
-        # Check for markdown headers
         header_match = re.match(r"^(#{1,6})\s+(.+)$", stripped_line)
 
         if header_match:
-            # Save previous section
             if current_content:
                 sections[current_section] = "\n".join(current_content).strip()
 
@@ -45,7 +43,6 @@ def parse_markdown_sections(text: str) -> dict[str, str]:
         elif stripped_line:  # Only add non-empty lines
             current_content.append(stripped_line)
 
-    # Save last section
     if current_content:
         sections[current_section] = "\n".join(current_content).strip()
 
@@ -279,7 +276,6 @@ def extract_quotes(text: str) -> list[tuple[str, str | None]]:
     # Pattern for standalone quotes
     standalone_pattern = r'"([^"]+)"'
     for match in re.finditer(standalone_pattern, text):
-        # Check if this quote was already captured with attribution
         quote_text = match.group(1)
         if not any(q[0] == quote_text for q in quotes):
             quotes.append((quote_text, None))
@@ -333,9 +329,7 @@ def clean_text(text: str) -> str:
     text = text.replace(""", "'").replace(""", "'")
 
     # Normalize dashes
-    text = text.replace("–", "-").replace("—", "-")  # noqa: RUF001
-
-    return text
+    return text.replace("–", "-").replace("—", "-")  # noqa: RUF001
 
 
 def extract_summary(text: str, max_length: int = 500) -> str:

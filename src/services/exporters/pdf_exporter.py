@@ -87,10 +87,8 @@ class PDFExporter:
             # Prepare CSS styles
             css_styles = self._build_css_styles(report, custom_css)
 
-            # Create WeasyPrint HTML document
             html_doc = HTML(string=html_content, base_url=".")
 
-            # Create CSS stylesheets
             css_objects = []
             for css_content in css_styles:
                 css_objects.append(
@@ -100,7 +98,6 @@ class PDFExporter:
             # Generate PDF
             pdf_bytes = self._generate_pdf_bytes(html_doc, css_objects, report)
 
-            # Create report output
             output = ReportOutput(
                 format=ReportFormat.PDF,
                 content=pdf_bytes,
@@ -127,7 +124,6 @@ class PDFExporter:
         base_css = self._get_base_pdf_css(report)
         css_styles.append(base_css)
 
-        # Print-specific styles
         print_css = self._get_print_css(report)
         css_styles.append(print_css)
 
@@ -409,7 +405,6 @@ class PDFExporter:
     ) -> bytes:
         """Generate PDF bytes from HTML document and CSS."""
         try:
-            # Create a temporary file for PDF generation
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_file:
                 temp_path = temp_file.name
 
@@ -423,7 +418,6 @@ class PDFExporter:
                     optimize_images=True,
                 )
 
-                # Read PDF bytes
                 with open(temp_path, "rb") as pdf_file:
                     pdf_bytes = pdf_file.read()
 
@@ -471,7 +465,6 @@ class PDFExporter:
         """
         warnings = []
 
-        # Check for unsupported CSS features
         unsupported_features = [
             "position: fixed",
             "position: sticky",
@@ -485,15 +478,12 @@ class PDFExporter:
             if feature in html_content:
                 warnings.append(f"Unsupported CSS feature detected: {feature}")
 
-        # Check for large images that might cause issues
         if "data:image" in html_content:
             warnings.append("Base64 encoded images detected - may increase PDF size")
 
-        # Check for JavaScript
         if "<script" in html_content:
             warnings.append("JavaScript detected - will be ignored in PDF")
 
-        # Check for form elements
         form_elements = ["<input", "<textarea", "<select", "<button"]
         for element in form_elements:
             if element in html_content:
@@ -581,10 +571,7 @@ def add_pdf_page_breaks(
 
     modified_html = html_content
 
-    # Add page break before major headings
-    modified_html = modified_html.replace("<h1>", '<h1 class="page-break">')
-
-    return modified_html
+    return modified_html.replace("<h1>", '<h1 class="page-break">')
 
 
 __all__ = [
