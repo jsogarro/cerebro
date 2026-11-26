@@ -9,6 +9,7 @@ served as plain text.
 import asyncio
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -34,9 +35,11 @@ from src.models.db.similarity_check import SIMILARITY_CHECKS
 from src.repositories.similarity_repository import (
     MAX_LIST,
     MAX_MATCH_PAGE,
+    MAX_REPORT_MATCHES,
     SIMILARITY_DEADLINE_S,
     CheckView,
     MatchView,
+    NewCheck,
     SimilarityRepository,
     active_similarity_checks,
 )
@@ -179,9 +182,49 @@ def _error(code: int, name: str, details: Any = None) -> HTTPException:
     return HTTPException(status_code=code, detail=detail)
 
 
-async def _enabled(
-    response: Response, _: TenantContext = Depends(get_tenant_context)
-) -> None:
+TenantDep = Annotated[TenantContext, Depends(get_tenant_context)]
+IdentityDep = Annotated[TenantContext, Depends(get_tenant_identity)]
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@dataclass(frozen=True)
+class Scope:
+    """The request's session and the caller it is scoped to."""
+
+    session: AsyncSession
+    ids: OwnerIds
+
+
+async def get_scope(session: SessionDep, tenant: TenantDep) -> Scope:
+    return Scope(session, owner_ids(tenant))
+
+
+ScopeDep = Annotated[Scope, Depends(get_scope)]
+
+
+@dataclass(frozen=True)
+class Runner:
+    """What a started check needs from this worker."""
+
+    state: Any
+    retrieve: service.Retriever
+    session_factory: Callable[[], AsyncSession]
+
+
+async def get_runner(
+    request: Request,
+    retrieve: Annotated[service.Retriever, Depends(get_retriever)],
+    session_factory: Annotated[
+        Callable[[], AsyncSession], Depends(get_job_session_factory)
+    ],
+) -> Runner:
+    return Runner(request.app.state, retrieve, session_factory)
+
+
+RunnerDep = Annotated[Runner, Depends(get_runner)]
+
+
+async def _enabled(response: Response, _: TenantDep) -> None:
     """Runs after authentication and before the body is parsed, so a dark feature is a 404."""
     if not settings.SIMILARITY_CHECKS_ENABLED:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
@@ -201,11 +244,11 @@ def _repository(session: AsyncSession) -> SimilarityRepository:
     return SimilarityRepository(session, _cipher())
 
 
-async def _owned_document(
-    session: AsyncSession, document_id: uuid.UUID, ids: OwnerIds
-) -> DocumentMeta:
-    document = await UploadedDocumentRepository(session, _cipher()).get_meta(
-        document_id, organization_id=ids.organization_id, user_id=ids.user_id
+async def _owned_document(scope: Scope, document_id: uuid.UUID) -> DocumentMeta:
+    document = await UploadedDocumentRepository(scope.session, _cipher()).get_meta(
+        document_id,
+        organization_id=scope.ids.organization_id,
+        user_id=scope.ids.user_id,
     )
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
@@ -213,9 +256,7 @@ async def _owned_document(
 
 
 @router.get("/similarity-config")
-async def similarity_config(
-    _: TenantContext = Depends(get_tenant_identity),
-) -> dict[str, Any]:
+async def similarity_config(_: IdentityDep) -> dict[str, Any]:
     return {
         "enabled": settings.SIMILARITY_CHECKS_ENABLED,
         "open_sources_enabled": bool(
@@ -235,14 +276,14 @@ async def similarity_config(
     }
 
 
-async def _check_comparison_documents(
-    session: AsyncSession, request: SimilarityRequest, ids: OwnerIds
-) -> None:
-    repository = UploadedDocumentRepository(session, _cipher())
+async def _check_comparison_documents(scope: Scope, request: SimilarityRequest) -> None:
+    repository = UploadedDocumentRepository(scope.session, _cipher())
     chars = 0
     for document_id in dict.fromkeys(request.comparison_document_ids):
         meta = await repository.get_meta(
-            document_id, organization_id=ids.organization_id, user_id=ids.user_id
+            document_id,
+            organization_id=scope.ids.organization_id,
+            user_id=scope.ids.user_id,
         )
         if meta is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
@@ -252,7 +293,7 @@ async def _check_comparison_documents(
 
 
 async def _check_open_sources(
-    session: AsyncSession, body: OpenSourcesBody, document_id: uuid.UUID, ids: OwnerIds
+    scope: Scope, body: OpenSourcesBody, document_id: uuid.UUID
 ) -> None:
     if not settings.SIMILARITY_OPEN_SOURCES_ENABLED:
         raise _error(status.HTTP_409_CONFLICT, "open_sources_disabled")
@@ -264,8 +305,10 @@ async def _check_open_sources(
         set(body.consent.recipients) != set(CONSENT_RECIPIENTS)
         or body.consent.consent_text_version != service.SIMILARITY_CONSENT_TEXT_VERSION
     ):
-        document = await UploadedDocumentRepository(session, _cipher()).get_text(
-            document_id, organization_id=ids.organization_id, user_id=ids.user_id
+        document = await UploadedDocumentRepository(scope.session, _cipher()).get_text(
+            document_id,
+            organization_id=scope.ids.organization_id,
+            user_id=scope.ids.user_id,
         )
         raise _error(
             status.HTTP_409_CONFLICT,
@@ -280,36 +323,12 @@ async def _check_open_sources(
         )
 
 
-@router.post(
-    "/documents/{document_id}/similarity-checks",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=CheckAccepted,
-    dependencies=[Depends(_enabled)],
-)
-async def start_check(
-    document_id: uuid.UUID,
-    body: SimilarityRequest,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-    tenant: TenantContext = Depends(get_tenant_context),
-    retrieve: service.Retriever = Depends(get_retriever),
-    session_factory: Callable[[], AsyncSession] = Depends(get_job_session_factory),
-) -> CheckAccepted:
-    ids = owner_ids(tenant)
-    await _owned_document(session, document_id, ids)
-    await _check_comparison_documents(session, body, ids)
-    consented = (
-        body.open_sources if body.open_sources and body.open_sources.enabled else None
-    )
-    if consented:
-        await _check_open_sources(session, consented, document_id, ids)
-
-    state = request.app.state
-    if len(state.document_jobs) >= MAX_QUEUED_PER_WORKER:
-        raise _error(status.HTTP_429_TOO_MANY_REQUESTS, "worker_busy")
+async def _admit(scope: Scope, *, open_sources: bool) -> uuid.UUID:
+    """Quota, only through the shared guard; a refusal raises so nothing is written."""
+    ids = scope.ids
     try:
         ledger_id = await admit(
-            session,
+            scope.session,
             kind="similarity_check",
             organization_id=ids.organization_id,
             user_id=ids.user_id,
@@ -317,9 +336,9 @@ async def start_check(
             limits=service.SIMILARITY_LIMITS,
             count_active=active_similarity_checks,
         )
-        if consented:
+        if open_sources:
             await admit(
-                session,
+                scope.session,
                 kind="similarity_open_sources",
                 organization_id=ids.organization_id,
                 user_id=ids.user_id,
@@ -329,6 +348,32 @@ async def start_check(
             )
     except QuotaExceeded as exc:
         raise _error(status.HTTP_429_TOO_MANY_REQUESTS, exc.code) from None
+    return ledger_id
+
+
+@router.post(
+    "/documents/{document_id}/similarity-checks",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=CheckAccepted,
+    dependencies=[Depends(_enabled)],
+)
+async def start_check(
+    document_id: uuid.UUID,
+    body: SimilarityRequest,
+    scope: ScopeDep,
+    runner: RunnerDep,
+) -> CheckAccepted:
+    ids = scope.ids
+    await _owned_document(scope, document_id)
+    await _check_comparison_documents(scope, body)
+    consented = (
+        body.open_sources if body.open_sources and body.open_sources.enabled else None
+    )
+    if consented:
+        await _check_open_sources(scope, consented, document_id)
+    if len(runner.state.document_jobs) >= MAX_QUEUED_PER_WORKER:
+        raise _error(status.HTTP_429_TOO_MANY_REQUESTS, "worker_busy")
+    ledger_id = await _admit(scope, open_sources=consented is not None)
     options = {
         "own_uploads": body.own_uploads,
         "comparison_document_ids": [
@@ -337,51 +382,50 @@ async def start_check(
         "open_sources": consented is not None,
         "semantic": body.semantic,
     }
-    row = await _repository(session).create(
-        document_id=document_id,
-        organization_id=ids.organization_id,
-        user_id=ids.user_id,
-        options=options,
-        policy_versions=service.policy_versions(),
-        consent_text_version=(
-            service.SIMILARITY_CONSENT_TEXT_VERSION if consented else None
-        ),
-        consent_text_sha256=service.consent_sha256() if consented else None,
-        ledger_id=ledger_id,
+    row = await _repository(scope.session).create(
+        NewCheck(
+            document_id=document_id,
+            organization_id=ids.organization_id,
+            user_id=ids.user_id,
+            options=options,
+            policy_versions=service.policy_versions(),
+            consent_text_version=(
+                service.SIMILARITY_CONSENT_TEXT_VERSION if consented else None
+            ),
+            consent_text_sha256=service.consent_sha256() if consented else None,
+            ledger_id=ledger_id,
+        )
     )
-    check_id, created_at = row.id, row.created_at
+    job = service.CheckJob(
+        row.id, document_id, ids.organization_id, ids.user_id, options
+    )
+    created_at = row.created_at
     # The task must find the committed row, so commit before scheduling it.
-    await session.commit()
+    await scope.session.commit()
 
     task = asyncio.create_task(
         run_job(
             table=SIMILARITY_CHECKS,
-            job_id=check_id,
+            job_id=job.check_id,
             organization_id=ids.organization_id,
             created_at=created_at,
             deadline_s=SIMILARITY_DEADLINE_S,
-            session_factory=session_factory,
-            semaphore=state.similarity_semaphore,
+            session_factory=runner.session_factory,
+            semaphore=runner.state.similarity_semaphore,
             work=service.make_work(
-                session_factory=session_factory,
-                check_id=check_id,
-                document_id=document_id,
-                organization_id=ids.organization_id,
-                user_id=ids.user_id,
-                options=options,
-                retrieve=retrieve,
+                job, session_factory=runner.session_factory, retrieve=runner.retrieve
             ),
             persist=service.make_persist(
-                check_id=check_id,
+                check_id=job.check_id,
                 organization_id=ids.organization_id,
                 user_id=ids.user_id,
             ),
         ),
-        name=f"similarity:{check_id}",
+        name=f"similarity:{job.check_id}",
     )
-    state.document_jobs.add(task)
-    task.add_done_callback(state.document_jobs.discard)
-    return CheckAccepted(id=check_id, status="queued")
+    runner.state.document_jobs.add(task)
+    task.add_done_callback(runner.state.document_jobs.discard)
+    return CheckAccepted(id=job.check_id, status="queued")
 
 
 @router.get(
@@ -391,16 +435,14 @@ async def start_check(
 )
 async def list_checks(
     document_id: uuid.UUID,
+    scope: ScopeDep,
     limit: Annotated[int, Query(ge=1, le=MAX_LIST)] = MAX_LIST,
-    session: AsyncSession = Depends(get_session),
-    tenant: TenantContext = Depends(get_tenant_context),
 ) -> list[CheckSummaryOut]:
-    ids = owner_ids(tenant)
-    await _owned_document(session, document_id, ids)
-    rows = await _repository(session).list_for_document(
+    await _owned_document(scope, document_id)
+    rows = await _repository(scope.session).list_for_document(
         document_id,
-        organization_id=ids.organization_id,
-        user_id=ids.user_id,
+        organization_id=scope.ids.organization_id,
+        user_id=scope.ids.user_id,
         limit=limit,
     )
     return [CheckSummaryOut(**CheckSummaryOut.summary_of(v)) for v in rows]
@@ -408,24 +450,23 @@ async def list_checks(
 
 async def _owned_check(
     check_id: uuid.UUID,
-    session: AsyncSession,
-    tenant: TenantContext,
+    scope: Scope,
     *,
     offset: int = 0,
     limit: int = MAX_MATCH_PAGE,
-) -> tuple[CheckView, DocumentMeta]:
+) -> CheckView:
     """A check is readable only while its document is: an expired one reads as missing."""
-    ids = owner_ids(tenant)
-    view = await _repository(session).get(
+    view = await _repository(scope.session).get(
         check_id,
-        organization_id=ids.organization_id,
-        user_id=ids.user_id,
+        organization_id=scope.ids.organization_id,
+        user_id=scope.ids.user_id,
         offset=offset,
         limit=limit,
     )
     if view is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return view, await _owned_document(session, view.document_id, ids)
+    await _owned_document(scope, view.document_id)
+    return view
 
 
 @router.get(
@@ -435,27 +476,22 @@ async def _owned_check(
 )
 async def get_check(
     check_id: uuid.UUID,
+    scope: ScopeDep,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=MAX_MATCH_PAGE)] = MAX_MATCH_PAGE,
-    session: AsyncSession = Depends(get_session),
-    tenant: TenantContext = Depends(get_tenant_context),
 ) -> CheckOut:
-    view, _ = await _owned_check(check_id, session, tenant, offset=offset, limit=limit)
-    return CheckOut.of(view)
+    return CheckOut.of(await _owned_check(check_id, scope, offset=offset, limit=limit))
 
 
 @router.get("/similarity-checks/{check_id}/report", dependencies=[Depends(_enabled)])
-async def get_report(
-    check_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
-    tenant: TenantContext = Depends(get_tenant_context),
-) -> Response:
-    ids = owner_ids(tenant)
-    view, _ = await _owned_check(check_id, session, tenant, limit=1000)
+async def get_report(check_id: uuid.UUID, scope: ScopeDep) -> Response:
+    view = await _owned_check(check_id, scope, limit=MAX_REPORT_MATCHES)
     if view.status in ACTIVE_STATUSES:
         raise _error(status.HTTP_409_CONFLICT, "not_finished")
-    document = await UploadedDocumentRepository(session, _cipher()).get_text(
-        view.document_id, organization_id=ids.organization_id, user_id=ids.user_id
+    document = await UploadedDocumentRepository(scope.session, _cipher()).get_text(
+        view.document_id,
+        organization_id=scope.ids.organization_id,
+        user_id=scope.ids.user_id,
     )
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
@@ -475,17 +511,15 @@ async def get_report(
     dependencies=[Depends(_enabled)],
 )
 async def delete_check(
-    check_id: uuid.UUID,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-    tenant: TenantContext = Depends(get_tenant_context),
+    check_id: uuid.UUID, request: Request, scope: ScopeDep
 ) -> Response:
-    ids = owner_ids(tenant)
-    if not await _repository(session).delete(
-        check_id, organization_id=ids.organization_id, user_id=ids.user_id
+    if not await _repository(scope.session).delete(
+        check_id,
+        organization_id=scope.ids.organization_id,
+        user_id=scope.ids.user_id,
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    await session.commit()
+    await scope.session.commit()
     # Stop the work too; its quota stays spent. Only this worker's tasks are visible
     # here, so a run on another worker finishes and discards its result.
     running = {

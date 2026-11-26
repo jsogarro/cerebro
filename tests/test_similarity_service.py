@@ -16,6 +16,7 @@ from src.models.db.similarity_check import SimilarityCheck, SimilarityMatch
 from src.models.db.uploaded_document import UsageLedger
 from src.repositories.similarity_repository import (
     SIMILARITY_DEADLINE_S,
+    NewCheck,
     SimilarityRepository,
     active_similarity_checks,
 )
@@ -41,7 +42,7 @@ from tests.similarity_support import (
     stub_retrieve,
 )
 
-PASSAGE_40 = SHARED
+BIDI_MARK = chr(0x202E)
 
 
 def other_text(tag: str, shared: str = SHARED) -> str:
@@ -253,7 +254,9 @@ async def test_source_titles_are_sanitized_and_capped(
 ) -> None:
     hostile = (
         "![x](https://evil.example/?q=SENTINEL)<script>alert(1)</script>"
-        "‮BIDI" + "z" * 500
+        + BIDI_MARK
+        + "BIDI"
+        + "z" * 500
     )
     target = await make_document(factory)
     retrieve, _ = stub_retrieve(
@@ -264,7 +267,7 @@ async def test_source_titles_are_sanitized_and_capped(
     )
     title = view.matches[0].source_title
     assert len(title) <= 200
-    for forbidden in ("http", "<script", "‮", "SENTINEL"):
+    for forbidden in ("http", "<script", BIDI_MARK, "SENTINEL"):
         assert forbidden not in title
     report = render_report(view, TEXT)
     assert set(re.findall(r"https?://\S+", report)) == {"https://openalex.org/W1"}
@@ -375,11 +378,7 @@ async def test_a_stale_running_check_reads_as_failed(
     old = datetime.now(UTC) - timedelta(seconds=SIMILARITY_DEADLINE_S + 600)
     async with factory() as session:
         row = await SimilarityRepository(session, document_cipher()).create(
-            document_id=target,
-            organization_id=ORG_A,
-            user_id=USER_A,
-            options={},
-            policy_versions={},
+            NewCheck(target, ORG_A, USER_A, {}, {})
         )
         row.created_at, row.status = old, "running"
         await session.commit()
@@ -434,12 +433,7 @@ async def test_a_run_that_never_started_releases_its_ledger_row(
             count_active=active_similarity_checks,
         )
         row = await SimilarityRepository(session, document_cipher()).create(
-            document_id=target,
-            organization_id=ORG_A,
-            user_id=USER_A,
-            options={},
-            policy_versions={},
-            ledger_id=ledger_id,
+            NewCheck(target, ORG_A, USER_A, {}, {}, ledger_id=ledger_id)
         )
         row.created_at = datetime.now(UTC) - timedelta(
             seconds=SIMILARITY_DEADLINE_S + 600

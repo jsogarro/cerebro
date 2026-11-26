@@ -76,7 +76,10 @@ def _source_count(check: CheckView) -> int:
 
 def _coverage_lines(check: CheckView) -> list[str]:
     cov = check.coverage
-    lines = ["Coverage", "Sources searched:"]
+    lines = ["Coverage"]
+    if reasons := cov.get("partial_reasons"):
+        lines.append(f"Partial because: {', '.join(reasons)}")
+    lines.append("Sources searched:")
     for origin, row in sorted(cov.get("sources_searched", {}).items()):
         lines.append(
             f"- {origin}: candidates {row['candidates']}, full text {row['full_text']}, "
@@ -93,11 +96,10 @@ def _coverage_lines(check: CheckView) -> list[str]:
     )
     lines.append("Excluded regions:")
     regions = cov.get("excluded_regions", [])
-    for region in regions:
-        lines.append(
-            f"- reference list from char {region['start']:,} "
-            f"({region['tokens']:,} tokens not compared)"
-        )
+    lines.extend(
+        f"- reference list from char {r['start']:,} ({r['tokens']:,} tokens not compared)"
+        for r in regions
+    )
     if not regions and not cov.get("reference_heading_found", False):
         lines.append("- no reference heading found; references were compared")
     lines += ["Not covered:", *(f"- {item}" for item in NOT_COVERED)]

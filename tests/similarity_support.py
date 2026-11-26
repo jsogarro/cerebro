@@ -21,13 +21,13 @@ from src.models.db.similarity_check import SIMILARITY_CHECKS
 from src.repositories.similarity_repository import (
     SIMILARITY_DEADLINE_S,
     CheckView,
+    NewCheck,
     SimilarityRepository,
 )
 from src.repositories.uploaded_document_repository import UploadedDocumentRepository
 from src.services import similarity_service as service
 from src.services.document_jobs import run_job
 from src.services.scholarly_retrieval import (
-    EgressEvent,
     RetrievalResult,
     SourceCoverage,
 )
@@ -66,27 +66,23 @@ async def factory_fixture(
 
 
 async def make_document(
-    factory: async_sessionmaker[AsyncSession],
-    *,
-    org: uuid.UUID = ORG_A,
-    user: uuid.UUID = USER_A,
-    text: str = TEXT,
-    filename: str = "paper.txt",
-    declared_authors: list[str] | None = None,
-    expires_in: timedelta = timedelta(days=30),
+    factory: async_sessionmaker[AsyncSession], **fields: Any
 ) -> uuid.UUID:
+    """A stored document; ``fields`` override org, user, text, filename, authors, expiry."""
+    org = fields.get("org", ORG_A)
+    text = fields.get("text", TEXT)
     extracted = ExtractedText(text, (PageSpan(1, 0, len(text)),), "a" * 64, "b" * 64)
     async with factory() as session:
         row = await UploadedDocumentRepository(session, document_cipher()).create(
             organization_id=org,
-            user_id=user,
-            filename=filename,
+            user_id=fields.get("user", USER_A),
+            filename=fields.get("filename", "paper.txt"),
             media_type="plain",
             extracted=extracted,
             extractor_version="t",
             invisible_chars_removed=0,
-            declared_authors=declared_authors or [],
-            expires_at=datetime.now(UTC) + expires_in,
+            declared_authors=fields.get("declared_authors", []),
+            expires_at=datetime.now(UTC) + fields.get("expires_in", timedelta(days=30)),
         )
         await session.commit()
         return row.id
@@ -97,17 +93,9 @@ async def count(factory: async_sessionmaker[AsyncSession], model: Any) -> int:
         return int(await session.scalar(select(func.count()).select_from(model)) or 0)
 
 
-def candidate(
-    wid: str = "W1",
-    *,
-    text: str = SHARED,
-    licence: str | None = "cc-by",
-    title: str = "A Source Paper",
-    authors: tuple[str, ...] = (),
-    full_text: bool = True,
-    arxiv_id: str | None = None,
-    year: int | None = 2019,
-) -> Candidate:
+def candidate(wid: str = "W1", **fields: Any) -> Candidate:
+    """A retrieved candidate; ``fields`` override text, licence, title, authors, ..."""
+    licence = fields.get("licence", "cc-by")
     declared = (
         SourceLicense(licence, LicenseDeclaration.API_FIELD)
         if licence
@@ -116,32 +104,31 @@ def candidate(
     return Candidate(
         source_id=wid,
         origin="openalex",
-        title=title,
-        authors=authors,
-        year=year,
+        title=fields.get("title", "A Source Paper"),
+        authors=fields.get("authors", ()),
+        year=fields.get("year", 2019),
         doi=None,
-        arxiv_id=arxiv_id,
+        arxiv_id=fields.get("arxiv_id"),
         licence=declared,
-        text=text,
-        text_kind="full_text" if full_text else "abstract",
+        text=fields.get("text", SHARED),
+        text_kind="abstract" if fields.get("full_text") is False else "full_text",
     )
 
 
 def stub_retrieve(
-    candidates: tuple[Candidate, ...] = (),
-    *,
-    openalex: SourceCoverage | None = None,
-    arxiv: SourceCoverage | None = None,
-    events: tuple[EgressEvent, ...] = (),
+    candidates: tuple[Candidate, ...] = (), **fields: Any
 ) -> tuple[Retrieve, list[str]]:
+    """A retriever returning ``candidates``; ``fields`` set openalex, arxiv, events."""
     calls: list[str] = []
 
     async def retrieve(text: str, **kwargs: Any) -> RetrievalResult:
         calls.append(text)
-        for event in events:
+        for event in fields.get("events", ()):
             await kwargs["record_egress"](event)
         return RetrievalResult(
-            candidates, openalex or SourceCoverage(), arxiv or SourceCoverage()
+            candidates,
+            fields.get("openalex") or SourceCoverage(),
+            fields.get("arxiv") or SourceCoverage(),
         )
 
     return retrieve, calls
@@ -150,36 +137,32 @@ def stub_retrieve(
 async def start_check(
     factory: async_sessionmaker[AsyncSession],
     document_id: uuid.UUID,
-    *,
-    options: dict[str, Any] | None = None,
-    retrieve: Retrieve | None = None,
-    org: uuid.UUID = ORG_A,
-    user: uuid.UUID = USER_A,
-    work_wrapper: Callable[[Callable[[], Awaitable[Any]]], Callable[[], Awaitable[Any]]]
-    | None = None,
+    **fields: Any,
 ) -> tuple[uuid.UUID, Callable[[], Awaitable[None]]]:
-    """Create the check row as the route would; return its id and a coroutine that runs it."""
-    merged = DEFAULT_OPTIONS | (options or {})
+    """Create the check row as the route would; return its id and a coroutine that runs it.
+
+    ``fields`` may set options, retrieve, org, user and work_wrapper.
+    """
+    org, user = fields.get("org", ORG_A), fields.get("user", USER_A)
+    options = DEFAULT_OPTIONS | fields.get("options", {})
     async with factory() as session:
         row = await SimilarityRepository(session, document_cipher()).create(
-            document_id=document_id,
-            organization_id=org,
-            user_id=user,
-            options=merged,
-            policy_versions=service.policy_versions(),
+            NewCheck(
+                document_id=document_id,
+                organization_id=org,
+                user_id=user,
+                options=options,
+                policy_versions=service.policy_versions(),
+            )
         )
         await session.commit()
         check_id, created = row.id, row.created_at
     stub, _ = stub_retrieve()
+    job = service.CheckJob(check_id, document_id, org, user, options)
     work = service.make_work(
-        session_factory=factory,
-        check_id=check_id,
-        document_id=document_id,
-        organization_id=org,
-        user_id=user,
-        options=merged,
-        retrieve=retrieve or stub,
+        job, session_factory=factory, retrieve=fields.get("retrieve") or stub
     )
+    wrap = fields.get("work_wrapper")
 
     async def go() -> None:
         await run_job(
@@ -190,7 +173,7 @@ async def start_check(
             deadline_s=SIMILARITY_DEADLINE_S,
             session_factory=factory,
             semaphore=asyncio.Semaphore(1),
-            work=work_wrapper(work) if work_wrapper else work,
+            work=wrap(work) if wrap else work,
             persist=service.make_persist(
                 check_id=check_id, organization_id=org, user_id=user
             ),
@@ -224,5 +207,6 @@ async def read_check(
             check_id, organization_id=org, user_id=user
         )
         await session.commit()
-    assert view is not None
+    if view is None:
+        pytest.fail("check not found")
     return view

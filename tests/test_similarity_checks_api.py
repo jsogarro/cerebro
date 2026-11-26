@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.api.main import app
+from src.api.routes import similarity_checks as similarity_routes
 from src.api.routes.similarity_checks import get_job_session_factory, get_retriever
 from src.auth.models import TokenPayload
 from src.core.config import settings
@@ -423,18 +424,36 @@ async def test_an_open_source_check_writes_both_ledger_rows(
     assert sorted(kinds) == ["similarity_check", "similarity_open_sources"]
 
 
-async def test_a_busy_worker_refuses_new_checks(
+async def test_a_busy_worker_refuses_new_checks_without_reserving_quota(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    document_id = await make_document(factory)
+    sleepers = {
+        asyncio.create_task(asyncio.sleep(60))
+        for _ in range(similarity_routes.MAX_QUEUED_PER_WORKER)
+    }
+    app.state.document_jobs.update(sleepers)
+    refused = await start(client, document_id)
+    assert refused.status_code == 429
+    assert refused.json()["error"]["code"] == "worker_busy"
+    assert await count(factory, UsageLedger) == 0
+    for task in sleepers:
+        task.cancel()
+    app.state.document_jobs.difference_update(sleepers)
+
+
+async def test_a_third_concurrent_check_in_one_org_is_refused(
     client: httpx.AsyncClient,
     factory: async_sessionmaker[AsyncSession],
     retrieval: Retrieval,
 ) -> None:
     document_id = await make_document(factory)
     retrieval.gate.clear()
+    open_body = {"open_sources": consent()}
     codes = [
-        (await start(client, document_id, {"open_sources": consent()})).status_code
-        for _ in range(6)
+        (await start(client, document_id, open_body)).status_code for _ in range(3)
     ]
-    assert codes[:4] == [202, 202, 429, 429] or 429 in codes
+    assert codes == [202, 202, 429]
     retrieval.gate.set()
     await drain()
 

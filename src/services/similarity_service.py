@@ -25,6 +25,7 @@ from src.core.memory_encryption import document_cipher
 from src.core.untrusted_text import sanitize_model_field, strip_invisible
 from src.middleware.tenant_context import set_postgres_tenant_context
 from src.repositories.similarity_repository import (
+    EgressRecord,
     MatchRecord,
     SimilarityRepository,
 )
@@ -149,6 +150,15 @@ async def live_retrieve(document_text: str, **kwargs: Any) -> RetrievalResult:
         )
 
 
+@dataclass(frozen=True)
+class CheckJob:
+    check_id: uuid.UUID
+    document_id: uuid.UUID
+    organization_id: uuid.UUID
+    user_id: uuid.UUID
+    options: dict[str, Any]
+
+
 @dataclass
 class RunResult:
     matches: list[MatchRecord]
@@ -198,61 +208,46 @@ def _upload_candidate(document_id: uuid.UUID, filename: str, body: str) -> Candi
 
 
 async def _load_uploads(
-    session_factory: SessionFactory,
-    *,
-    document_id: uuid.UUID,
-    organization_id: uuid.UUID,
-    user_id: uuid.UUID,
-    options: dict[str, Any],
+    session_factory: SessionFactory, job: CheckJob
 ) -> tuple[str, list[str], _Sources]:
     """The document, its declared authors and the caller's own comparison corpora.
 
     One short session, closed before any long wait, so no pooled connection is held
     while retrieval or matching runs.
     """
+    owner = {"organization_id": job.organization_id, "user_id": job.user_id}
     sources = _Sources()
     async with session_factory() as session:
-        await set_postgres_tenant_context(session, str(organization_id))
+        await set_postgres_tenant_context(session, str(job.organization_id))
         repository = UploadedDocumentRepository(session, document_cipher())
-        extracted = await repository.get_text(
-            document_id, organization_id=organization_id, user_id=user_id
-        )
-        meta = await repository.get_meta(
-            document_id, organization_id=organization_id, user_id=user_id
-        )
+        extracted = await repository.get_text(job.document_id, **owner)
+        meta = await repository.get_meta(job.document_id, **owner)
         if extracted is None or meta is None:
             raise LookupError("document unavailable")
-        wanted: list[tuple[str, uuid.UUID]] = [
-            ("comparison", uuid.UUID(i)) for i in options["comparison_document_ids"]
+        wanted = [
+            ("comparison", uuid.UUID(i)) for i in job.options["comparison_document_ids"]
         ]
-        if options["own_uploads"]:
+        if job.options["own_uploads"]:
             recent = await repository.list_recent(
-                organization_id=organization_id,
-                user_id=user_id,
-                limit=MAX_OWN_UPLOADS + MAX_COMPARISON_IDS + 1,
+                limit=MAX_OWN_UPLOADS + MAX_COMPARISON_IDS + 1, **owner
             )
-            named = {i for _, i in wanted}
-            others = [m for m in recent if m.id != document_id and m.id not in named]
-            wanted += [("own_upload", m.id) for m in others[:MAX_OWN_UPLOADS]]
+            skip = {job.document_id, *(i for _, i in wanted)}
+            others = [m.id for m in recent if m.id not in skip]
+            wanted += [("own_upload", i) for i in others[:MAX_OWN_UPLOADS]]
         for origin, other_id in wanted:
-            other = await repository.get_meta(
-                other_id, organization_id=organization_id, user_id=user_id
-            )
+            other = await repository.get_meta(other_id, **owner)
             if other is None:
                 sources.unavailable += 1
-                continue
-            if not sources.fits(other.char_count):
+            elif not sources.fits(other.char_count):
                 sources.skip(origin)
-                continue
-            body = await repository.get_text(
-                other_id, organization_id=organization_id, user_id=user_id
-            )
-            if body is None:
+            elif (body := await repository.get_text(other_id, **owner)) is None:
                 sources.unavailable += 1
-                continue
-            sources.add(_upload_candidate(other_id, other.filename, body.text), origin)
-            if origin == "comparison":
-                sources.comparison_ids.add(str(other_id))
+            else:
+                sources.add(
+                    _upload_candidate(other_id, other.filename, body.text), origin
+                )
+                if origin == "comparison":
+                    sources.comparison_ids.add(str(other_id))
     return extracted.text, meta.declared_authors, sources
 
 
@@ -349,80 +344,88 @@ def _partial_reasons(
     options: dict[str, Any],
     rows: dict[str, dict[str, Any]],
     skipped: dict[str, int],
-    unavailable: int,
+    sources: _Sources,
     deadline: bool,
 ) -> list[str]:
-    reasons: list[str] = []
-    if any(row["failures"] for row in rows.values()):
-        reasons.append("failed_sources")
-    if any(row["skipped_budget"] for row in rows.values()):
-        reasons.append("skipped_budget")
-    for reason in ("budget_exhausted", "deadline_reached", "too_many_matches"):
-        if skipped.get(reason):
-            reasons.append(reason)
-    if deadline:
-        reasons.append("deadline_reached")
-    if unavailable:
-        reasons.append("source_unavailable")
-    if options["semantic"]:
-        reasons.append("semantic_not_run")
-    return sorted(set(reasons))
+    reasons = {
+        reason
+        for reason in ("budget_exhausted", "deadline_reached", "too_many_matches")
+        if skipped.get(reason)
+    }
+    flags = {
+        "failed_sources": any(row["failures"] for row in rows.values()),
+        "skipped_budget": any(row["skipped_budget"] for row in rows.values()),
+        "deadline_reached": deadline,
+        "source_unavailable": bool(sources.unavailable),
+        "semantic_not_run": bool(options["semantic"]),
+    }
+    reasons |= {name for name, raised in flags.items() if raised}
+    return sorted(reasons)
 
 
-def make_work(
-    *,
-    session_factory: SessionFactory,
-    check_id: uuid.UUID,
-    document_id: uuid.UUID,
-    organization_id: uuid.UUID,
-    user_id: uuid.UUID,
-    options: dict[str, Any],
-    retrieve: Retriever = live_retrieve,
-) -> Callable[[], Awaitable[RunResult]]:
-    async def record_egress(event: EgressEvent) -> None:
-        async with session_factory() as session:
-            await set_postgres_tenant_context(session, str(organization_id))
+@dataclass
+class _Retrieved:
+    rows: dict[str, dict[str, Any]]
+    terms_dropped: int = 0
+    deadline: bool = False
+
+
+class _Run:
+    """One check's work: load, retrieve, match, and describe what was covered."""
+
+    def __init__(
+        self, job: CheckJob, session_factory: SessionFactory, retrieve: Retriever
+    ) -> None:
+        self._job = job
+        self._session_factory = session_factory
+        self._retrieve = retrieve
+
+    async def record_egress(self, event: EgressEvent) -> None:
+        job = self._job
+        async with self._session_factory() as session:
+            await set_postgres_tenant_context(session, str(job.organization_id))
             await SimilarityRepository(session, document_cipher()).add_egress(
-                check_id=check_id,
-                organization_id=organization_id,
-                user_id=user_id,
-                host=event.host,
-                request_class=event.request_class,
-                term_count=event.term_count,
-                status=event.status,
-                bytes_received=event.bytes_received,
-                duration_ms=event.duration_ms,
+                EgressRecord(
+                    event.host,
+                    event.request_class,
+                    event.term_count,
+                    event.status,
+                    event.bytes_received,
+                    event.duration_ms,
+                ),
+                check_id=job.check_id,
+                organization_id=job.organization_id,
+                user_id=job.user_id,
             )
             await session.commit()
 
-    async def work() -> RunResult:
-        body, declared, sources = await _load_uploads(
-            session_factory,
-            document_id=document_id,
-            organization_id=organization_id,
-            user_id=user_id,
-            options=options,
-        )
+    async def _open_sources(self, body: str, sources: _Sources) -> _Retrieved:
         rows = {origin: _blank_row() for origin in ORIGINS}
-        retrieval_deadline = False
-        terms_dropped = 0
-        if options["open_sources"]:
-            retrieved = await retrieve(
-                body,
-                budget=RetrievalBudget(deadline_s=RETRIEVAL_DEADLINE_S),
-                record_egress=record_egress,
-                pacer=PgHostPacer(session_factory),
-            )
-            rows.update(_retrieval_rows(retrieved))
-            terms_dropped = retrieved.openalex.terms_dropped_non_ascii
-            retrieval_deadline = (
-                retrieved.openalex.deadline_reached or retrieved.arxiv.deadline_reached
-            )
-            for candidate in retrieved.candidates:
-                if sources.fits(len(candidate.text)):
-                    sources.add(candidate)
-                else:
-                    rows["openalex"]["skipped_budget"] += 1
+        if not self._job.options["open_sources"]:
+            return _Retrieved(rows)
+        retrieved = await self._retrieve(
+            body,
+            budget=RetrievalBudget(deadline_s=RETRIEVAL_DEADLINE_S),
+            record_egress=self.record_egress,
+            pacer=PgHostPacer(self._session_factory),
+        )
+        rows.update(_retrieval_rows(retrieved))
+        for candidate in retrieved.candidates:
+            if sources.fits(len(candidate.text)):
+                sources.add(candidate)
+            else:
+                rows["openalex"]["skipped_budget"] += 1
+        return _Retrieved(
+            rows,
+            retrieved.openalex.terms_dropped_non_ascii,
+            retrieved.openalex.deadline_reached or retrieved.arxiv.deadline_reached,
+        )
+
+    async def __call__(self) -> RunResult:
+        options = self._job.options
+        body, declared, sources = await _load_uploads(self._session_factory, self._job)
+        retrieved = await self._open_sources(body, sources)
+        rows = retrieved.rows
         for origin, count in sources.loaded.items():
             rows[origin].update(candidates=count, full_text=count)
         for origin, count in sources.skipped_budget.items():
@@ -436,22 +439,17 @@ def make_work(
             budget=ReuseBudget(deadline_s=MATCHING_DEADLINE_S),
         )
         by_id = {c.source_id: c for c in sources.candidates}
-        matches = [
-            _record(m, by_id[m.candidate_source_id], origin)
-            for m in result.matches
-            for origin in (
-                _origin_of(by_id[m.candidate_source_id], sources.comparison_ids),
-            )
-        ]
+        matches = []
+        for m in result.matches:
+            cand = by_id[m.candidate_source_id]
+            matches.append(_record(m, cand, _origin_of(cand, sources.comparison_ids)))
         skipped: dict[str, int] = {}
         for source_id, reason in result.skipped:
             skipped[reason] = skipped.get(reason, 0) + 1
             if reason in ("too_long", "budget_exhausted"):
                 origin = _origin_of(by_id[source_id], sources.comparison_ids)
                 rows[origin]["skipped_budget"] += 1
-        reasons = _partial_reasons(
-            options, rows, skipped, sources.unavailable, retrieval_deadline
-        )
+        reasons = _partial_reasons(options, rows, skipped, sources, retrieved.deadline)
         semantic = UNAVAILABLE if options["semantic"] else NOT_REQUESTED
         coverage = {
             "sources_searched": {
@@ -470,11 +468,18 @@ def make_work(
             "skipped": skipped,
             "unavailable_sources": sources.unavailable,
             "partial_reasons": reasons,
-            "terms_dropped_non_ascii": terms_dropped,
+            "terms_dropped_non_ascii": retrieved.terms_dropped,
         }
         return RunResult(matches, coverage, "partial" if reasons else "succeeded")
 
-    return work
+
+def make_work(
+    job: CheckJob,
+    *,
+    session_factory: SessionFactory,
+    retrieve: Retriever = live_retrieve,
+) -> Callable[[], Awaitable[RunResult]]:
+    return _Run(job, session_factory, retrieve)
 
 
 def _searched(origin: str, row: dict[str, Any], options: dict[str, Any]) -> bool:

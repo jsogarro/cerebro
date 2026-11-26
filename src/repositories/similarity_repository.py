@@ -75,6 +75,28 @@ class MatchRecord:
 
 
 @dataclass(frozen=True)
+class NewCheck:
+    document_id: uuid.UUID
+    organization_id: uuid.UUID
+    user_id: uuid.UUID
+    options: dict[str, Any]
+    policy_versions: dict[str, Any]
+    consent_text_version: str | None = None
+    consent_text_sha256: str | None = None
+    ledger_id: uuid.UUID | None = None
+
+
+@dataclass(frozen=True)
+class EgressRecord:
+    host: str
+    request_class: str
+    term_count: int
+    status: int | str
+    bytes_received: int
+    duration_ms: int
+
+
+@dataclass(frozen=True)
 class MatchView:
     id: uuid.UUID
     kind: str
@@ -166,29 +188,18 @@ class SimilarityRepository:
             user_id=user,
         )
 
-    async def create(
-        self,
-        *,
-        document_id: uuid.UUID,
-        organization_id: uuid.UUID,
-        user_id: uuid.UUID,
-        options: dict[str, Any],
-        policy_versions: dict[str, Any],
-        consent_text_version: str | None = None,
-        consent_text_sha256: str | None = None,
-        ledger_id: uuid.UUID | None = None,
-    ) -> SimilarityCheck:
+    async def create(self, new: NewCheck) -> SimilarityCheck:
         row = SimilarityCheck(
-            document_id=document_id,
-            organization_id=normalize_organization_id(organization_id),
-            user_id=user_id,
+            document_id=new.document_id,
+            organization_id=normalize_organization_id(new.organization_id),
+            user_id=new.user_id,
             status="queued",
-            options=options,
-            consent_text_version=consent_text_version,
-            consent_text_sha256=consent_text_sha256,
-            ledger_id=ledger_id,
+            options=new.options,
+            consent_text_version=new.consent_text_version,
+            consent_text_sha256=new.consent_text_sha256,
+            ledger_id=new.ledger_id,
             coverage={},
-            policy_versions=policy_versions,
+            policy_versions=new.policy_versions,
             created_at=datetime.now(UTC),
         )
         self._session.add(row)
@@ -237,28 +248,23 @@ class SimilarityRepository:
 
     async def add_egress(
         self,
+        event: EgressRecord,
         *,
         check_id: uuid.UUID,
         organization_id: uuid.UUID,
         user_id: uuid.UUID,
-        host: str,
-        request_class: str,
-        term_count: int,
-        status: int | str,
-        bytes_received: int,
-        duration_ms: int,
     ) -> None:
         self._session.add(
             EgressEvent(
                 check_id=check_id,
                 organization_id=organization_id,
                 user_id=user_id,
-                host=host,
-                request_class=request_class,
-                term_count=term_count,
-                status=str(status),
-                bytes_received=bytes_received,
-                duration_ms=duration_ms,
+                host=event.host,
+                request_class=event.request_class,
+                term_count=event.term_count,
+                status=str(event.status),
+                bytes_received=event.bytes_received,
+                duration_ms=event.duration_ms,
             )
         )
         await self._session.flush()

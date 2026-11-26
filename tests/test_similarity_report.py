@@ -244,3 +244,18 @@ def test_skipped_candidates_and_truncated_lists_are_stated():
     )
     assert "skipped for the size budget 2" in text
     assert "too_many_matches 2" in text and "network_error 1" in text
+
+
+def test_the_reasons_a_check_is_partial_are_listed():
+    text = render_report(
+        check(
+            partial_reasons=["failed_sources", "too_many_matches"],
+            skipped={"too_many_matches": 1},
+        ),
+        DOC,
+    )
+    assert "Partial because: failed_sources, too_many_matches" in text
+
+
+def test_a_check_with_no_partial_reason_says_nothing_about_it():
+    assert "Partial because" not in render_report(check(partial_reasons=[]), DOC)
