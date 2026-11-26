@@ -178,33 +178,3 @@ jobs:
       if: always()
       run: |
         docker compose down -v
-
-
-  e2e-report:
-    name: E2E Test Report
-    needs: e2e-python
-    runs-on: ubuntu-latest
-    if: always()
-    
-    steps:
-    - name: Download all test results
-      uses: actions/download-artifact@v8
-      with:
-        pattern: e2e-results-*
-        merge-multiple: true
-    
-    - name: Merge test results
-      run: |
-        # Merge all XML test results
-        echo "Test results merged"
-    
-    - name: Generate summary
-      run: |
-        echo "## E2E Test Summary" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| Browser | Status | Tests | Duration |" >> $GITHUB_STEP_SUMMARY
-        echo "|---------|--------|-------|----------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Chromium | ✅ | 25/25 | 2m 30s |" >> $GITHUB_STEP_SUMMARY
-        echo "| Firefox | ✅ | 25/25 | 3m 15s |" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "All E2E tests passed! 🎉" >> $GITHUB_STEP_SUMMARY
