@@ -183,7 +183,7 @@ def test_queries_are_sorted_whitelisted_and_bounded():
     assert queries
     for q in queries:
         assert 1 <= len(q) <= 6 and list(q) == sorted(q)
-        assert all(sr.TERM_RE.fullmatch(t) for t in q)
+        assert all(re.fullmatch(r"[a-z0-9-]{5,40}", t) for t in q)
 
 
 def test_queries_never_include_a_single_paragraph_term():
@@ -592,3 +592,10 @@ async def test_dedup_and_ranking_by_hits_then_year(httpx_mock, run):
     search_ok(httpx_mock, dup)
     res = await run(budget=RetrievalBudget(max_queries=2))
     assert [c.source_id for c in res.candidates] == ["W1", "W2"]
+
+
+def test_terms_outside_the_whitelist_are_never_sent():
+    odd = ["tiny", "snake_case", "x" * 41, "12345", "caf\u00e9ine", "quo\"te", "ok-term"]
+    text = "\n\n".join(para(["alphabet", "wordlist", "gamma-ray", *odd]) for _ in range(3))
+    terms = {t for q in build_queries(text) for t in q}
+    assert terms == {"alphabet", "wordlist", "gamma-ray", "ok-term"}
