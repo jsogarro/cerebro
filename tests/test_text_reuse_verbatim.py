@@ -84,19 +84,13 @@ def test_identical_passage_found_once_verbatim():
     assert m.tokens == 30
 
 
-def test_normalized_kind_lists_normalizations():
-    p = passage(28).split()
-    src_p = " ".join(p)
-    doc_p = " ".join(p[:5]) + "—" + "-".join([p[5], p[6]]) + " " + " ".join(p[7:])
-    doc_p = doc_p.replace(p[10], p[10].upper())
-    doc_p = doc_p.replace(f"{p[5]}-{p[6]}", f"{p[5]}-\n{p[6]}")
-    doc_p = f"“{doc_p}”"
-    res = run(
-        f"{sentence('a', 9)} {doc_p} {sentence('b', 9)}",
-        [cand(sentence("c", 9) + " " + src_p + " " + sentence("d", 9))],
-    )
-    assert res.matches and res.matches[0].kind == "normalized"
-    assert res.matches[0].normalizations_applied
+def test_normalized_kind_lists_exactly_the_applied_normalizations():
+    p = passage(28)
+    doc = f"{sentence('a', 9)} \u201c{p}\u201d {sentence('b', 9)}"
+    res = run(doc, [cand(f"{sentence('c', 9)} {p} {sentence('d', 9)}")])
+    (m,) = res.matches
+    assert m.tokens == 28 and m.kind == "normalized"
+    assert m.normalizations_applied == {"quote_folded", "token_key_folding"}
 
 
 @pytest.mark.parametrize(
@@ -592,3 +586,55 @@ def test_citation_in_an_earlier_sentence_does_not_cite_the_match():
     p = passage()
     doc = f"{sentence('a', 10)}. (Jones, 2019) showed this. {p}."
     assert attribution(doc) is Attribution.UNATTRIBUTED
+
+
+def test_quote_pairing_does_not_cross_paragraphs():
+    p = passage()
+    doc = f'The 5" pipe is long.\n\n{sentence("a", 25)}. "{p}" end.'
+    assert attribution(doc) is Attribution.QUOTED_UNCITED
+
+
+def test_bare_zero_never_counts_as_a_citation():
+    assert (
+        attribution(f"{sentence('a', 25)}. {passage()} [0].")
+        is Attribution.UNATTRIBUTED
+    )
+
+
+def test_author_key_ignores_initial_periods():
+    assert author_key("Smith J.") == ("smith", "j")
+
+
+@pytest.mark.parametrize("invisible", ["‎", "͏", "️", "ㅤ", "⁡", "\U000e0020"])
+def test_invisible_characters_do_not_hide_a_copied_passage(invisible):
+    p = passage(40).split()
+    doc = " ".join(w + invisible for w in p)
+    res = run(f"{sentence('a', 20)} {doc} {sentence('b', 20)}", [cand(" ".join(p))])
+    assert [m.tokens for m in res.matches] == [40]
+
+
+def test_reference_heading_scan_is_linear_on_trailing_whitespace():
+    doc = "x\nReferences" + " " * 40_000 + "x\n"
+    t0 = time.perf_counter()
+    run(doc, [cand("hello world")])
+    assert time.perf_counter() - t0 < 1
+
+
+def test_statement_heading_scan_is_linear_on_trailing_whitespace():
+    doc = "x\n\nFunding" + " " * 40_000 + "x\n"
+    t0 = time.perf_counter()
+    run(doc, [cand("hello world")])
+    assert time.perf_counter() - t0 < 1
+
+
+def test_author_year_scan_cost_is_bounded_by_the_window_not_the_match():
+    p = " ".join(["A'" * 4000] * 12)
+    t0 = time.perf_counter()
+    assert run(p, [cand(p)]).matches
+    assert time.perf_counter() - t0 < 3
+
+
+def test_one_document_wide_quote_pair_does_not_quote_every_match():
+    p = passage()
+    doc = f'"\nAs shown (Lee, 2020) elsewhere\n{p}\n{sentence("a", 5000)}"'
+    assert attribution(doc) is Attribution.CITED_UNQUOTED

@@ -34,7 +34,7 @@ _HEADING = r"^[ \t]*(?:#{1,6}[ \t]*)?(?:\d+\.?[ \t]*)?"
 _REFERENCES = re.compile(
     _HEADING
     + r"(?:references|bibliography|works cited|literature cited"
-    + r"|notes and references|references and notes)[ \t]*:?[ \t\r]*$",
+    + r"|notes and references|references and notes)[ \t\r]*(?::[ \t\r]*)?$",
     re.I | re.M,
 )
 _APPENDIX = re.compile(
@@ -45,17 +45,27 @@ _STATEMENT = re.compile(
     _HEADING
     + r"(?:acknowledg(?:e)?ments?|funding|competing interests?"
     + r"|conflicts? of interest|data availability|ethics(?: statement)?"
-    + r"|author contributions)[ \t]*:?[ \t]*$",
+    + r"|author contributions)[ \t]*(?::[ \t]*)?$",
     re.I,
 )
 _REFERENCE_ENTRY = re.compile(r"^[ \t]*(?:\[(\d+)\]|(\d+)\.)[ \t]", re.M)
 _DOUBLE_QUOTES = str.maketrans(dict.fromkeys("“”„‟″«»", '"'))
-_QUOTED = re.compile(r'"[^"]*"')
+# A quote never spans a blank line, so one stray mark cannot flip later paragraphs.
+_QUOTED = re.compile(r'"(?:[^"\n]|\n(?!\s*\n))*"')
 _SENTENCE_END = re.compile(r"(?<!\bal)[.!?]\s")
 _QUOTED_SHARE = 0.8
+_MAX_QUOTE_CHARS = 20_000
 _WINDOW_BEFORE = 150
 _WINDOW_AFTER = 300
 _LINE_LOOKBACK = 200
+
+
+_FILLERS = frozenset("\u115f\u1160\u3164\uffa0")
+
+
+def _invisible(ch: str) -> bool:
+    """Format, combining and filler characters that render as nothing."""
+    return unicodedata.category(ch) in ("Cf", "Mn", "Me") or ch in _FILLERS
 
 
 def _strippable(ch: str) -> bool:
@@ -65,6 +75,10 @@ def _strippable(ch: str) -> bool:
 
 def _token_key(token: str) -> str:
     key = token.casefold()
+    if not key.isascii():
+        key = "".join(c for c in key if not _invisible(c))
+        if not key:
+            return key
     if key[0].isalnum() and key[-1].isalnum():
         return key
     lo, hi = 0, len(key)
@@ -91,7 +105,7 @@ def author_key(name: str) -> tuple[str, str]:
         surname, _, given = name.partition(",")
     else:
         parts = name.split() or [""]
-        last = parts[-1]
+        last = parts[-1].rstrip(".")
         if len(parts) > 1 and last.isalpha() and last.isupper() and len(last) <= 3:
             # "Smith JA": trailing initials
             surname, given = " ".join(parts[:-1]), last
@@ -101,7 +115,7 @@ def author_key(name: str) -> tuple[str, str]:
                 (n for n, p in enumerate(parts) if n and p[0].islower()), len(parts) - 1
             )
             surname, given = " ".join(parts[k:]), " ".join(parts[:k])
-    return _fold(surname), _fold(given)[:1]
+    return _fold(surname), _fold(given.replace(".", ""))[:1]
 
 
 def _lines(raw: str) -> list[tuple[int, int, str]]:
@@ -160,7 +174,7 @@ def _index(keys: list[str]) -> tuple[dict[tuple[str, ...], list[int]], int]:
     return index, len(common)
 
 
-class _DeadlineReached(Exception):
+class _DeadlineReachedError(Exception):
     pass
 
 
@@ -177,7 +191,7 @@ def _runs(
         for i in range(lo, hi - SHINGLE_TOKENS + 1):
             for j in index.get(tuple(doc[i : i + SHINGLE_TOKENS]), ()):
                 if time.monotonic() > deadline:
-                    raise _DeadlineReached
+                    raise _DeadlineReachedError
                 d = i - j
                 if last_end.get(d, -1) > i:
                     continue
@@ -197,7 +211,11 @@ class _Attributor:
         self, raw: str, tokens: list[tuple[str, int, int]], refs: int, body_end: int
     ):
         self.raw, self.refs, self.body_end = raw, refs, body_end
-        regions = [m.span() for m in _QUOTED.finditer(raw.translate(_DOUBLE_QUOTES))]
+        regions = [
+            m.span()
+            for m in _QUOTED.finditer(raw.translate(_DOUBLE_QUOTES))
+            if m.end() - m.start() <= _MAX_QUOTE_CHARS
+        ]
         flags, r = [], 0
         for _, s, e in tokens:
             while r < len(regions) and regions[r][1] < e:
@@ -233,12 +251,21 @@ class _Attributor:
         hi = end + _WINDOW_AFTER
         if start < self.body_end:
             hi = max(end, min(hi, self.body_end))
-        window = self.raw[lo:hi]
+        # The citation scanner is superlinear on some inputs, so a long match is
+        # scanned only near its two edges.
+        head_end = min(hi, start + _WINDOW_AFTER)
+        tail_start = max(head_end, end - _WINDOW_AFTER)
+        windows = [self.raw[lo:head_end]]
+        if tail_start < hi:
+            windows.append(self.raw[tail_start:hi])
+        return any(self._cites(w) for w in windows)
+
+    def _cites(self, window: str) -> bool:
         for f in find_unrendered_citation_prose(window):
             if f.kind is not CitationProseKind.NUMERIC:
                 return True
             nums = [int(n) for n in re.findall(r"\d+", f.text)]
-            if nums and max(nums) <= self.refs:
+            if nums and 0 < max(nums) <= self.refs:
                 return True
         return False
 
@@ -300,7 +327,7 @@ def find_verbatim_reuse(
                 [t[0] for t in src_tokens],
                 started + budget.deadline_s,
             )
-        except _DeadlineReached:
+        except _DeadlineReachedError:
             skipped.append((c.source_id, "deadline_reached"))
             continue
         common_total += common
