@@ -27,6 +27,7 @@ SkipReason = Literal[
 _DOI = re.compile(r'10\.\d{4,9}/[^\s"<>\x00-\x1f\x7f]+', re.ASCII)
 _ARXIV_NEW = r"\d{4}\.\d{4,5}(?:v\d+)?"
 _ARXIV_OLD = r"[a-z\-]+(?:\.[A-Z]{2})?/\d{7}(?:v\d+)?"
+ARXIV_ID_PATTERN = f"{_ARXIV_NEW}|{_ARXIV_OLD}"
 _ARXIV = re.compile(rf"{_ARXIV_NEW}|{_ARXIV_OLD}", re.ASCII)
 _OPENALEX = re.compile(r"W\d+", re.ASCII)
 _MAX_TITLE = 300

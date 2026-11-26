@@ -93,6 +93,7 @@ class Settings(BaseSettings):
     DOCUMENT_MAX_PAGES: int = 300
     DOCUMENT_MAX_CHARS: int = 2_000_000
     DOCUMENT_EXTRACT_TIMEOUT_S: int = 60
+    OPENALEX_API_KEY: str | None = None
     DOCUMENT_RETENTION_DAYS: int = 30
     DOCUMENT_UPLOADS_PER_DAY: int = 20
     DOCUMENT_PURGE_INTERVAL_S: int = 3600

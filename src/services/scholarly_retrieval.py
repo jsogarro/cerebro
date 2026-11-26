@@ -1,0 +1,539 @@
+"""Candidate retrieval from open scholarly sources for the text-reuse check.
+
+OpenAlex answers keyword searches; arXiv supplies open full text for the best
+hits. This is the only module in the feature that imports an HTTP client, so
+the two allowed hosts, the audit trail and the per-host breaker live here and
+nowhere else.
+
+Nothing sensitive is logged: no query term, URL, key or response body. Audit
+rows (``EgressEvent``) carry the host, request class, term count, status, byte
+count and duration only.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
+import string
+from collections import Counter
+from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
+from importlib.resources import files
+from typing import Any, Protocol
+
+import httpx
+
+from src.core.acquisition.sources import LicenseDeclaration, SourceLicense
+from src.core.config import settings
+from src.core.tools.circuit import BreakerRegistry, CircuitBreaker
+from src.core.untrusted_text import sanitize_model_field, strip_invisible
+from src.services.document_ingestion import (
+    DocumentIngestionError,
+    extract_pdf_sandboxed,
+)
+from src.services.text_reuse.types import ARXIV_ID_PATTERN, Candidate
+from src.services.text_reuse.verbatim import reference_region
+
+# The default INFO line of httpx carries the full request URL, search terms included.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+OPENALEX_HOST = "api.openalex.org"
+ARXIV_HOST = "arxiv.org"
+ALLOWED_HOSTS = frozenset({OPENALEX_HOST, ARXIV_HOST})
+CONSENT_RECIPIENTS = tuple(sorted(ALLOWED_HOSTS))
+
+MAX_CANDIDATES = 20
+MAX_FULLTEXT = 10
+MAX_JSON_BYTES = 2 * 1024 * 1024
+MAX_PDF_BYTES = 25 * 1024 * 1024
+MAX_ABSTRACT_POSITION = 10_000
+MAX_ABSTRACT_WORDS = 20_000
+MAX_TITLE_CHARS = 300
+MAX_AUTHORS = 50
+MAX_AUTHOR_CHARS = 100
+QUERY_TERMS = 6
+MIN_QUERY_TERMS = 3
+MIN_TERM_PARAGRAPHS = 2
+TERM_RE = re.compile(r"[a-z0-9-]{5,40}")
+
+_SPACING_S = {ARXIV_HOST: 3.0, OPENALEX_HOST: 0.5}
+_PER_PAGE = 10
+_SELECT = (
+    "id,doi,title,authorships,abstract_inverted_index,best_oa_location,"
+    "ids,locations,language,publication_year"
+)
+_ARXIV_ABS = re.compile(rf"https://arxiv\.org/abs/({ARXIV_ID_PATTERN})")
+_DOI_PREFIX = re.compile(r"^https?://(?:dx\.)?doi\.org/", re.I)
+_PARAGRAPHS = re.compile(r"\n[ \t\r]*\n")
+_STOPWORDS = frozenset(
+    files("src.services.text_reuse").joinpath("stopwords_en.txt").read_text().split()
+)
+_USER_AGENT = "cerebro-similarity-check (open-source research workbench)"
+
+
+class HostNotAllowedError(ValueError):
+    """A request targeted a host or scheme outside the allowlist."""
+
+
+@dataclass(frozen=True)
+class RetrievalBudget:
+    max_queries: int = MAX_CANDIDATES
+    max_fulltext: int = MAX_FULLTEXT
+    deadline_s: float = 180
+
+
+@dataclass(frozen=True)
+class EgressEvent:
+    host: str
+    request_class: str
+    term_count: int
+    status: int | str
+    bytes_received: int
+    duration_ms: int
+
+
+class Pacer(Protocol):
+    """Cross-worker request spacing plus the clock the spacing is measured on."""
+
+    def slot(self, host: str) -> AbstractAsyncContextManager[None]: ...
+
+    def now(self) -> datetime: ...
+
+    async def sleep(self, seconds: float) -> None: ...
+
+
+class RealTime:
+    """Wall-clock ``now`` and ``sleep`` for a production pacer to inherit."""
+
+    def now(self) -> datetime:
+        return datetime.now(UTC)
+
+    async def sleep(self, seconds: float) -> None:
+        await asyncio.sleep(seconds)
+
+
+@dataclass
+class SourceCoverage:
+    queries_sent: int = 0
+    responses_ok: int = 0
+    failures: dict[str, int] = field(default_factory=dict)
+    candidates: int = 0
+    full_text_count: int = 0
+    abstract_only_count: int = 0
+    terms_dropped_non_ascii: int = 0
+    deadline_reached: bool = False
+
+    def fail(self, reason: str) -> None:
+        self.failures[reason] = self.failures.get(reason, 0) + 1
+
+
+@dataclass(frozen=True)
+class RetrievalResult:
+    candidates: tuple[Candidate, ...]
+    openalex: SourceCoverage
+    arxiv: SourceCoverage
+
+
+@dataclass(frozen=True)
+class QueryPlan:
+    queries: tuple[tuple[str, ...], ...]
+    terms_dropped_non_ascii: int
+
+
+# -- queries -----------------------------------------------------------------
+
+
+def _without_phrases(terms: list[str], phrases: set[tuple[str, ...]]) -> list[str]:
+    """Drop terms until no three consecutive terms repeat a phrase of the document."""
+    for i in range(len(terms) - 2):
+        if tuple(terms[i : i + 3]) in phrases:
+            return _without_phrases(terms[: i + 2] + terms[i + 3 :], phrases)
+    return terms
+
+
+def plan_queries(text: str, limit: int = MAX_CANDIDATES) -> QueryPlan:
+    region = reference_region(text)
+    body = text[: region[0]] + text[region[1] :] if region else text
+    paragraphs = [p for p in _PARAGRAPHS.split(body) if p.strip()]
+    dropped = 0
+    per_paragraph: list[tuple[set[str], set[tuple[str, ...]]]] = []
+    for paragraph in paragraphs:
+        terms: set[str] = set()
+        words: list[str] = []
+        for token in paragraph.split():
+            if not token.isascii():
+                dropped += 1
+                words.append("")
+                continue
+            term = token.casefold().strip(string.punctuation)
+            words.append(term)
+            if (
+                TERM_RE.fullmatch(term)
+                and not term.isdigit()
+                and term not in _STOPWORDS
+            ):
+                terms.add(term)
+        phrases = {tuple(words[i : i + 3]) for i in range(len(words) - 2)}
+        per_paragraph.append((terms, phrases))
+
+    frequency = Counter(t for terms, _ in per_paragraph for t in terms)
+    scored: list[tuple[int, int, tuple[str, ...]]] = []
+    for index, (terms, phrases) in enumerate(per_paragraph):
+        weights = {
+            t: frequency[t] * min(len(t), 12)
+            for t in terms
+            if frequency[t] >= MIN_TERM_PARAGRAPHS
+        }
+        top = sorted(weights, key=lambda t: (-weights[t], t))[:QUERY_TERMS]
+        query = _without_phrases(sorted(top), phrases)
+        if len(query) >= MIN_QUERY_TERMS:
+            scored.append((-sum(weights[t] for t in query), index, tuple(query)))
+    queries: list[tuple[str, ...]] = []
+    for _, _, ranked_query in sorted(scored):
+        if ranked_query not in queries:
+            queries.append(ranked_query)
+    return QueryPlan(tuple(queries[:limit]), dropped)
+
+
+def build_queries(text: str, limit: int = MAX_CANDIDATES) -> list[tuple[str, ...]]:
+    return list(plan_queries(text, limit).queries)
+
+
+# -- HTTP --------------------------------------------------------------------
+
+
+async def _enforce_host_policy(request: httpx.Request) -> None:
+    if request.url.scheme != "https" or request.url.host not in ALLOWED_HOSTS:
+        raise HostNotAllowedError("request refused: host or scheme not allowed")
+
+
+def make_client() -> httpx.AsyncClient:
+    """The only way to build the client: no redirects, https and two hosts."""
+    return httpx.AsyncClient(
+        follow_redirects=False,
+        timeout=httpx.Timeout(15.0),
+        headers={"User-Agent": _USER_AGENT},
+        event_hooks={"request": [_enforce_host_policy]},
+    )
+
+
+_BREAKERS = BreakerRegistry(
+    lambda: CircuitBreaker(failure_threshold=3, cooldown_seconds=60)
+)
+
+
+@dataclass
+class _Reply:
+    body: bytes | None
+    failure: str | None = None
+    status: int | str = 0
+
+
+@dataclass(frozen=True)
+class _Request:
+    host: str
+    url: str
+    params: dict[str, Any] | None
+    cap: int
+    request_class: str
+    term_count: int
+
+
+class _Session:
+    def __init__(
+        self,
+        http: httpx.AsyncClient,
+        pacer: Pacer,
+        record_egress: Callable[[EgressEvent], Awaitable[None]],
+        deadline_s: float,
+    ) -> None:
+        self.http, self.pacer, self.record_egress = http, pacer, record_egress
+        self.started = pacer.now()
+        self.deadline_s = deadline_s
+
+    def remaining(self) -> float:
+        return self.deadline_s - (self.pacer.now() - self.started).total_seconds()
+
+    async def get(self, request: _Request) -> _Reply:
+        breaker = _BREAKERS.for_tool(request.host)
+        if self.remaining() <= 0:
+            return _Reply(None, "deadline_reached")
+        if not breaker.allows(self.pacer.now()):
+            await self._emit(request, "breaker_open", 0, 0)
+            return _Reply(None, "breaker_open")
+        judged = False
+        try:
+            reply, received, elapsed_ms = await self._paced_fetch(request, breaker)
+            judged = True
+        finally:
+            if not judged:
+                breaker.record_abandoned()
+        if reply.failure != "deadline_reached":
+            await self._emit(request, reply.status, received, elapsed_ms)
+        return reply
+
+    async def _paced_fetch(
+        self, request: _Request, breaker: CircuitBreaker
+    ) -> tuple[_Reply, int, int]:
+        async with AsyncExitStack() as stack:
+            try:
+                await asyncio.wait_for(
+                    stack.enter_async_context(self.pacer.slot(request.host)),
+                    self.remaining(),
+                )
+            except TimeoutError:
+                breaker.record_abandoned()
+                return _Reply(None, "deadline_reached"), 0, 0
+            started = self.pacer.now()
+            reply, received = await self._fetch(request, breaker)
+            await self.pacer.sleep(_SPACING_S[request.host])
+        elapsed = int((self.pacer.now() - started).total_seconds() * 1000)
+        return reply, received, elapsed
+
+    async def _fetch(
+        self, request: _Request, breaker: CircuitBreaker
+    ) -> tuple[_Reply, int]:
+        received = 0
+        try:
+            async with self.http.stream(
+                "GET", request.url, params=request.params
+            ) as response:
+                status = response.status_code
+                if status >= 300:
+                    return self._refusal(status, breaker), 0
+                chunks: list[bytes] = []
+                async for chunk in response.aiter_bytes():
+                    received += len(chunk)
+                    if received > request.cap:
+                        breaker.record_abandoned()
+                        return _Reply(None, "oversize", "oversize"), received
+                    chunks.append(chunk)
+        except httpx.TimeoutException:
+            breaker.record_failure(self.pacer.now())
+            return _Reply(None, "timeout", "timeout"), received
+        except httpx.TransportError:
+            breaker.record_failure(self.pacer.now())
+            return _Reply(None, "network_error", "network_error"), received
+        breaker.record_success()
+        return _Reply(b"".join(chunks), None, status), received
+
+    def _refusal(self, status: int, breaker: CircuitBreaker) -> _Reply:
+        if status < 400:
+            breaker.record_abandoned()
+            return _Reply(None, "redirect", "redirect")
+        if status == 429 or status >= 500:
+            breaker.record_failure(self.pacer.now())
+        else:
+            breaker.record_success()
+        return _Reply(None, f"http_{status}", status)
+
+    async def _emit(
+        self, request: _Request, status: int | str, received: int, duration_ms: int
+    ) -> None:
+        await self.record_egress(
+            EgressEvent(
+                request.host,
+                request.request_class,
+                request.term_count,
+                status,
+                received,
+                duration_ms,
+            )
+        )
+
+
+# -- parsing -----------------------------------------------------------------
+
+
+class _ParseError(ValueError):
+    pass
+
+
+def _abstract(index: Any) -> str:
+    if not index:
+        return ""
+    if not isinstance(index, dict):
+        raise _ParseError("inverted index is not an object")
+    words: dict[int, str] = {}
+    for word, positions in index.items():
+        if not isinstance(positions, list):
+            raise _ParseError("positions are not a list")
+        for position in positions:
+            if (
+                not isinstance(position, int)
+                or isinstance(position, bool)
+                or not 0 <= position <= MAX_ABSTRACT_POSITION
+            ):
+                raise _ParseError("position out of range")
+            words[position] = word
+        if len(words) > MAX_ABSTRACT_WORDS:
+            raise _ParseError("abstract too long")
+    return " ".join(words[p] for p in sorted(words))
+
+
+def _clean(text: Any, limit: int) -> str:
+    return sanitize_model_field(strip_invisible(str(text or ""))[0], limit)[0].strip()
+
+
+def _arxiv_id(record: dict[str, Any]) -> str | None:
+    urls = [loc.get("landing_page_url") for loc in record.get("locations") or []]
+    urls += list((record.get("ids") or {}).values())
+    for url in urls:
+        match = _ARXIV_ABS.fullmatch(url) if isinstance(url, str) else None
+        if match:
+            return match.group(1)
+    return None
+
+
+def _licence(record: dict[str, Any]) -> SourceLicense:
+    location = record.get("best_oa_location") or {}
+    identifier = location.get("license")
+    if isinstance(identifier, str) and identifier:
+        return SourceLicense(identifier, LicenseDeclaration.API_FIELD)
+    return SourceLicense(None, LicenseDeclaration.UNDECLARED)
+
+
+def _candidate(record: Any) -> Candidate:
+    if not isinstance(record, dict):
+        raise _ParseError("record is not an object")
+    doi = record.get("doi")
+    year = record.get("publication_year")
+    names = [
+        _clean(a.get("author", {}).get("display_name"), MAX_AUTHOR_CHARS)
+        for a in (record.get("authorships") or [])[:MAX_AUTHORS]
+    ]
+    return Candidate(
+        source_id=str(record.get("id", "")).rsplit("/", 1)[-1],
+        origin="openalex",
+        title=_clean(record.get("title"), MAX_TITLE_CHARS),
+        authors=tuple(n for n in names if n),
+        year=year if isinstance(year, int) and not isinstance(year, bool) else None,
+        doi=_DOI_PREFIX.sub("", doi) if isinstance(doi, str) else None,
+        arxiv_id=_arxiv_id(record),
+        licence=_licence(record),
+        text=strip_invisible(_abstract(record.get("abstract_inverted_index")))[0],
+        text_kind="abstract",
+    )
+
+
+def _key(c: Candidate) -> tuple[str, str]:
+    if c.doi:
+        return ("doi", c.doi.lower())
+    if c.arxiv_id:
+        return ("arxiv", c.arxiv_id)
+    return ("openalex", c.source_id)
+
+
+# -- retrieval ---------------------------------------------------------------
+
+
+async def retrieve_candidates(
+    document_text: str,
+    *,
+    budget: RetrievalBudget,
+    http: httpx.AsyncClient,
+    record_egress: Callable[[EgressEvent], Awaitable[None]],
+    pacer: Pacer,
+) -> RetrievalResult:
+    if _enforce_host_policy not in http.event_hooks["request"]:
+        raise ValueError("http client must come from make_client()")
+    session = _Session(http, pacer, record_egress, budget.deadline_s)
+    openalex, arxiv = SourceCoverage(), SourceCoverage()
+    plan = plan_queries(document_text, min(budget.max_queries, MAX_CANDIDATES))
+    openalex.terms_dropped_non_ascii = plan.terms_dropped_non_ascii
+
+    found: dict[tuple[str, str], Candidate] = {}
+    hits: Counter[tuple[str, str]] = Counter()
+    for terms in plan.queries:
+        params: dict[str, Any] = {
+            "search": " ".join(terms),
+            "per-page": _PER_PAGE,
+            "select": _SELECT,
+        }
+        if settings.OPENALEX_API_KEY:
+            params["api_key"] = settings.OPENALEX_API_KEY
+        reply = await session.get(
+            _Request(
+                OPENALEX_HOST,
+                f"https://{OPENALEX_HOST}/works",
+                params,
+                MAX_JSON_BYTES,
+                "search",
+                len(terms),
+            )
+        )
+        if reply.failure == "deadline_reached":
+            openalex.deadline_reached = True
+            break
+        openalex.queries_sent += reply.failure != "breaker_open"
+        if reply.body is None:
+            openalex.fail(reply.failure or "unknown")
+            continue
+        try:
+            results = json.loads(reply.body)["results"]
+            if not isinstance(results, list):
+                raise _ParseError("results is not a list")
+        except (ValueError, KeyError, TypeError):
+            openalex.fail("parse_error")
+            continue
+        openalex.responses_ok += 1
+        for record in results:
+            try:
+                candidate = _candidate(record)
+            except (ValueError, AttributeError, TypeError):
+                openalex.fail("parse_error")
+                continue
+            key = _key(candidate)
+            found.setdefault(key, candidate)
+            hits[key] += 1
+
+    ranked = sorted(found, key=lambda k: (-hits[k], -(found[k].year or 0), k))
+    chosen = [found[k] for k in ranked[:MAX_CANDIDATES]]
+    chosen = await _upgrade_to_full_text(chosen, budget, session, arxiv)
+    openalex.candidates = len(chosen)
+    openalex.abstract_only_count = sum(c.text_kind == "abstract" for c in chosen)
+    return RetrievalResult(tuple(chosen), openalex, arxiv)
+
+
+async def _upgrade_to_full_text(
+    chosen: list[Candidate],
+    budget: RetrievalBudget,
+    session: _Session,
+    coverage: SourceCoverage,
+) -> list[Candidate]:
+    eligible = [i for i, c in enumerate(chosen) if c.arxiv_id][: budget.max_fulltext]
+    coverage.candidates = len(eligible)
+    for index in eligible:
+        candidate = chosen[index]
+        reply = await session.get(
+            _Request(
+                ARXIV_HOST,
+                f"https://{ARXIV_HOST}/pdf/{candidate.arxiv_id}",
+                None,
+                MAX_PDF_BYTES,
+                "pdf",
+                0,
+            )
+        )
+        if reply.failure == "deadline_reached":
+            coverage.deadline_reached = True
+            break
+        coverage.queries_sent += reply.failure != "breaker_open"
+        if reply.body is None:
+            coverage.fail(reply.failure or "unknown")
+            continue
+        coverage.responses_ok += 1
+        try:
+            extracted, _ = await extract_pdf_sandboxed(reply.body)
+        except DocumentIngestionError:
+            coverage.fail("extract_error")
+            continue
+        text = strip_invisible(extracted.text)[0]
+        chosen[index] = replace(candidate, text=text, text_kind="full_text")
+        coverage.full_text_count += 1
+    return chosen

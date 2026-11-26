@@ -127,7 +127,7 @@ def _lines(raw: str) -> list[tuple[int, int, str]]:
     return out
 
 
-def _reference_region(raw: str) -> tuple[int, int] | None:
+def reference_region(raw: str) -> tuple[int, int] | None:
     headings = list(_REFERENCES.finditer(raw))
     if not headings:
         return None
@@ -304,7 +304,7 @@ def find_verbatim_reuse(
     segments = [(0, len(doc_keys))]
     excluded: tuple[ExcludedRegion, ...] = ()
     refs = 0
-    region = _reference_region(document)
+    region = reference_region(document)
     if region:
         inside = [i for i, t in enumerate(doc_tokens) if region[0] <= t[1] < region[1]]
         lo, hi = (inside[0], inside[-1] + 1) if inside else (0, 0)
