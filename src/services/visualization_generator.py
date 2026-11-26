@@ -797,7 +797,7 @@ class VisualizationGenerator:
             try:
                 viz_data = self.generate_visualization(viz_spec, format)
                 visualizations[viz_spec.id] = viz_data
-            except Exception as e:
+            except VisualizationGenerationError as e:
                 logger.error(f"Failed to generate visualization {viz_spec.id}: {e}")
                 # Continue with other visualizations
 

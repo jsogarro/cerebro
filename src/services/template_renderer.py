@@ -445,7 +445,7 @@ class TemplateRenderer:
             return True
         except jinja2.TemplateNotFound:
             return False
-        except Exception as e:
+        except (jinja2.TemplateError, OSError, UnicodeDecodeError) as e:
             logger.error(f"Template validation error: {e}")
             return False
 

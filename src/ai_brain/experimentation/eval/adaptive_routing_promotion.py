@@ -1466,7 +1466,7 @@ def main(argv: list[str] | None = None) -> int:
                 seed=args.seed,
             )
         )
-    except Exception:
+    except (OSError, ValueError, TypeError, KeyError):
         report = _empty_report(
             criteria=None,
             corpus=None,

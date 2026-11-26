@@ -8,15 +8,21 @@ various caching strategies, compression, and batch operations.
 from __future__ import annotations
 
 import gzip
+import zlib
 from typing import Any
 
 from redis import asyncio as aioredis
+from redis.exceptions import RedisError
 from structlog import get_logger
 
 from src.services.cache.cache_strategies import CacheStrategy, TTLStrategy
 from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
 logger = get_logger()
+
+# Redis failures, corrupt or non-UTF-8 payloads (ValueError covers orjson and
+# unicode decoding), bad gzip data, and unserializable values (TypeError).
+_CACHE_ERRORS = (RedisError, OSError, EOFError, zlib.error, ValueError, TypeError)
 
 
 class CacheManager:
@@ -140,7 +146,7 @@ class CacheManager:
             logger.debug(f"Cache hit for key: {key}")
             return value if isinstance(value, dict) else None
 
-        except Exception as e:
+        except _CACHE_ERRORS as e:
             logger.error(f"Cache get error for key {key}: {e}")
             self.metrics["errors"] += 1
             return None
@@ -191,7 +197,7 @@ class CacheManager:
             logger.debug(f"Cache set for key: {key} (compressed: {compressed})")
             return True
 
-        except Exception as e:
+        except _CACHE_ERRORS as e:
             logger.error(f"Cache set error for key {key}: {e}")
             self.metrics["errors"] += 1
             return False
@@ -226,7 +232,7 @@ class CacheManager:
 
             return deleted
 
-        except Exception as e:
+        except _CACHE_ERRORS as e:
             logger.error(f"Cache delete error for key {key}: {e}")
             self.metrics["errors"] += 1
             return False
@@ -280,7 +286,7 @@ class CacheManager:
 
             return results
 
-        except Exception as e:
+        except _CACHE_ERRORS as e:
             logger.error(f"Batch get error: {e}")
             self.metrics["errors"] += 1
             return dict.fromkeys(keys)
@@ -333,7 +339,7 @@ class CacheManager:
             logger.debug(f"Batch set {len(items)} items")
             return True
 
-        except Exception as e:
+        except _CACHE_ERRORS as e:
             logger.error(f"Batch set error: {e}")
             self.metrics["errors"] += 1
             return False
@@ -363,7 +369,7 @@ class CacheManager:
             logger.info(f"Cleared {deleted_count} keys from namespace {self.namespace}")
             return deleted_count
 
-        except Exception as e:
+        except RedisError as e:
             logger.error(f"Clear namespace error: {e}")
             return 0
 
@@ -385,24 +391,19 @@ class CacheManager:
         count = 0
         batch = {}
 
-        try:
-            async for key, value in data_generator:
-                batch[key] = value
+        async for key, value in data_generator:
+            batch[key] = value
 
-                if len(batch) >= batch_size:
-                    if await self.batch_set(batch):
-                        count += len(batch)
-                    batch = {}
+            if len(batch) >= batch_size:
+                if await self.batch_set(batch):
+                    count += len(batch)
+                batch = {}
 
-            if batch and await self.batch_set(batch):
-                count += len(batch)
+        if batch and await self.batch_set(batch):
+            count += len(batch)
 
-            logger.info(f"Warmed cache with {count} items")
-            return count
-
-        except Exception as e:
-            logger.error(f"Cache warming error: {e}")
-            return count
+        logger.info(f"Warmed cache with {count} items")
+        return count
 
     def get_metrics(self) -> dict[str, Any]:
         """
