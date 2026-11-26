@@ -43,7 +43,7 @@ cd "$PROJECT_ROOT"
 
 # Use --no-cov to avoid coverage overhead for live evals
 # Use -v for verbose output showing each test
-# Use -m to run only live eval tests; the cost pilot spends ~$11 and has its own command
+# Use -m to run only live eval tests; the cost pilot spends real money and has its own command
 pytest evals/live -m "live_eval and not cost_pilot" -v --no-cov --tb=short
 
 # Capture pytest exit code
