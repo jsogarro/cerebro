@@ -27,6 +27,7 @@ from src.models.db.document_critique import (
     CritiqueFinding,
     DocumentCritique,
 )
+from src.models.db.job_constants import ACTIVE_STATUSES
 from src.repositories.tenant_scope import normalize_organization_id, scope_to_owner
 from src.repositories.uploaded_document_repository import UndecryptableDocumentError
 from src.services.document_jobs import flip_if_stale, stale_cutoff
@@ -83,7 +84,7 @@ async def active_model_jobs(
             .select_from(DocumentCritique)
             .where(
                 DocumentCritique.organization_id == organization_id,
-                DocumentCritique.status.in_(("queued", "running")),
+                DocumentCritique.status.in_(ACTIVE_STATUSES),
                 DocumentCritique.created_at >= stale_cutoff(now, CRITIQUE_DEADLINE_S),
             )
         )
@@ -114,28 +115,16 @@ class CritiqueRepository:
     def _owned(
         self,
         query: _SelectT,
-        column_org: Any,
-        column_user: Any,
+        model: type[DocumentCritique] | type[CritiqueFinding],
         org: uuid.UUID,
         user: uuid.UUID,
     ) -> _SelectT:
         return scope_to_owner(
             query,
-            org_column=column_org,
-            user_column=column_user,
+            org_column=model.organization_id,
+            user_column=model.user_id,
             organization_id=org,
             user_id=user,
-        )
-
-    def _owned_critiques(
-        self, query: _SelectT, org: uuid.UUID, user: uuid.UUID
-    ) -> _SelectT:
-        return self._owned(
-            query,
-            DocumentCritique.organization_id,
-            DocumentCritique.user_id,
-            org,
-            user,
         )
 
     async def create(
@@ -263,8 +252,9 @@ class CritiqueRepository:
     ) -> CritiqueView | None:
         row = (
             await self._session.execute(
-                self._owned_critiques(
+                self._owned(
                     select(DocumentCritique).where(DocumentCritique.id == critique_id),
+                    DocumentCritique,
                     organization_id,
                     user_id,
                 )
@@ -273,22 +263,26 @@ class CritiqueRepository:
         if row is None:
             return None
         row = await self._fresh(row)
-        findings = (
-            await self._session.execute(
-                self._owned(
-                    select(CritiqueFinding).where(
-                        CritiqueFinding.critique_id == critique_id
-                    ),
-                    CritiqueFinding.organization_id,
-                    CritiqueFinding.user_id,
-                    organization_id,
-                    user_id,
-                )
+        findings: list[CritiqueFinding] = []
+        if row.status not in ACTIVE_STATUSES:
+            findings = list(
+                (
+                    await self._session.execute(
+                        self._owned(
+                            select(CritiqueFinding).where(
+                                CritiqueFinding.critique_id == critique_id
+                            ),
+                            CritiqueFinding,
+                            organization_id,
+                            user_id,
+                        )
+                    )
+                ).scalars()
             )
-        ).scalars()
         try:
-            return self._view(row, list(findings))
+            return self._view(row, findings)
         except UndecryptableDocumentError:
+            # A key rotated away reads as missing, like an undecryptable document.
             return None
 
     async def list_for_document(
@@ -301,11 +295,12 @@ class CritiqueRepository:
     ) -> list[CritiqueView]:
         rows = (
             await self._session.execute(
-                self._owned_critiques(
+                self._owned(
                     select(DocumentCritique)
                     .where(DocumentCritique.document_id == document_id)
                     .order_by(DocumentCritique.created_at.desc())
                     .limit(max(1, min(limit, MAX_LIST))),
+                    DocumentCritique,
                     organization_id,
                     user_id,
                 )
@@ -318,8 +313,9 @@ class CritiqueRepository:
     ) -> bool:
         row = (
             await self._session.execute(
-                self._owned_critiques(
+                self._owned(
                     select(DocumentCritique).where(DocumentCritique.id == critique_id),
+                    DocumentCritique,
                     organization_id,
                     user_id,
                 )

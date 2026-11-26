@@ -29,6 +29,7 @@ from src.models.db.base import Base
 from src.models.db.document_critique import CritiqueFinding, DocumentCritique
 from src.models.db.session import get_session
 from src.models.db.uploaded_document import UsageLedger
+from src.repositories.critique_repository import CRITIQUE_DEADLINE_S
 from src.repositories.uploaded_document_repository import UploadedDocumentRepository
 from src.services import critique_service as service
 from src.services.document_jobs import JobLimits
@@ -145,6 +146,7 @@ async def client_fixture(
     previous = getattr(app.state, "audit_logger", missing)
     app.state.audit_logger = _AuditLogger()
     app.state.document_jobs = set()
+    app.state.critique_semaphore = asyncio.Semaphore(1)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
@@ -164,7 +166,7 @@ async def client_fixture(
         del app.state.audit_logger
     else:
         app.state.audit_logger = previous
-    del app.state.document_jobs
+    del app.state.document_jobs, app.state.critique_semaphore
 
 
 async def drain() -> None:
@@ -639,7 +641,7 @@ async def test_a_stale_running_critique_reads_as_failed_deadline_exceeded(
     client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
 ) -> None:
     document_id = await make_document(factory)
-    old = datetime.now(UTC) - timedelta(seconds=service.CRITIQUE_DEADLINE_S + 500)
+    old = datetime.now(UTC) - timedelta(seconds=CRITIQUE_DEADLINE_S + 500)
     async with factory() as session:
         row = DocumentCritique(
             document_id=document_id,

@@ -5,4 +5,5 @@ constraints and that module imports the tenant middleware, which imports the mod
 """
 
 JOB_STATUSES = ("queued", "running", "succeeded", "partial", "failed")
+ACTIVE_STATUSES = ("queued", "running")
 RUN_JOB_REASONS = ("deadline_exceeded", "interrupted", "internal_error")

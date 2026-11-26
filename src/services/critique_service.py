@@ -14,13 +14,13 @@ from typing import Any
 from langchain_google_genai import ChatGoogleGenerativeAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.agents.critique import panel
 from src.agents.critique.model import (
     GeminiReviewModel,
     ReviewModel,
     TracingEnabledRefusal,
 )
 from src.agents.critique.panel import (
-    CRITIQUE_MAX_CHARS,
     PRIOR_FINDINGS_MAX_CHARS,
     PanelResult,
     claims_reference_verification,
@@ -32,42 +32,15 @@ from src.core.config import settings
 from src.core.memory_encryption import document_cipher
 from src.middleware.tenant_context import set_postgres_tenant_context
 from src.repositories.critique_repository import (
-    CRITIQUE_DEADLINE_S,
     CritiqueRepository,
     CritiqueView,
-    active_model_jobs,
 )
 from src.repositories.uploaded_document_repository import UploadedDocumentRepository
-from src.services.document_jobs import (
-    MODEL_ADMIT_LOCK,
-    MODEL_JOB_KINDS,
-    JobLimits,
-    Outcome,
-    SessionFactory,
-)
+from src.services.document_jobs import JobLimits, Outcome, SessionFactory
 from src.services.gemini_limiter import RateLimiter
 
-__all__ = [
-    "CONSENTS",
-    "CRITIQUE_DEADLINE_S",
-    "CRITIQUE_LIMITS",
-    "CRITIQUE_MAX_CHARS",
-    "CRITIQUE_MODEL_ID",
-    "CRITIQUE_PER_WORKER_CONCURRENCY",
-    "CRITIQUE_TEMPERATURE",
-    "MODEL_ADMIT_LOCK",
-    "MODEL_JOB_KINDS",
-    "MODEL_RATE_LIMITER",
-    "PROVIDER_HOSTS",
-    "active_model_jobs",
-    "build_review_model",
-    "final_status",
-    "make_persist",
-    "make_work",
-    "render_report",
-    "reserved_units",
-]
-
+# The API enforces this at admission; the panel refuses anything longer as well.
+CRITIQUE_MAX_CHARS = panel.CRITIQUE_MAX_CHARS
 CRITIQUE_MODEL_ID = "gemini-2.5-flash"
 CRITIQUE_TEMPERATURE = 0.2
 CRITIQUE_PER_WORKER_CONCURRENCY = 1
@@ -154,13 +127,6 @@ def build_review_model() -> ReviewModel:
     return GeminiReviewModel(chat, MODEL_RATE_LIMITER)
 
 
-@dataclass(frozen=True)
-class CritiqueOutcome:
-    """``panel`` is None when tracing was on, so nothing was sent."""
-
-    panel: PanelResult | None
-
-
 def make_work(
     *,
     session_factory: SessionFactory,
@@ -168,8 +134,8 @@ def make_work(
     organization_id: uuid.UUID,
     user_id: uuid.UUID,
     model: ReviewModel,
-) -> Callable[[], Awaitable[CritiqueOutcome]]:
-    async def work() -> CritiqueOutcome:
+) -> Callable[[], Awaitable[PanelResult | None]]:
+    async def work() -> PanelResult | None:
         async with session_factory() as session:
             await set_postgres_tenant_context(session, str(organization_id))
             document = await UploadedDocumentRepository(
@@ -178,9 +144,10 @@ def make_work(
         if document is None:
             raise LookupError("document unavailable")
         try:
-            return CritiqueOutcome(await run_panel(document, model=model))
+            return await run_panel(document, model=model)
         except TracingEnabledRefusal:
-            return CritiqueOutcome(None)
+            # Nothing was sent; the run fails with its reason.
+            return None
 
     return work
 
@@ -210,11 +177,10 @@ def role_outcomes(panel: PanelResult) -> dict[str, dict[str, Any]]:
 
 def make_persist(
     *, critique_id: uuid.UUID, organization_id: uuid.UUID, user_id: uuid.UUID
-) -> Callable[[AsyncSession, CritiqueOutcome], Awaitable[Outcome]]:
-    async def persist(session: AsyncSession, outcome: CritiqueOutcome) -> Outcome:
-        if outcome.panel is None:
+) -> Callable[[AsyncSession, PanelResult | None], Awaitable[Outcome]]:
+    async def persist(session: AsyncSession, panel: PanelResult | None) -> Outcome:
+        if panel is None:
             return "failed", {"status_reason": "tracing_enabled"}
-        panel = outcome.panel
         await CritiqueRepository(session, document_cipher()).add_findings(
             critique_id=critique_id,
             organization_id=organization_id,

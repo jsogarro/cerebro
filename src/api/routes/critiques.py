@@ -19,6 +19,7 @@ from src.agents.critique.model import ReviewModel
 from src.core.config import settings
 from src.core.memory_encryption import DocumentEncryptionUnavailable, document_cipher
 from src.middleware.tenant_context import (
+    OwnerIds,
     TenantContext,
     get_tenant_context,
     get_tenant_identity,
@@ -27,13 +28,24 @@ from src.middleware.tenant_context import (
 from src.models.db.document_critique import DOCUMENT_CRITIQUES
 from src.models.db.session import get_session, get_session_factory
 from src.repositories.critique_repository import (
+    CRITIQUE_DEADLINE_S,
     CritiqueRepository,
     CritiqueView,
     FindingView,
+    active_model_jobs,
 )
-from src.repositories.uploaded_document_repository import UploadedDocumentRepository
+from src.repositories.uploaded_document_repository import (
+    DocumentMeta,
+    UploadedDocumentRepository,
+)
 from src.services import critique_service as service
-from src.services.document_jobs import QuotaExceeded, admit, run_job
+from src.services.document_jobs import (
+    MODEL_ADMIT_LOCK,
+    MODEL_JOB_KINDS,
+    QuotaExceeded,
+    admit,
+    run_job,
+)
 
 router = APIRouter(tags=["critiques"])
 
@@ -141,6 +153,17 @@ def _repository(session: AsyncSession) -> CritiqueRepository:
         ) from None
 
 
+async def _owned_document(
+    session: AsyncSession, document_id: uuid.UUID, ids: OwnerIds
+) -> DocumentMeta:
+    document = await UploadedDocumentRepository(session, document_cipher()).get_meta(
+        document_id, organization_id=ids.organization_id, user_id=ids.user_id
+    )
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return document
+
+
 @router.get("/critique-config")
 async def critique_config(
     _: TenantContext = Depends(get_tenant_identity),
@@ -182,11 +205,7 @@ async def start_critique(
 ) -> CritiqueAccepted:
     _require_enabled()
     ids = owner_ids(tenant)
-    document = await UploadedDocumentRepository(session, document_cipher()).get_meta(
-        document_id, organization_id=ids.organization_id, user_id=ids.user_id
-    )
-    if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    document = await _owned_document(session, document_id, ids)
     if not _terms_verified():
         raise _error(status.HTTP_409_CONFLICT, "provider_terms_unverified")
     if not settings.GEMINI_API_KEY:
@@ -208,7 +227,7 @@ async def start_critique(
                 "consent_text_versions": [c.version for c in service.CONSENTS],
             },
         )
-    if body.acknowledged is not True:
+    if not body.acknowledged:
         raise _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "consent_not_acknowledged")
     if document.char_count > service.CRITIQUE_MAX_CHARS:
         raise _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "too_long_for_critique")
@@ -224,9 +243,9 @@ async def start_critique(
             user_id=ids.user_id,
             units=units,
             limits=service.CRITIQUE_LIMITS,
-            count_active=service.active_model_jobs,
-            lock=service.MODEL_ADMIT_LOCK,
-            budget_kinds=service.MODEL_JOB_KINDS,
+            count_active=active_model_jobs,
+            lock=MODEL_ADMIT_LOCK,
+            budget_kinds=MODEL_JOB_KINDS,
         )
     except QuotaExceeded as exc:
         raise _error(status.HTTP_429_TOO_MANY_REQUESTS, exc.code) from None
@@ -246,16 +265,14 @@ async def start_critique(
     await session.commit()
 
     state = request.app.state
-    jobs: set[asyncio.Task[None]] | None = getattr(state, "document_jobs", None)
-    if jobs is None:
-        jobs = state.document_jobs = set()
+    jobs: set[asyncio.Task[None]] = state.document_jobs
     task = asyncio.create_task(
         run_job(
             table=DOCUMENT_CRITIQUES,
             job_id=critique_id,
             organization_id=ids.organization_id,
             created_at=created_at,
-            deadline_s=service.CRITIQUE_DEADLINE_S,
+            deadline_s=CRITIQUE_DEADLINE_S,
             session_factory=session_factory,
             semaphore=getattr(state, "critique_semaphore", None)
             or asyncio.Semaphore(1),
@@ -287,11 +304,7 @@ async def list_critiques(
 ) -> list[CritiqueOut]:
     _require_enabled()
     ids = owner_ids(tenant)
-    document = await UploadedDocumentRepository(session, document_cipher()).get_meta(
-        document_id, organization_id=ids.organization_id, user_id=ids.user_id
-    )
-    if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    await _owned_document(session, document_id, ids)
     rows = await _repository(session).list_for_document(
         document_id,
         organization_id=ids.organization_id,
@@ -333,11 +346,7 @@ async def get_report(
     if view.status in ("queued", "running"):
         raise _error(status.HTTP_409_CONFLICT, "not_finished")
     ids = owner_ids(tenant)
-    document = await UploadedDocumentRepository(session, document_cipher()).get_meta(
-        view.document_id, organization_id=ids.organization_id, user_id=ids.user_id
-    )
-    if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    document = await _owned_document(session, view.document_id, ids)
     return Response(
         service.render_report(view, document.text_sha256),
         media_type="text/plain; charset=utf-8",

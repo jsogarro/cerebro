@@ -177,7 +177,7 @@ async def test_persist_stores_findings_encrypted_and_reads_them_back_by_severity
         critique_id=critique_id, organization_id=ORG, user_id=USER
     )
     async with factory() as session:
-        status, fields = await persist(session, service.CritiqueOutcome(panel))
+        status, fields = await persist(session, panel)
         await session.commit()
     assert status == "succeeded" and "status_reason" not in fields
     assert fields["role_outcomes"]["methods"]["kept"] == 2
@@ -202,7 +202,7 @@ async def test_all_roles_failing_records_a_reason_and_no_findings(
         critique_id=critique_id, organization_id=ORG, user_id=USER
     )
     async with factory() as session:
-        outcome = service.CritiqueOutcome(roles(*("failed",) * 4, "skipped_no_inputs"))
+        outcome = roles(*("failed",) * 4, "skipped_no_inputs")
         status, fields = await persist(session, outcome)
     assert (status, fields["status_reason"]) == ("failed", "all_roles_failed")
 
@@ -214,7 +214,7 @@ async def test_a_tracing_refusal_fails_the_run_with_its_reason(
         critique_id=uuid.uuid4(), organization_id=ORG, user_id=USER
     )
     async with factory() as session:
-        assert await persist(session, service.CritiqueOutcome(None)) == (
+        assert await persist(session, None) == (
             "failed",
             {"status_reason": "tracing_enabled"},
         )
@@ -231,7 +231,7 @@ async def test_with_no_key_persist_raises_and_writes_nothing(
     )
     async with factory() as session:
         with pytest.raises(DocumentEncryptionUnavailable):
-            await persist(session, service.CritiqueOutcome(panel))
+            await persist(session, panel)
         await session.rollback()
     async with factory() as session:
         assert (await session.execute(select(CritiqueFinding))).first() is None
@@ -246,7 +246,7 @@ async def test_a_value_stored_without_the_prefix_is_refused_not_served(
         critique_id=critique_id, organization_id=ORG, user_id=USER
     )
     async with factory() as session:
-        await persist(session, service.CritiqueOutcome(panel))
+        await persist(session, panel)
         row = (await session.execute(select(CritiqueFinding))).scalars().first()
         assert row is not None
         row.quote_enc = Q1
@@ -269,7 +269,7 @@ async def rendered_view(
         critique_id=critique_id, organization_id=ORG, user_id=USER
     )
     async with factory() as session:
-        status, fields = await persist(session, service.CritiqueOutcome(panel))
+        status, fields = await persist(session, panel)
         from src.services.document_jobs import transition
 
         await transition(

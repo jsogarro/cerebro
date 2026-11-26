@@ -22,7 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
 from src.middleware.tenant_context import set_postgres_tenant_context
-from src.models.db.job_constants import JOB_STATUSES, RUN_JOB_REASONS
+from src.models.db.job_constants import (
+    ACTIVE_STATUSES,
+    JOB_STATUSES,
+    RUN_JOB_REASONS,
+)
 from src.models.db.uploaded_document import UsageLedger
 
 __all__ = [
@@ -46,7 +50,6 @@ __all__ = [
 
 logger = get_logger()
 
-_ACTIVE = ("queued", "running")
 STALE_GRACE_S = 120
 MODEL_ADMIT_LOCK = "model"
 MODEL_JOB_KINDS = ("critique", "revision")
@@ -91,7 +94,9 @@ def stale_cutoff(now: datetime, deadline_s: float) -> datetime:
 def is_stale(
     status: str, created_at: datetime, deadline_s: float, now: datetime
 ) -> bool:
-    return status in _ACTIVE and _aware(created_at) < stale_cutoff(now, deadline_s)
+    return status in ACTIVE_STATUSES and _aware(created_at) < stale_cutoff(
+        now, deadline_s
+    )
 
 
 async def transition(
