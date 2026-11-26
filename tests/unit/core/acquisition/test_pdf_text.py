@@ -206,3 +206,20 @@ def test_clean_page_runs_before_spans_and_hash() -> None:
     assert result.text.startswith("alpha\nbravo")
     assert result.page_of(result.text.index("bravo")) == 2
     assert result.text_sha256 == snapshot_digest(result.text.encode("utf-8"))
+
+
+def test_the_page_and_character_caps_are_inclusive() -> None:
+    pdf = _pdf(["aa", "bb", "cc"])
+    assert len(extract_pdf_text(pdf, max_pages=3).pages) == 3
+    with pytest.raises(TooManyPagesError):
+        extract_pdf_text(pdf, max_pages=2)
+    exact = len("aa\nbb\ncc")
+    assert extract_pdf_text(pdf, max_chars=exact).text == "aa\nbb\ncc"
+    with pytest.raises(TooMuchTextError):
+        extract_pdf_text(pdf, max_chars=exact - 1)
+
+
+def test_cleaned_pages_are_renormalized() -> None:
+    pdf = _pdf(["e"])
+    result = extract_pdf_text(pdf, clean_page=lambda page: page + "́")
+    assert result.text == "é"

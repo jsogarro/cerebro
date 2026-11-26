@@ -3,7 +3,7 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -475,3 +475,158 @@ async def test_an_oversized_text_is_refused_before_any_per_character_work(
 
     monkeypatch.setattr(di, "strip_invisible", boom)
     assert await _code(_ingest(session, b"abcdefghij")) == "too_much_text"
+
+
+def _tampered(monkeypatch: pytest.MonkeyPatch, data: bytes, **override: object) -> None:
+    async def fake_child(*_: object, **__: object) -> bytes:
+        return _reply(source_sha256=snapshot_digest(data), **override)
+
+    monkeypatch.setattr(di, "_run_child", fake_child)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"source_sha256": "0" * 64},
+        {"text_sha256": snapshot_digest(b"other")},
+        {"pages": [[2, 0, 5]]},
+        {"pages": [[1, 0, 3], [2, 2, 5]]},
+        {"pages": [[1, 0, 6]]},
+        {"pages": [[1, 3, 2]]},
+        {"pages": []},
+        {"invisible_chars_removed": -1},
+        {"invisible_chars_removed": True},
+        {"ok": False, "error": "something_new"},
+    ],
+    ids=[
+        "source-hash",
+        "text-hash",
+        "page-number",
+        "overlap",
+        "past-end",
+        "inverted",
+        "no-pages",
+        "negative-count",
+        "bool-count",
+        "unknown-error",
+    ],
+)
+async def test_every_check_on_the_child_reply_is_load_bearing(
+    monkeypatch: pytest.MonkeyPatch, override: dict[str, object]
+) -> None:
+    data = b"%PDF-1.7 x"
+    if "source_sha256" not in override:
+        _tampered(monkeypatch, data, **override)
+    else:
+        _tampered(monkeypatch, data)
+
+        async def fake_child(*_: object, **__: object) -> bytes:
+            return _reply(**override)
+
+        monkeypatch.setattr(di, "_run_child", fake_child)
+    with pytest.raises(DocumentIngestionError) as caught:
+        await extract_pdf_sandboxed(data)
+    assert caught.value.code == "malformed_pdf"
+
+
+async def test_a_known_child_error_code_passes_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_child(*_: object, **__: object) -> bytes:
+        return json.dumps({"ok": False, "error": "encrypted_pdf"}).encode()
+
+    monkeypatch.setattr(di, "_run_child", fake_child)
+    with pytest.raises(DocumentIngestionError) as caught:
+        await extract_pdf_sandboxed(b"%PDF-1.7")
+    assert caught.value.code == "encrypted_pdf"
+
+
+async def test_the_child_is_given_the_configured_limits_and_stdout_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    async def fake_child(
+        argv: list[str], data: bytes, *, timeout: float, max_out: int
+    ) -> bytes:
+        seen.update(argv=argv, timeout=timeout, max_out=max_out)
+        return _reply(source_sha256=snapshot_digest(data))
+
+    monkeypatch.setattr(di, "_run_child", fake_child)
+    monkeypatch.setattr(settings, "DOCUMENT_MAX_CHARS", 1000)
+    monkeypatch.setattr(settings, "DOCUMENT_MAX_PAGES", 7)
+    monkeypatch.setattr(settings, "DOCUMENT_EXTRACT_TIMEOUT_S", 9)
+    await extract_pdf_sandboxed(b"%PDF-1.7")
+    assert seen["argv"][-2:] == ["7", "1000"]  # type: ignore[index]
+    assert seen["argv"][:3] == ["-I", "-B", "-m"]  # type: ignore[index]
+    assert seen["timeout"] == 9
+    assert seen["max_out"] == 1000 * 6 + di._STDOUT_SLACK
+
+
+async def test_text_exactly_at_the_character_limit_is_accepted(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "DOCUMENT_MAX_CHARS", 5)
+    assert (await _ingest(session, b"abcde")).char_count == 5
+    assert await _code(_ingest(session, b"abcdef")) == "too_much_text"
+
+
+async def test_authors_at_the_limits_are_accepted(session: AsyncSession) -> None:
+    row = await _ingest(session, b"t", authors=["a" * 100] * 20)
+    assert row.id
+
+
+@pytest.mark.parametrize(
+    ("given", "stored"),
+    [
+        ("a" * 300 + ".txt", ("a" * 255)),
+        ("  spaced.txt  ", "spaced.txt"),
+        ("", "document"),
+        ("dir\\\\sub\\\\name.txt", "name.txt"),
+        ("na\x00m\x07e.txt", "name.txt"),
+        ("../../etc/x.txt", "x.txt"),
+    ],
+)
+async def test_filenames_are_reduced_to_a_safe_basename(
+    session: AsyncSession, given: str, stored: str
+) -> None:
+    row = await _ingest(session, b"t", filename=given)
+    repo = UploadedDocumentRepository(session, di.document_cipher())
+    meta = await repo.get_meta(row.id, organization_id=ORG, user_id=USER)
+    assert meta is not None and meta.filename == stored
+
+
+def test_the_pdf_header_may_sit_anywhere_in_the_first_1024_bytes() -> None:
+    binary = b"\xff" * 1019 + b"%PDF-1.7"
+    assert sniff_media_type(binary, "application/pdf") == "pdf"
+    late = b"\xff" * 1100 + b"%PDF-1.7"
+    with pytest.raises(DocumentIngestionError):
+        sniff_media_type(late, "application/pdf")
+    assert sniff_media_type(b"hi", "TEXT/Plain; charset=utf-8") == "plain"
+
+
+async def test_expiry_is_the_retention_period_from_now(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "DOCUMENT_RETENTION_DAYS", 7)
+    row = await _ingest(session, b"t")
+    expires = row.expires_at.replace(tzinfo=UTC)
+    delta = expires - datetime.now(UTC)
+    assert timedelta(days=6, hours=23) < delta <= timedelta(days=7)
+
+
+def test_startup_rejects_a_malformed_key() -> None:
+    with pytest.raises(ValueError):
+        require_document_key(
+            Settings(DOCUMENT_UPLOADS_ENABLED=True, DOCUMENT_ENCRYPTION_KEY="not-a-key")
+        )
+
+
+async def test_page_and_extractor_metadata_are_stored(
+    session: AsyncSession,
+) -> None:
+    row = await _ingest(session, _pdf(["alpha", "bravo"]), "application/pdf")
+    assert row.page_count == 2 and row.extractor_version.startswith("pypdf-")
+    text_row = await _ingest(session, b"t")
+    assert text_row.page_count is None
+    assert text_row.extractor_version.startswith("text-utf8/")

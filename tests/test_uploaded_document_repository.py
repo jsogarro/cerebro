@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 from cryptography.fernet import Fernet
+from sqlalchemy import event, select, text
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.core.acquisition.pdf_text import ExtractedText, PageSpan
@@ -186,3 +186,42 @@ async def test_metadata_reads_do_not_load_the_encrypted_body(
     row = await repo._get(doc_id, ORG_A, USER_A)
     assert row is not None
     assert {"text_enc", "pages"} <= sa_inspect(row).unloaded
+
+
+async def test_list_recent_is_newest_first_by_creation_time(
+    session: AsyncSession, cipher: MemoryEncryption
+) -> None:
+    repo = UploadedDocumentRepository(session, cipher)
+    ids = [await _create(repo) for _ in range(3)]
+    for position, doc_id in enumerate(ids):
+        await session.execute(
+            text("UPDATE uploaded_documents SET created_at = :at WHERE id = :id"),
+            {
+                "at": datetime(2026, 1, 1 + position, tzinfo=UTC),
+                "id": str(doc_id).replace("-", ""),
+            },
+        )
+    listed = [
+        m.id for m in await repo.list_recent(organization_id=ORG_A, user_id=USER_A)
+    ]
+    assert listed == list(reversed(ids))
+
+
+async def test_listing_does_not_select_encrypted_bodies(
+    session: AsyncSession, cipher: MemoryEncryption
+) -> None:
+    repo = UploadedDocumentRepository(session, cipher)
+    await _create(repo)
+    statements: list[str] = []
+    engine = session.bind.sync_engine  # type: ignore[union-attr]
+
+    def capture(conn: object, cursor: object, statement: str, *_: object) -> None:
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        await repo.list_recent(organization_id=ORG_A, user_id=USER_A)
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    selects = [s for s in statements if s.lstrip().upper().startswith("SELECT")]
+    assert selects and all("text_enc" not in s for s in selects)

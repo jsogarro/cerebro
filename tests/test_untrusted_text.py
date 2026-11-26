@@ -65,3 +65,10 @@ def test_removes_control_and_blank_filler_characters_but_keeps_whitespace() -> N
 
 def test_removes_private_use_and_unassigned_code_points() -> None:
     assert strip_invisible(f"a{chr(0xE000)}{chr(0xF0000)}{chr(0x0378)}b") == ("ab", 3)
+
+
+def test_range_edges_are_stripped_and_the_neighbours_are_not() -> None:
+    for edge in (0xE007F, 0xE0100, 0xE01EF):
+        assert strip_invisible(f"a{chr(edge)}b") == ("ab", 1)
+    assert strip_invisible(f"a{chr(0xE01F0)}b")[1] == 1  # unassigned (Cn)
+    assert strip_invisible("aéb") == ("aéb", 0)
