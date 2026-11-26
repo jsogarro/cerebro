@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
 
-from sqlalchemy import Select, delete, func, select
+from sqlalchemy import Select, case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.memory_encryption import (
@@ -379,7 +379,11 @@ class SimilarityRepository:
                             select(SimilarityMatch)
                             .where(SimilarityMatch.check_id == check_id)
                             .order_by(
-                                SimilarityMatch.tokens.desc(), SimilarityMatch.doc_start
+                                case(
+                                    ATTRIBUTION_RANK, value=SimilarityMatch.attribution
+                                ),
+                                SimilarityMatch.tokens.desc(),
+                                SimilarityMatch.doc_start,
                             )
                             .offset(max(0, offset))
                             .limit(max(1, min(limit, MAX_REPORT_MATCHES))),

@@ -131,6 +131,7 @@ async def client_fixture(
     app.state.audit_logger = _AuditLogger()
     app.state.document_jobs = set()
     app.state.similarity_semaphore = asyncio.Semaphore(1)
+    app.state.similarity_reserved = 0
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
@@ -151,6 +152,7 @@ async def client_fixture(
     else:
         app.state.audit_logger = previous
     del app.state.document_jobs, app.state.similarity_semaphore
+    del app.state.similarity_reserved
 
 
 async def drain() -> None:
@@ -776,3 +778,13 @@ async def test_a_report_for_an_expired_document_is_404(
         await session.commit()
     report = await client.get(f"/api/v1/similarity-checks/{check_id}/report")
     assert report.status_code == 404
+
+
+async def test_a_204_is_not_cached_either(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    document_id = await make_document(factory)
+    check_id = await run_to_end(client, document_id)
+    deleted = await client.delete(f"/api/v1/similarity-checks/{check_id}")
+    assert deleted.status_code == 204
+    assert deleted.headers["cache-control"] == "no-store"

@@ -346,7 +346,7 @@ def _reserve_worker_slot(state: Any) -> Iterator[None]:
     starts would otherwise all pass the same check.
     """
     running = sum(t.get_name().startswith("similarity:") for t in state.document_jobs)
-    reserved = getattr(state, "similarity_reserved", 0)
+    reserved = state.similarity_reserved
     if running + reserved >= MAX_QUEUED_PER_WORKER:
         raise _error(status.HTTP_429_TOO_MANY_REQUESTS, "worker_busy")
     state.similarity_reserved = reserved + 1
@@ -538,7 +538,7 @@ async def get_report(check_id: uuid.UUID, scope: ScopeDep) -> Response:
     if document is None:
         raise _missing()
     return Response(
-        render_report(view, document.text),
+        await asyncio.to_thread(render_report, view, document.text),
         media_type="text/plain; charset=utf-8",
         headers={
             "Content-Disposition": f'attachment; filename="similarity-{check_id}.txt"',
@@ -570,4 +570,6 @@ async def delete_check(
         if task.get_name() == f"similarity:{check_id}"
     }
     await cancel_all(running)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return Response(
+        status_code=status.HTTP_204_NO_CONTENT, headers={"Cache-Control": NO_STORE}
+    )

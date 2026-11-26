@@ -331,6 +331,8 @@ def _blank_row() -> dict[str, Any]:
 
 def _retrieval_rows(retrieved: RetrievalResult) -> dict[str, dict[str, Any]]:
     oa, ax = retrieved.openalex, retrieved.arxiv
+    # Only arXiv upgrades an abstract to full text, so the works OpenAlex returned have
+    # exactly the full-text count arXiv produced.
     return {
         "openalex": {
             "candidates": oa.candidates,
@@ -425,7 +427,8 @@ class _Run:
             if sources.fits(len(candidate.text)):
                 sources.add(candidate)
             else:
-                rows["openalex"]["skipped_budget"] += 1
+                origin = _origin_of(candidate, sources.comparison_ids)
+                rows[origin]["skipped_budget"] += 1
         return _Retrieved(
             rows,
             retrieved.openalex.terms_dropped_non_ascii,
@@ -442,6 +445,8 @@ class _Run:
         for origin, count in sources.skipped_budget.items():
             rows[origin]["skipped_budget"] += count
 
+        # ponytail: cancellation abandons this thread, which stops at the matcher's own
+        # 120 s deadline; a hard per-thread cancel would need a subprocess.
         result = await asyncio.to_thread(
             find_verbatim_reuse,
             body,

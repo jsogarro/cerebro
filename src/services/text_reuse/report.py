@@ -167,16 +167,19 @@ def render_report(check: CheckView, document_text: str) -> str:
     ]
     if check.matches:
         covered, total = _covered_tokens(document_text, check.matches)
+        cut = check.match_total > len(check.matches)
         lines.append(
             f"{covered} of {total} document tokens lie in verbatim matches against "
-            "the sources searched."
+            "the sources searched" + (", among the listed matches." if cut else ".")
         )
-        if check.match_total > len(check.matches):
+        if cut:
             lines.append(
                 f"{len(check.matches)} of {check.match_total} matches are listed."
             )
     else:
         lines.append(f"No matching text was found in the {sources} sources searched.")
+    if not sources and check.coverage.get("partial_reasons"):
+        lines.append("No source was searched successfully.")
     lines += ["", *_coverage_lines(check)]
     if check.matches:
         lines += ["", "Matches"]

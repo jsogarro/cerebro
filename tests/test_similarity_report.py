@@ -384,3 +384,17 @@ def test_origins_and_failure_reasons_are_listed_in_a_stable_order():
     )
     assert text.index("- comparison:") < text.index("- openalex:")
     assert "failures: http_429 2, timeout 1" in text
+
+
+def test_a_cut_match_list_says_the_token_sentence_covers_only_the_listed_matches():
+    shown = check(match())
+    cut = CheckView(**{**vars(shown), "match_total": 5})
+    assert "among the listed matches" in render_report(cut, DOC)
+    assert "among the listed matches" not in render_report(shown, DOC)
+
+
+def test_a_check_that_searched_nothing_says_so_before_the_coverage_block():
+    text = render_report(
+        check(sources_searched={}, partial_reasons=["failed_sources"]), DOC
+    )
+    assert "No source was searched successfully" in text

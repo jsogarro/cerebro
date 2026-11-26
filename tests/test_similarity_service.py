@@ -479,3 +479,51 @@ async def test_a_hostile_licence_is_bounded_before_it_is_stored(
         factory, target, options={"open_sources": True}, retrieve=retrieve
     )
     assert len(view.matches[0].source_licence["identifier"]) == 64
+
+
+async def test_the_report_page_keeps_the_most_severe_matches_when_it_is_cut(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    from src.repositories.similarity_repository import MatchRecord
+
+    target = await make_document(factory)
+    check_id, _ = await run_check(factory, target)
+
+    def record(attribution: str, tokens: int, source_id: str) -> MatchRecord:
+        return MatchRecord(
+            "verbatim",
+            attribution,
+            False,
+            0,
+            5,
+            tokens,
+            "openalex",
+            None,
+            source_id,
+            f"t-{source_id}",
+            None,
+            {},
+            "full_text",
+            0,
+            5,
+            None,
+        )
+
+    async with factory() as session:
+        repository = SimilarityRepository(session, document_cipher())
+        await repository.add_matches(
+            check_id=check_id,
+            organization_id=ORG_A,
+            user_id=USER_A,
+            matches=[
+                record("quoted_and_cited", 90, "W1"),
+                record("cited_unquoted", 80, "W2"),
+                record("unattributed", 12, "W3"),
+            ],
+        )
+        await session.commit()
+        view = await repository.get(
+            check_id, organization_id=ORG_A, user_id=USER_A, limit=1
+        )
+    assert view is not None and [m.source_id for m in view.matches] == ["W3"]
+    assert view.match_total == 3

@@ -667,3 +667,9 @@ def test_identical_text_lists_no_normalization():
     p = passage(20)
     (m,) = run(f"{sentence('a', 9)} {p}", [cand(p)]).matches
     assert m.kind == "verbatim" and m.normalizations_applied == frozenset()
+
+
+def test_an_openalex_id_has_a_bounded_length():
+    with pytest.raises(ValueError):
+        make(source_id="W" + "1" * 25)
+    assert make(source_id="W" + "1" * 20).source_id == "W" + "1" * 20

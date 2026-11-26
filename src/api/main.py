@@ -329,6 +329,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.similarity_semaphore = asyncio.Semaphore(
             SIMILARITY_PER_WORKER_CONCURRENCY
         )
+        app.state.similarity_reserved = 0
         resources.push_async_callback(cancel_all, app.state.document_jobs)
 
         audit_logger = AuditLogger(session_factory=durable_session_factory)
