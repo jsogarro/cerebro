@@ -237,13 +237,13 @@ async def blocked_on_an_advisory_lock(
     the second connection takes to open.
     """
     async with factory() as probe:
-        for _ in range(300):
+        for _ in range(200):
             if task.done():
                 return False
             waiting = await probe.scalar(
                 text(
-                    "SELECT count(*) FROM pg_stat_activity "
-                    "WHERE wait_event_type = 'Lock' AND wait_event = 'advisory'"
+                    "SELECT count(*) FROM pg_locks "
+                    "WHERE locktype = 'advisory' AND NOT granted"
                 )
             )
             if waiting:
