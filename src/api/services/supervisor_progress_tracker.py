@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 from structlog import get_logger
 
 from src.models.supervisor_api_models import (
@@ -77,7 +77,7 @@ class SupervisorProgressTracker:
                     continue
                 try:
                     await connection.send_json(event.model_dump())
-                except Exception as exc:
+                except (RuntimeError, OSError, WebSocketDisconnect) as exc:
                     logger.error("supervisor_event_send_failed", error=str(exc))
 
     async def broadcast_event(
@@ -90,7 +90,7 @@ class SupervisorProgressTracker:
                     continue
                 try:
                     await connection.send_json(event)
-                except Exception as exc:
+                except (RuntimeError, OSError, WebSocketDisconnect) as exc:
                     logger.error("supervisor_event_broadcast_failed", error=str(exc))
 
     async def iter_coordination_progress_events(

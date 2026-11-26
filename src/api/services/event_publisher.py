@@ -14,6 +14,7 @@ from typing import Any
 from uuid import UUID
 
 import redis.asyncio as redis
+from redis.exceptions import RedisError
 from structlog import get_logger
 
 from src.api.websocket.connection_manager import websocket_manager
@@ -67,7 +68,7 @@ class EventPublisher:
 
             logger.info("Event publisher initialized with Redis support")
 
-        except Exception as e:
+        except (RedisError, OSError) as e:
             logger.warning(
                 "Failed to initialize Redis for event publishing, using local-only mode",
                 error=str(e),
@@ -520,7 +521,7 @@ class EventPublisher:
                 ),
             )
             return True
-        except Exception as e:
+        except (RedisError, OSError) as e:
             logger.warning(
                 "Failed to publish run event to Redis",
                 error=str(e),
@@ -554,7 +555,7 @@ class EventPublisher:
                         }
                     ),
                 )
-            except Exception as e:
+            except (RedisError, OSError) as e:
                 logger.warning(
                     "Failed to publish event to Redis",
                     error=str(e),
@@ -606,7 +607,7 @@ class EventPublisher:
                     # Timeout is expected
                     continue
 
-                except Exception as e:
+                except (RedisError, ValueError) as e:
                     logger.error(
                         "Error processing Redis event",
                         error=str(e),
@@ -616,7 +617,7 @@ class EventPublisher:
             await pubsub.unsubscribe("research_platform:events")
             await pubsub.close()
 
-        except Exception as e:
+        except (RedisError, OSError) as e:
             logger.error(
                 "Redis subscription error",
                 error=str(e),

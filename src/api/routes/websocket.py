@@ -225,13 +225,6 @@ async def websocket_endpoint(
             client_id=client_id,
         )
 
-    except Exception as e:
-        logger.error(
-            "WebSocket connection error",
-            client_id=client_id,
-            error=str(e),
-        )
-
     finally:
         # Clean up connection
         if client_id:
@@ -361,14 +354,6 @@ async def project_websocket_endpoint(
             project_id=str(project_id),
         )
 
-    except Exception as e:
-        logger.error(
-            "Project WebSocket connection error",
-            client_id=client_id,
-            project_id=str(project_id),
-            error=str(e),
-        )
-
     finally:
         # Clean up connection
         if client_id:
@@ -492,14 +477,6 @@ async def cli_websocket_endpoint(
             project_id=str(project_id),
         )
 
-    except Exception as e:
-        logger.error(
-            "CLI WebSocket connection error",
-            client_id=client_id,
-            project_id=str(project_id),
-            error=str(e),
-        )
-
     finally:
         # Clean up connection
         if client_id:
@@ -547,7 +524,7 @@ async def run_event_stream_endpoint(
 
     try:
         session_factory = get_session_factory()
-    except Exception as e:
+    except RuntimeError as e:
         logger.warning("Run stream unavailable: no session factory", error=str(e))
         await websocket.close(code=1011, reason="Run event stream unavailable")
         return

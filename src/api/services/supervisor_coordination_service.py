@@ -384,29 +384,20 @@ class SupervisorCoordinationService:
         )
 
         # Execute the coordinated workers for real and attach the result to the
-        # plan. A failure degrades to an initiated plan rather than 500-ing.
+        # plan; _execute_with_workers reports failure as a marker, not a raise.
         status = "completed"
-        try:
-            execution_result = await self._execute_with_workers(
-                supervisor_type,
-                request.task,
-                assigned_workers,
-                SupervisionStrategy.ITERATIVE
-                if (request.refinement_rounds or 1) > 1
-                else SupervisionStrategy.COLLABORATIVE,
-                request.coordination_mode,
-                0.8,
-                300,
-            )
-            coordination_plan["execution_result"] = execution_result
-        except Exception as exc:
-            logger.warning(
-                "worker_coordination_execution_failed",
-                coordination_id=coordination_id,
-                error=str(exc),
-            )
-            coordination_plan["execution_error"] = str(exc)
-            status = "initiated"
+        execution_result = await self._execute_with_workers(
+            supervisor_type,
+            request.task,
+            assigned_workers,
+            SupervisionStrategy.ITERATIVE
+            if (request.refinement_rounds or 1) > 1
+            else SupervisionStrategy.COLLABORATIVE,
+            request.coordination_mode,
+            0.8,
+            300,
+        )
+        coordination_plan["execution_result"] = execution_result
 
         # Store active coordination
         self.active_coordinations[coordination_id] = {

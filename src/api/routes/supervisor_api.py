@@ -596,13 +596,6 @@ async def coordination_progress_websocket(
             except WebSocketDisconnect:
                 break
 
-    except Exception as e:
-        logger.error(
-            "coordination_websocket_error",
-            coordination_id=coordination_id,
-            client_id=client_id,
-            error=str(e),
-        )
     finally:
         connection_manager.disconnect(websocket, client_id)
 
@@ -673,13 +666,6 @@ async def supervisor_websocket(
                 )
                 await websocket.send_json({"error": "Processing error"})
 
-    except Exception as e:
-        logger.error(
-            "supervisor_websocket_connection_error",
-            supervisor_type=supervisor_type.value,
-            client_id=client_id,
-            error=str(e),
-        )
     finally:
         connection_manager.disconnect(websocket, client_id)
         connection_manager.unsubscribe_supervisor(supervisor_type.value, websocket)

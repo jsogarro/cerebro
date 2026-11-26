@@ -10,6 +10,7 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from src.api.services.event_publisher import EventPublisher
 
@@ -69,7 +70,9 @@ async def test_publish_run_event_publishes_envelope_to_redis_channel() -> None:
 async def test_publish_run_event_returns_false_when_redis_raises() -> None:
     publisher = EventPublisher()
     publisher.redis_client = AsyncMock()
-    publisher.redis_client.publish.side_effect = RuntimeError("connection reset")
+    publisher.redis_client.publish.side_effect = RedisConnectionError(
+        "connection reset"
+    )
 
     delivered = await publisher.publish_run_event(
         run_id="run-1",

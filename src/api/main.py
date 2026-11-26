@@ -12,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
 from structlog import get_logger
@@ -145,11 +146,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             masr_runtime,
         )
 
-        try:
-            await event_publisher.initialize()
-            logger.info("Event publisher initialized")
-        except Exception as e:
-            logger.warning(f"Failed to initialize event publisher: {e}")
+        await event_publisher.initialize()
+        logger.info("Event publisher initialized")
         resources.push_async_callback(
             _close_lifespan_resource,
             "event_publisher",
@@ -211,7 +209,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     async with _engine.begin() as conn:
                         await conn.run_sync(Base.metadata.create_all, tables=tables)
                     logger.info("Database tables created")
-        except Exception as e:
+        except (SQLAlchemyError, OSError, ImportError) as e:
             logger.warning(f"Database initialization failed: {e}")
 
         gemini_service = None
@@ -257,7 +255,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if database_initialized:
             try:
                 durable_session_factory = get_session_factory()
-            except Exception as e:
+            except RuntimeError as e:
                 logger.warning(f"Session factory unavailable: {e}")
         direct_execution_service = configure_direct_execution_service(
             gemini_service=gemini_service,
@@ -297,13 +295,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             direct_execution_service.execution_authority_resolver = None
 
         if durable_session_factory is not None:
-            try:
-                restored = await direct_execution_service.restore_active_executions()
-                logger.info(
-                    "Active executions restored from persistence", count=restored
-                )
-            except Exception as e:
-                logger.warning(f"Failed to restore active executions: {e}")
+            restored = await direct_execution_service.restore_active_executions()
+            logger.info("Active executions restored from persistence", count=restored)
 
             from src.api.services.outbox_relay import OutboxRelay
 
@@ -425,17 +418,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # the first real request does not pay the SDK-import + client-construction cost
         # synchronously on the event loop.
         if settings.LANGFUSE_ENABLED:
-            try:
-                import asyncio as _asyncio
+            import asyncio as _asyncio
 
-                from src.core.tracing import get_langfuse_client as _get_lf_client
+            from src.core.tracing import get_langfuse_client as _get_lf_client
 
-                await _asyncio.to_thread(_get_lf_client)
-                logger.info("Langfuse client pre-initialized")
-            except Exception as _lf_init_err:
-                logger.warning(
-                    f"Langfuse pre-initialization failed (non-fatal): {_lf_init_err}"
-                )
+            await _asyncio.to_thread(_get_lf_client)
+            logger.info("Langfuse client pre-initialized")
 
         try:
             yield
@@ -460,8 +448,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 logger.warning(
                     "Langfuse shutdown timed out after 5 s — background export threads may still be running"
                 )
-            except Exception as e:
-                logger.warning(f"Error shutting down Langfuse: {e}")
 
             # await close_database()
             # await close_redis()

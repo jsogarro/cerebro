@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 import redis.asyncio as redis
 import structlog
+from redis.exceptions import RedisError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -128,7 +129,7 @@ class ResilientRateLimitStore:
     ) -> tuple[int, int]:
         try:
             return await self._primary.increment(key, window_seconds)
-        except Exception as exc:
+        except (RedisError, OSError) as exc:
             logger.warning("Rate-limit primary store unavailable", error=str(exc))
             return await self._fallback.increment(key, window_seconds)
 
@@ -138,7 +139,7 @@ class ResilientRateLimitStore:
         await self._fallback.reset(key)
         try:
             await self._primary.reset(key)
-        except Exception as exc:
+        except (RedisError, OSError) as exc:
             logger.warning("Rate-limit primary store unavailable", error=str(exc))
 
 

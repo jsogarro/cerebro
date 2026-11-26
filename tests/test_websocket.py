@@ -252,7 +252,7 @@ class TestConnectionManager:
         client_id = await connection_manager.connect(mock_websocket)
         connection_manager.subscribe_to_project(client_id, project_id)
 
-        mock_websocket.send_text.side_effect = Exception("Connection lost")
+        mock_websocket.send_text.side_effect = ConnectionError("Connection lost")
 
         # Broadcast message
         message = WSMessage(

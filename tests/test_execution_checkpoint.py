@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
@@ -148,8 +149,8 @@ async def test_checkpoint_on_repository_error_degrades_gracefully(
         "src.api.services.direct_execution_service.CheckpointRepository"
     ) as mock_repo_cls:
         mock_repo_instance = AsyncMock(spec=CheckpointRepository)
-        mock_repo_instance.create_checkpoint.side_effect = Exception(
-            "DB connection failed"
+        mock_repo_instance.create_checkpoint.side_effect = OperationalError(
+            "INSERT", {}, Exception("DB connection failed")
         )
         mock_repo_cls.return_value = mock_repo_instance
 
