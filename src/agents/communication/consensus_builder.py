@@ -141,73 +141,64 @@ class ConsensusBuilder:
 
         logger.info("consensus_evaluation_started", message_count=len(messages))
 
-        try:
-            # Extract responses for analysis
-            responses = [msg.talkhier_content for msg in messages]
+        # Extract responses for analysis
+        responses = [msg.talkhier_content for msg in messages]
 
-            overall_score = await self._calculate_overall_consensus(responses)
+        overall_score = await self._calculate_overall_consensus(responses)
 
-            confidence_scores = [r.confidence_score for r in responses]
-            confidence_variance = (
-                statistics.variance(confidence_scores)
-                if len(confidence_scores) > 1
-                else 0.0
-            )
+        confidence_scores = [r.confidence_score for r in responses]
+        confidence_variance = (
+            statistics.variance(confidence_scores)
+            if len(confidence_scores) > 1
+            else 0.0
+        )
 
-            # Identify agreement and disagreement areas
-            agreement_areas, disagreement_areas = await self._identify_agreement_areas(
-                responses
-            )
+        # Identify agreement and disagreement areas
+        agreement_areas, disagreement_areas = await self._identify_agreement_areas(
+            responses
+        )
 
-            content_consensus = await self._calculate_content_consensus(responses)
-            methodology_consensus = await self._calculate_methodology_consensus(
-                responses
-            )
-            evidence_consensus = await self._calculate_evidence_consensus(responses)
+        content_consensus = await self._calculate_content_consensus(responses)
+        methodology_consensus = await self._calculate_methodology_consensus(responses)
+        evidence_consensus = await self._calculate_evidence_consensus(responses)
 
-            # Detect conflicts
-            conflicts = await self._detect_conflicts(responses)
+        # Detect conflicts
+        conflicts = await self._detect_conflicts(responses)
 
-            # Generate resolution suggestions
-            resolution_suggestions = await self._generate_resolution_suggestions(
-                conflicts
-            )
+        # Generate resolution suggestions
+        resolution_suggestions = await self._generate_resolution_suggestions(conflicts)
 
-            # Assess quality metrics
-            evidence_quality = await self._assess_evidence_quality(responses)
-            completeness = await self._assess_response_completeness(responses)
-            reasoning_soundness = await self._assess_reasoning_soundness(responses)
+        # Assess quality metrics
+        evidence_quality = await self._assess_evidence_quality(responses)
+        completeness = await self._assess_response_completeness(responses)
+        reasoning_soundness = await self._assess_reasoning_soundness(responses)
 
-            consensus_score = ConsensusScore(
-                overall_score=overall_score,
-                confidence_variance=confidence_variance,
-                agreement_areas=agreement_areas,
-                disagreement_areas=disagreement_areas,
-                content_consensus=content_consensus,
-                methodology_consensus=methodology_consensus,
-                evidence_consensus=evidence_consensus,
-                conflicts_detected=conflicts,
-                resolution_suggestions=resolution_suggestions,
-                evidence_quality=evidence_quality,
-                response_completeness=completeness,
-                reasoning_soundness=reasoning_soundness,
-            )
+        consensus_score = ConsensusScore(
+            overall_score=overall_score,
+            confidence_variance=confidence_variance,
+            agreement_areas=agreement_areas,
+            disagreement_areas=disagreement_areas,
+            content_consensus=content_consensus,
+            methodology_consensus=methodology_consensus,
+            evidence_consensus=evidence_consensus,
+            conflicts_detected=conflicts,
+            resolution_suggestions=resolution_suggestions,
+            evidence_quality=evidence_quality,
+            response_completeness=completeness,
+            reasoning_soundness=reasoning_soundness,
+        )
 
-            if overall_score >= threshold:
-                self.successful_consensus += 1
+        if overall_score >= threshold:
+            self.successful_consensus += 1
 
-            logger.info(
-                "consensus_evaluation_completed",
-                overall_score=overall_score,
-                threshold=threshold,
-                message_count=len(messages),
-            )
+        logger.info(
+            "consensus_evaluation_completed",
+            overall_score=overall_score,
+            threshold=threshold,
+            message_count=len(messages),
+        )
 
-            return consensus_score
-
-        except Exception as e:
-            logger.error("consensus_evaluation_failed", error=str(e))
-            return ConsensusScore()
+        return consensus_score
 
     async def validate_response(
         self, message: TalkHierMessage, validation_criteria: list[str] | None = None

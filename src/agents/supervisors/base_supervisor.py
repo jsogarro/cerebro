@@ -256,7 +256,7 @@ class BaseSupervisor(BaseAgent, ABC):
 
             return token_count
 
-        except Exception as e:
+        except (TypeError, ValueError) as e:
             logger.debug(
                 "Failed to measure worker results tokens",
                 supervisor_type=self.supervisor_type,

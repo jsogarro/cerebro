@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 
+from pydantic.errors import PydanticUserError
+
 from src.agents.base import BaseAgent
 from src.agents.models import AgentResult, AgentTask
 from src.agents.tools.base_tool import ToolResult
@@ -792,7 +794,7 @@ class LLMWorkerAgentBase(BaseAgent):
                 "Your response must be valid JSON that can be parsed and validated "
                 "against this schema."
             )
-        except Exception as e:
+        except (PydanticUserError, TypeError, ValueError) as e:
             # Fallback to basic instructions if schema generation fails
             self.log_warning(f"Schema generation failed: {e}, using basic instructions")
             return "Respond with valid JSON."

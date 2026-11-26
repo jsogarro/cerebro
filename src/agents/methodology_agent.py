@@ -52,18 +52,11 @@ class MethodologyAgent(LLMWorkerAgentBase):
             # Generate methodology using structured output
             from src.agents.schemas import MethodologySchema
 
-            try:
-                prompt = self._build_prompt(task.input_data)
-                schema_result = await self._generate_structured_with_routing(
-                    prompt, MethodologySchema, task=task
-                )
-                analysis = schema_result.model_dump()
-            except Exception as e:
-                # Fallback for testing without configured LLM
-                self.log_warning(
-                    f"Structured generation failed: {e}, using mock fallback"
-                )
-                analysis = self._generate_mock_analysis(task)
+            prompt = self._build_prompt(task.input_data)
+            schema_result = await self._generate_structured_with_routing(
+                prompt, MethodologySchema, task=task
+            )
+            analysis = schema_result.model_dump()
 
             confidence = self._calculate_confidence(analysis)
 
@@ -160,17 +153,3 @@ class MethodologyAgent(LLMWorkerAgentBase):
         Scope: {input_data.get("scope", "general")}
         
         Provide methodology recommendations in JSON format."""
-
-    def _generate_mock_analysis(self, task: AgentTask) -> dict[str, Any]:
-        """Generate mock analysis for testing."""
-        return {
-            "research_design": "Mixed methods approach",
-            "data_collection_methods": ["Surveys", "Interviews"],
-            "sampling_strategy": "Random sampling",
-            "analysis_approaches": ["Statistical analysis", "Thematic analysis"],
-            "validity_measures": ["Triangulation"],
-            "ethical_considerations": ["Informed consent"],
-            "limitations": ["Sample size"],
-            "timeline": "3 months",
-            "quality_indicators": ["Reliability", "Validity"],
-        }

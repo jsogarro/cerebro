@@ -277,24 +277,20 @@ class CitationAgent(LLMWorkerAgentBase):
             self.log_warning("MCP integration not available, using Gemini fallback")
             return await self._format_citations_with_gemini(sources, style)
 
-        try:
-            result = await self.mcp_integration.format_citations(
-                sources=sources, style=style
+        result = await self.mcp_integration.format_citations(
+            sources=sources, style=style
+        )
+
+        if result.get("success"):
+            self.log_info(
+                f"MCP citation formatting successful: {len(sources)} sources in {style} style"
             )
+            return dict(result)
 
-            if result.get("success"):
-                self.log_info(
-                    f"MCP citation formatting successful: {len(sources)} sources in {style} style"
-                )
-                return dict(result)
-            else:
-                raise Exception(
-                    f"MCP citation formatting failed: {result.get('error', 'Unknown error')}"
-                )
-
-        except Exception as e:
-            self.log_error(f"MCP citation formatting failed: {e}")
-            return await self._format_citations_with_gemini(sources, style)
+        self.log_error(
+            f"MCP citation formatting failed: {result.get('error', 'Unknown error')}"
+        )
+        return await self._format_citations_with_gemini(sources, style)
 
     async def _format_citations_with_gemini(
         self, sources: list[dict[str, Any]], style: str
@@ -512,37 +508,29 @@ Return formatted citations as structured JSON."""
                 "fallback": True,
             }
 
-        try:
-            # Use MCP citation tool for bibliography
-            result = await self.mcp_integration.format_citations(
-                sources=sources, style=style
-            )
+        result = await self.mcp_integration.format_citations(
+            sources=sources, style=style
+        )
 
-            if result.get("success"):
-                citations = result.get("formatted_citations", [])
-                bibliography = [c.get("citation", str(c)) for c in citations]
+        if result.get("success"):
+            citations = result.get("formatted_citations", [])
+            bibliography = [c.get("citation", str(c)) for c in citations]
 
-                return {
-                    "success": True,
-                    "bibliography": sorted(bibliography),
-                    "format": style,
-                    "total_entries": len(bibliography),
-                }
-            else:
-                raise Exception("MCP bibliography generation failed")
-
-        except Exception as e:
-            self.log_error(f"MCP bibliography generation failed: {e}")
-            # Fallback
-            citations = [
-                self._format_single_citation(source, style) for source in sources
-            ]
             return {
                 "success": True,
-                "bibliography": sorted(citations),
+                "bibliography": sorted(bibliography),
                 "format": style,
-                "fallback": True,
+                "total_entries": len(bibliography),
             }
+
+        self.log_error("MCP bibliography generation failed")
+        citations = [self._format_single_citation(source, style) for source in sources]
+        return {
+            "success": True,
+            "bibliography": sorted(citations),
+            "format": style,
+            "fallback": True,
+        }
 
     async def _export_citations(
         self, citation_result: dict[str, Any], export_formats: list[str]

@@ -33,25 +33,19 @@ class TheoryExtractor:
 
         query = self.build_research_query(input_data)
 
-        try:
-            search_sources: Callable[..., Awaitable[dict[str, Any]]] = (
-                mcp_integration.search_academic_sources
-            )
-            result = await search_sources(
-                query=query, databases=["arxiv", "pubmed"], max_results=10
-            )
+        search_sources: Callable[..., Awaitable[dict[str, Any]]] = (
+            mcp_integration.search_academic_sources
+        )
+        result = await search_sources(
+            query=query, databases=["arxiv", "pubmed"], max_results=10
+        )
 
-            if result.get("success"):
-                log_info(f"Found {result.get('total_found', 0)} comparative studies")
-                return dict(result)
+        if result.get("success"):
+            log_info(f"Found {result.get('total_found', 0)} comparative studies")
+            return dict(result)
 
-            raise Exception(
-                f"Comparative research search failed: {result.get('error')}"
-            )
-
-        except Exception as exc:
-            log_error(f"MCP comparative research search failed: {exc}")
-            return self.fallback_comparative_research(input_data)
+        log_error(f"MCP comparative research search failed: {result.get('error')}")
+        return self.fallback_comparative_research(input_data)
 
     def extract_theories_from_sources(
         self,

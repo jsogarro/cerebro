@@ -10,6 +10,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any
 
+from redis.exceptions import RedisError
 from structlog import get_logger
 from tenacity import (
     retry,
@@ -358,7 +359,7 @@ class BaseAgent(ABC):
                     ),
                 )
                 self.log_info(f"Cached result for key: {key}")
-            except Exception as e:
+            except (RedisError, TypeError, ValueError) as e:
                 self.log_warning(f"Failed to cache result: {e}")
 
     async def get_cached_result(self, key: str) -> AgentResult | None:
@@ -379,7 +380,7 @@ class BaseAgent(ABC):
                 if data:
                     result_data = json.loads(data)
                     return AgentResult(**result_data)
-            except Exception as e:
+            except (RedisError, TypeError, ValueError) as e:
                 self.log_warning(f"Failed to get cached result: {e}")
 
         return None

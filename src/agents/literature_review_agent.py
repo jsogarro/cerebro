@@ -507,7 +507,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             )
             return dict(result)
 
-        except Exception as e:
+        except OSError as e:
             self.log_error(f"MCP academic search failed: {e}")
             return self._static_fallback_sources(query, domains)
 
@@ -548,7 +548,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             parsed_response = parse_json_response(content)
             result = parsed_response.get("literature_analysis", {})
             return dict(result) if isinstance(result, dict) else {}
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             self.log_error(f"Gemini analysis failed: {e}")
             return self._generate_mock_analysis_from_sources(academic_sources)
 
@@ -583,17 +583,13 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         key_findings = literature_analysis.get("key_findings", [])
         text_for_analysis += " ".join(key_findings)
 
-        try:
-            result = await self.mcp_integration.build_knowledge_graph(
-                text=text_for_analysis, identity=ToolCallIdentity.from_agent_task(task)
-            )
-            self.log_info(
-                f"Knowledge graph built with {len(result.get('entities', []))} entities"
-            )
-            return dict(result)
-        except Exception as e:
-            self.log_error(f"Knowledge graph building failed: {e}")
-            return {"success": False, "error": str(e)}
+        result = await self.mcp_integration.build_knowledge_graph(
+            text=text_for_analysis, identity=ToolCallIdentity.from_agent_task(task)
+        )
+        self.log_info(
+            f"Knowledge graph built with {len(result.get('entities', []))} entities"
+        )
+        return dict(result)
 
     async def _format_source_citations(
         self, academic_sources: dict[str, Any], task: AgentTask | None = None
@@ -625,17 +621,13 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             }
             citation_sources.append(citation_source)
 
-        try:
-            result = await self.mcp_integration.format_citations(
-                sources=citation_sources,
-                style="APA",
-                identity=ToolCallIdentity.from_agent_task(task),
-            )
-            self.log_info(f"Formatted {len(citation_sources)} citations")
-            return dict(result)
-        except Exception as e:
-            self.log_error(f"Citation formatting failed: {e}")
-            return {"success": False, "error": str(e)}
+        result = await self.mcp_integration.format_citations(
+            sources=citation_sources,
+            style="APA",
+            identity=ToolCallIdentity.from_agent_task(task),
+        )
+        self.log_info(f"Formatted {len(citation_sources)} citations")
+        return dict(result)
 
     def _determine_databases(self, domains: list[str]) -> list[str]:
         """
@@ -734,15 +726,11 @@ Requirements:
 - Include 2-3 sentence abstracts
 - Include DOI when known"""
 
-        try:
-            result = await self._generate_structured_with_routing(
-                prompt, SourceListSchema, task=None
-            )
-            self.log_info(f"Found {len(result.sources)} sources")
-            return [s.model_dump() for s in result.sources]
-        except Exception as e:
-            self.log_error(f"Source search failed: {e}")
-            return []
+        result = await self._generate_structured_with_routing(
+            prompt, SourceListSchema, task=None
+        )
+        self.log_info(f"Found {len(result.sources)} sources")
+        return [s.model_dump() for s in result.sources]
 
     async def _analyze_sources_structured(
         self, query: str, sources: list[dict[str, Any]]
@@ -767,24 +755,15 @@ Analyze the literature and provide:
 3. methodologies_used: List of research methodologies observed across papers
 4. quality_assessment: Overall quality assessment of this literature corpus"""
 
-        try:
-            result = await self._generate_structured_with_routing(
-                prompt, LiteratureAnalysisSchema, task=None
-            )
-            return {
-                "key_findings": result.key_findings,
-                "research_gaps": result.research_gaps,
-                "methodologies_used": result.methodologies_used,
-                "quality_assessment": result.quality_assessment,
-            }
-        except Exception as e:
-            self.log_error(f"Analysis failed: {e}")
-            return {
-                "key_findings": [],
-                "research_gaps": [],
-                "methodologies_used": [],
-                "quality_assessment": "",
-            }
+        result = await self._generate_structured_with_routing(
+            prompt, LiteratureAnalysisSchema, task=None
+        )
+        return {
+            "key_findings": result.key_findings,
+            "research_gaps": result.research_gaps,
+            "methodologies_used": result.methodologies_used,
+            "quality_assessment": result.quality_assessment,
+        }
 
     async def _search_and_analyze_structured(
         self, input_data: dict[str, Any]
@@ -920,7 +899,7 @@ Requirements:
             self.log_warning(
                 f"Gemini returned no sources. Parsed keys: {list(parsed.keys())}"
             )
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             self.log_error(f"Gemini source search failed: {e}")
 
         return self._static_fallback_sources(query, domains)
