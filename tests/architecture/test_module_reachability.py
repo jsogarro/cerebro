@@ -63,7 +63,6 @@ KNOWN_UNREACHABLE: frozenset[str] = frozenset(
         "src.memory",
         "src.models.base",
         "src.models.db.migrations",
-        "src.research_platform",
         "src.services.evaluation_regression",
         "src.services.gemini_metrics",
         "src.services.hallucination_detector",
