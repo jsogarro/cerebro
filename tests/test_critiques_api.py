@@ -1037,15 +1037,19 @@ async def test_a_cancelled_request_still_schedules_the_run_it_committed(
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    row = None
     for _ in range(200):
         async with factory() as session:
-            row = (await session.execute(select(DocumentCritique))).scalar_one_or_none()
-        if row is not None and row.status != "queued":
+            seen = (
+                await session.execute(select(DocumentCritique))
+            ).scalar_one_or_none()
+        if seen is not None and (seen.status != "queued" or app.state.document_jobs):
             break
         await asyncio.sleep(0.05)
+    # The run was scheduled once the shielded commit finished; wait for it to end, then
+    # read the row afresh (the read above can still say "running").
     await drain()
-    assert row is not None
+    async with factory() as session:
+        row = (await session.execute(select(DocumentCritique))).scalar_one()
     assert row.status == "succeeded"
 
 
