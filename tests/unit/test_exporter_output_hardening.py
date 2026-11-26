@@ -114,6 +114,31 @@ def test_percent_hash_and_tilde_are_kept_and_escaped_inside_url() -> None:
     assert "\\url{https://example.org/~a/b\\%20c\\#sec}" in out
 
 
+UNSAFE_LINK_FRAGMENTS = ["}", "{", "\\", "^", "\n", " ", "\\input{/etc/passwd}"]
+
+
+@pytest.mark.parametrize("fragment", UNSAFE_LINK_FRAGMENTS)
+@pytest.mark.parametrize("kind", ["url", "doi"])
+def test_unsafe_link_characters_render_as_escaped_text(
+    kind: str, fragment: str
+) -> None:
+    exporter = LaTeXExporter()
+    value = (
+        f"https://example.org/p{fragment}q"
+        if kind == "url"
+        else f"10.1000/ab{fragment}cd"
+    )
+    out = exporter._format_citation_latex(_citation(**{kind: value}))
+    assert "\\url" not in out
+    assert exporter._escape_latex(value) in out
+    assert _unescaped(out, "{") == _unescaped(out, "}")
+
+
+def test_dollar_sign_is_legal_inside_a_url_link() -> None:
+    out = LaTeXExporter()._format_citation_latex(_citation(url="https://a.org/$x"))
+    assert "\\url{https://a.org/$x}" in out
+
+
 def test_trailing_newline_does_not_pass_the_url_check() -> None:
     out = LaTeXExporter()._format_citation_latex(_citation(url="https://a.org/x\n"))
     assert "\\url" not in out
