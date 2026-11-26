@@ -92,7 +92,6 @@ class MultiTierMemorySystem:
         """Initialize multi-tier memory system."""
         self.config = config
 
-        # Initialize memory managers
         self.working_memory = WorkingMemoryManager(config.get("working_memory", {}))
         self.episodic_memory = EpisodicMemoryManager(config.get("episodic_memory", {}))
         self.semantic_memory = SemanticMemoryManager(config.get("semantic_memory", {}))
@@ -167,7 +166,6 @@ class MultiTierMemorySystem:
 
         logger.info("Initializing multi-tier memory system...")
 
-        # Initialize all memory managers
         await self.working_memory.initialize()
         await self.episodic_memory.initialize()
         await self.semantic_memory.initialize()
@@ -274,7 +272,6 @@ class MultiTierMemorySystem:
                 procedural_results,
             ) = await asyncio.gather(*recall_tasks, return_exceptions=True)
 
-            # Handle any exceptions
             for i, result in enumerate(
                 [
                     working_results,
@@ -491,7 +488,6 @@ class MultiTierMemorySystem:
     async def get_memory_stats(self) -> dict[str, Any]:
         """Get comprehensive memory statistics."""
 
-        # Get stats from all tiers
         working_stats = await self.working_memory.get_memory_stats()
         episodic_stats = await self.episodic_memory.get_memory_stats()
         semantic_stats = await self.semantic_memory.get_memory_stats()
@@ -532,7 +528,6 @@ class MultiTierMemorySystem:
         if not context.session_id:
             return True  # No session to store
 
-        # Update or create conversation context
         conv_context = await self.working_memory.retrieve_conversation_context(
             context.session_id
         )
@@ -544,7 +539,6 @@ class MultiTierMemorySystem:
                 agent_id=context.agent_id,
             )
 
-        # Add interaction as message
         message = {
             "type": "interaction",
             "data": interaction_data,
@@ -652,12 +646,9 @@ class MultiTierMemorySystem:
     async def _recall_from_working_memory(
         self, query: str, context: MemoryContext
     ) -> list[MemoryResult]:
-        """Recall from working memory."""
-
         results = []
 
         try:
-            # Get conversation context if session available
             if context.session_id:
                 conv_context = await self.working_memory.retrieve_conversation_context(
                     context.session_id
@@ -692,8 +683,6 @@ class MultiTierMemorySystem:
     async def _recall_from_episodic_memory(
         self, query: str, context: MemoryContext
     ) -> list[MemoryResult]:
-        """Recall from episodic memory."""
-
         results = []
 
         try:
@@ -730,8 +719,6 @@ class MultiTierMemorySystem:
     async def _recall_from_semantic_memory(
         self, query: str, context: MemoryContext
     ) -> list[MemoryResult]:
-        """Recall from semantic memory."""
-
         results = []
 
         try:
@@ -757,12 +744,9 @@ class MultiTierMemorySystem:
     async def _recall_from_procedural_memory(
         self, query: str, context: MemoryContext
     ) -> list[MemoryResult]:
-        """Recall from procedural memory."""
-
         results = []
 
         try:
-            # Get relevant procedures
             if context.task_type:
                 procedure = await self.procedural_memory.get_best_procedure_for_task(
                     context.task_type,
@@ -825,7 +809,6 @@ class MultiTierMemorySystem:
             r.content for r in procedural_results if isinstance(r.content, Procedure)
         ]
 
-        # Calculate confidence based on result quality and quantity
         confidence = min(
             len(primary_results) / max_results * 0.5  # Quantity factor
             + sum(r.relevance_score for r in primary_results)

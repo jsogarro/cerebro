@@ -39,8 +39,6 @@ from .model_schemas import (  # noqa: E402
 
 
 class ConfigurationChangeEvent:
-    """Event for configuration changes."""
-
     def __init__(
         self,
         change_type: str,
@@ -90,7 +88,6 @@ class ModelConfigManager:
 
         logger.info("Initializing model configuration manager...")
 
-        # Load initial configuration
         await self.load_configuration()
 
         if self._current_config is not None:
@@ -103,10 +100,8 @@ class ModelConfigManager:
 
         try:
             with self._lock:
-                # Load base configuration
                 base_config = await self._load_yaml_file(self.base_config_path)
 
-                # Load environment-specific overrides
                 env_config = {}
                 if self.env_config_path.exists():
                     env_config = await self._load_yaml_file(self.env_config_path)
@@ -114,10 +109,8 @@ class ModelConfigManager:
                 # Merge configurations
                 merged_config = self._merge_configurations(base_config, env_config)
 
-                # Validate configuration
                 validated_config = ModelConfiguration(**merged_config)
 
-                # Update current configuration
                 old_config = self._current_config
                 self._current_config = validated_config
                 self._config_timestamp = datetime.now()
@@ -196,14 +189,10 @@ class ModelConfigManager:
         return config.get_models_by_tier(tier)
 
     async def get_enabled_models(self) -> dict[str, ModelSpecification]:
-        """Get all enabled models."""
-
         config = await self.get_configuration()
         return config.get_enabled_models()
 
     async def get_enabled_providers(self) -> dict[str, ProviderConfiguration]:
-        """Get all enabled providers."""
-
         config = await self.get_configuration()
         return config.get_enabled_providers()
 
@@ -227,7 +216,6 @@ class ModelConfigManager:
             config_path = config_path or self.base_config_path
             config_data = await self._load_yaml_file(config_path)
 
-            # Validate with Pydantic
             ModelConfiguration(**config_data)
             return True
 
@@ -277,15 +265,12 @@ class ModelConfigManager:
         if not path.exists():
             raise FileNotFoundError(f"Configuration file not found: {path}")
 
-        # Read file content
         content = await asyncio.get_event_loop().run_in_executor(
             None, path.read_text, "utf-8"
         )
 
-        # Parse YAML with environment variable substitution
         content_with_env = os.path.expandvars(content)
 
-        # Load YAML
         config_data = yaml.safe_load(content_with_env)
 
         if not config_data:
@@ -326,7 +311,6 @@ class ModelConfigManager:
         if not override_config:
             return base_config
 
-        # Check if override_config has 'extends' field
         if override_config.get("extends"):
             logger.info(f"Merging {override_config.get('extends')} with overrides")
 
@@ -455,8 +439,6 @@ async def get_provider_configuration(
 
 
 async def get_enabled_models() -> dict[str, ModelSpecification]:
-    """Get all enabled models."""
-
     manager = await get_model_config_manager()
     return await manager.get_enabled_models()
 

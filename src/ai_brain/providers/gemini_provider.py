@@ -24,7 +24,6 @@ from .base_provider import (
 if TYPE_CHECKING:
     from src.services.gemini_service import GeminiService
 
-# Import existing Gemini service from research platform
 try:
     from src.services.gemini_service import GeminiService as GeminiServiceClass
 
@@ -62,7 +61,6 @@ class GeminiProvider(BaseProvider):
         if not self.api_key:
             raise ValueError("Gemini API key is required")
 
-        # Initialize underlying Gemini service if available
         self.gemini_service: GeminiService | None = None
         if GEMINI_SERVICE_AVAILABLE and GeminiServiceClass is not None:
             gemini_config_obj: dict[str, Any] = {
@@ -164,18 +162,15 @@ class GeminiProvider(BaseProvider):
     ) -> ModelResponse:
         """Generate using existing GeminiService."""
 
-        # Convert ModelRequest to format expected by GeminiService
         if request.messages:
             # Use chat format
             prompt = self._convert_messages_to_prompt(request.messages)
         else:
             prompt = request.prompt
 
-        # Add system prompt if provided
         if request.system_prompt:
             prompt = f"{request.system_prompt}\n\n{prompt}"
 
-        # Call existing service
         if not self.gemini_service:
             raise ValueError("GeminiService not available")
 
@@ -186,7 +181,6 @@ class GeminiProvider(BaseProvider):
             )
             service_text = str(service_response)
 
-            # Convert service response to ModelResponse
             end_time = datetime.now()
             latency_ms = int((end_time - start_time).total_seconds() * 1000)
 
@@ -331,14 +325,12 @@ class GeminiProvider(BaseProvider):
             response = await self.generate(test_request)
             latency = (datetime.now() - start_time).total_seconds() * 1000
 
-            # Update health status
             self.health_status.healthy = response.success
             self.health_status.last_check = datetime.now()
             self.health_status.avg_latency_ms = latency
 
             # Gemini-specific health indicators
             if response.success:
-                # Check for reasonable response
                 if "2" in response.content:
                     self.health_status.api_status = "operational"
                 else:
@@ -365,7 +357,6 @@ class GeminiProvider(BaseProvider):
         if request.max_tokens > 8000:
             return False  # Gemini output limit
 
-        # Check context window usage
         estimated_tokens = len((request.prompt or "").split()) * 1.3
         return estimated_tokens <= 100000  # Gemini context limit
 
@@ -392,7 +383,6 @@ class GeminiProvider(BaseProvider):
             ],
         }
 
-        # Add model-specific information
         if model_name == "gemini-pro":
             base_info["best_for"] = [
                 "General text generation",

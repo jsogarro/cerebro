@@ -100,7 +100,6 @@ class LlamaProvider(BaseProvider):
     async def load_configuration(self) -> None:
         """Load Llama-specific configuration."""
 
-        # Load base configuration
         await super().load_configuration()
 
         # Configure API settings from provider configuration
@@ -118,7 +117,6 @@ class LlamaProvider(BaseProvider):
                 ),
             )
 
-            # Update Ollama-specific settings from provider config
             provider_settings = getattr(self._provider_config, "provider_settings", {})
             self.keep_alive = provider_settings.get("keep_alive", self.keep_alive)
 
@@ -170,7 +168,6 @@ class LlamaProvider(BaseProvider):
             # Prepare request payload
             payload = self._build_request_payload(request, model_name)
 
-            # Make API request
             response = await self._make_api_request(payload)
 
             # Process response
@@ -230,7 +227,6 @@ class LlamaProvider(BaseProvider):
                             if content:
                                 yield content
 
-                            # Check if done
                             if chunk.get("done", False):
                                 break
 
@@ -248,7 +244,6 @@ class LlamaProvider(BaseProvider):
 
         # Ollama uses a different format than OpenAI-style APIs
         if request.messages:
-            # Convert chat messages to single prompt
             prompt_parts = []
             for msg in request.messages:
                 role = msg.get("role", "user")
@@ -266,11 +261,9 @@ class LlamaProvider(BaseProvider):
         else:
             prompt = request.prompt
 
-        # Add system prompt if provided
         if request.system_prompt and not request.messages:
             prompt = f"System: {request.system_prompt}\n\nUser: {prompt}\n\nAssistant: "
 
-        # Build payload for Ollama
         max_output = 4000
         if hasattr(self, "model_specs"):
             spec = getattr(self, "model_specs", {}).get(model_name, {})
@@ -288,7 +281,6 @@ class LlamaProvider(BaseProvider):
             "stream": request.stream,
         }
 
-        # Add top_k if specified
         if request.top_k:
             payload["options"]["top_k"] = request.top_k
 
@@ -307,7 +299,6 @@ class LlamaProvider(BaseProvider):
         try:
             if not self.client:
                 raise RuntimeError("HTTP client not initialized")
-            # Check if model exists
             response = await self.client.get(f"{self.ollama_endpoint}/api/tags")
 
             if response.status_code == 200:
@@ -428,10 +419,8 @@ class LlamaProvider(BaseProvider):
         completion_tokens = int(eval_count)
         total_tokens = prompt_tokens + completion_tokens
 
-        # Calculate cost
         cost = self._calculate_cost(prompt_tokens, completion_tokens, model_name)
 
-        # Calculate confidence score
         confidence_score = self._calculate_confidence_score(
             content, done, request, response_data
         )
@@ -504,7 +493,6 @@ class LlamaProvider(BaseProvider):
         try:
             if not self.client:
                 raise RuntimeError("HTTP client not initialized")
-            # Check if Ollama is running
             response = await self.client.get(f"{self.ollama_endpoint}/api/tags")
 
             if response.status_code != 200:
@@ -519,7 +507,6 @@ class LlamaProvider(BaseProvider):
             model_response = await self.generate(test_request)
             latency = (datetime.now() - start_time).total_seconds() * 1000
 
-            # Update health status
             self.health_status.healthy = model_response.success
             self.health_status.last_check = datetime.now()
             self.health_status.avg_latency_ms = latency
@@ -548,7 +535,6 @@ class LlamaProvider(BaseProvider):
         if request.max_tokens > 4000:
             return False  # Llama practical output limit
 
-        # Check context window usage
         estimated_tokens = len((request.prompt or "").split()) * 1.3
         return estimated_tokens <= 128000  # Llama context limit
 

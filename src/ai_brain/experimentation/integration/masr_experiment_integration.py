@@ -202,7 +202,6 @@ class MASRExperimentalRouter(MASRouter):
                 SystemExperiment,
             )
 
-            # Create proper ExperimentVariant objects
             variants_list = [
                 ExperimentVariant(
                     id=variant["name"],
@@ -214,14 +213,12 @@ class MASRExperimentalRouter(MASRouter):
                 for variant in experiment_config_dict["variants"]
             ]
 
-            # Create proper ExperimentMetrics object
             metrics_obj = ExperimentMetrics(
                 primary_metrics=experiment_config_dict["metrics"]["primary"],
                 secondary_metrics=experiment_config_dict["metrics"]["secondary"],
                 guardrail_metrics=experiment_config_dict["metrics"]["guardrail"],
             )
 
-            # Create proper StatisticalConfig object
             statistical_config_obj = StatisticalConfig()
 
             sys_exp = SystemExperiment(
@@ -266,13 +263,11 @@ class MASRExperimentalRouter(MASRouter):
         # Analyze query complexity first
         complexity_analysis = await self.complexity_analyzer.analyze(query, context)
 
-        # Check for active routing strategy experiment
         routing_decision = None
         variant_used = "control"
         experiment_metadata = {}
 
         if "routing_strategy_test" in self.active_experiments:
-            # Get variant allocation
             allocation = await self.allocation_engine.allocate_variant(
                 experiment_id="routing_strategy_test",
                 user_context={
@@ -293,7 +288,6 @@ class MASRExperimentalRouter(MASRouter):
                 )
                 experiment_metadata["routing_strategy"] = strategy.value
 
-        # Check for collaboration mode experiment
         if "collaboration_mode_test" in self.active_experiments and routing_decision:
             allocation = await self.allocation_engine.allocate_variant(
                 experiment_id="collaboration_mode_test",
@@ -356,7 +350,6 @@ class MASRExperimentalRouter(MASRouter):
         Returns:
             RoutingDecision based on strategy
         """
-        # Set the routing strategy
         original_strategy = getattr(self, "_default_strategy", RoutingStrategy.BALANCED)
 
         try:
@@ -533,15 +526,13 @@ class MASRExperimentalRouter(MASRouter):
         # Analyze last 100 results
         recent = self.results_buffer[-100:]
 
-        metrics = {
+        return {
             "error_rate": sum(1 for r in recent if r.error_occurred) / len(recent),
             "avg_latency_ms": sum(r.execution_time_ms for r in recent) / len(recent),
             "avg_cost": sum(r.cost for r in recent) / len(recent),
             "avg_quality": sum(r.quality_score for r in recent) / len(recent),
             "fallback_rate": sum(1 for r in recent if r.fallback_used) / len(recent),
         }
-
-        return metrics
 
     async def get_experiment_results(self, experiment_id: str) -> dict[str, Any]:
         """
@@ -556,13 +547,11 @@ class MASRExperimentalRouter(MASRouter):
         if experiment_id not in self.active_experiments:
             return {"error": f"Experiment {experiment_id} not found"}
 
-        # Get experiment from manager
         experiment = await self.experiment_manager.get_experiment(experiment_id)
         results: dict[str, Any] = {
             "experiment": experiment.__dict__ if experiment else {}
         }
 
-        # Add MASR-specific analysis
         config = self.active_experiments[experiment_id]
         variant_results: dict[str, Any] = {}
 
@@ -655,7 +644,6 @@ class MASRExperimentalRouter(MASRouter):
                 continue
 
             for variant_id, metrics in results["variant_analysis"].items():
-                # Calculate weighted score
                 score = 0.0
                 if "cost" in optimization_goals:
                     score -= metrics.get("avg_cost", 0) * optimization_goals["cost"]
@@ -673,7 +661,6 @@ class MASRExperimentalRouter(MASRouter):
                 if score > best_score:
                     best_score = score
 
-                    # Update best config based on variant
                     config = self.active_experiments[exp_id]
                     if variant_id in config.variants:
                         variant_config = config.variants[variant_id]

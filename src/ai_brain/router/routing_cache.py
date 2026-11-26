@@ -118,7 +118,6 @@ class RoutingCacheManager:
         Returns:
             MD5 hash string as cache key
         """
-        # Create hash from query and relevant context
         cache_data = {
             "query": query.lower().strip(),
             "user_id": context.get("user_id") if context else None,

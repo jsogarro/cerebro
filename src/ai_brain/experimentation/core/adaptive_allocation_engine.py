@@ -124,7 +124,6 @@ class AdaptiveAllocationEngine:
         self.global_max_allocation = self.config.get("global_max_allocation", 0.70)
         self.rng = self.config.get("rng", np.random)
 
-        # Update scheduling
         self.update_task: asyncio.Task[None] | None = None
         self.update_interval = self.config.get("update_interval_seconds", 300)
 
@@ -143,7 +142,6 @@ class AdaptiveAllocationEngine:
             allocation_config: Configuration for allocation strategy
         """
 
-        # Validate configuration
         if sum(allocation_config.initial_allocation.values()) != 1.0:
             raise ValueError("Initial allocation must sum to 1.0")
 
@@ -155,7 +153,6 @@ class AdaptiveAllocationEngine:
         # Store configuration
         self.active_experiments[experiment_id] = allocation_config
 
-        # Initialize bandit optimizer if using bandit strategies
         if allocation_config.strategy in [
             AllocationStrategy.ADAPTIVE_BANDIT,
             AllocationStrategy.CONTEXTUAL_BANDIT,
@@ -293,7 +290,6 @@ class AdaptiveAllocationEngine:
             # Fallback to fixed allocation
             return await self._fixed_random_allocation(experiment_id, config, context)
 
-        # Get bandit recommendation
         bandit_result = await bandit.select_arm(context)
 
         # Map arm index to variant
@@ -355,7 +351,6 @@ class AdaptiveAllocationEngine:
     ) -> AllocationDecision:
         """Safety-constrained allocation with gradual rollout."""
 
-        # Check if we have enough safety samples
         bandit = self.bandit_optimizers.get(experiment_id)
         total_samples = sum(bandit.arm_counts) if bandit else 0
 
@@ -399,7 +394,6 @@ class AdaptiveAllocationEngine:
         if not config.enable_guardrails:
             return decision
 
-        # Check global allocation bounds
         if (
             decision.allocation_probability is not None
             and decision.allocation_probability < self.global_min_allocation
@@ -416,7 +410,6 @@ class AdaptiveAllocationEngine:
             decision.safety_warnings.append("Applied global maximum allocation limit")
             decision.safety_check_passed = False
 
-        # Check performance threshold (if we have historical data)
         bandit = self.bandit_optimizers.get(decision.experiment_id)
         if bandit and hasattr(bandit, "arm_values"):
             variants = list(config.initial_allocation.keys())
@@ -430,7 +423,6 @@ class AdaptiveAllocationEngine:
                     bandit.arm_values[selected_arm_index] if bandit.arm_values else 0.5
                 )
 
-                # Check performance threshold
                 relative_performance = variant_performance / max(
                     control_performance, 0.01
                 )
@@ -542,10 +534,8 @@ class AdaptiveAllocationEngine:
             )
             return
 
-        # Update bandit with outcome
         await bandit.update_bandit(arm_index, reward)
 
-        # Update statistics
         # Note: With advantage-based reward shaping (reward = advantage + 0.5),
         # this threshold correctly identifies arms that beat the mode baseline.
         if reward > 0.5:  # Consider above 0.5 as success
@@ -625,7 +615,6 @@ class AdaptiveAllocationEngine:
                 continue
 
             try:
-                # Calculate new optimal allocation
                 new_allocation = await self._calculate_optimal_allocation(
                     experiment_id, config, bandit
                 )
@@ -633,11 +622,9 @@ class AdaptiveAllocationEngine:
                 # Apply safety constraints
                 safe_allocation = self._apply_allocation_safety(new_allocation, config)
 
-                # Update configuration
                 old_allocation = config.initial_allocation.copy()
                 config.initial_allocation = safe_allocation
 
-                # Log significant changes
                 max_change = max(
                     abs(safe_allocation[variant] - old_allocation.get(variant, 0))
                     for variant in safe_allocation
@@ -666,7 +653,6 @@ class AdaptiveAllocationEngine:
         arm_values = bandit.arm_values
         arm_counts = bandit.arm_counts
 
-        # Calculate allocation based on Thompson sampling probabilities
         if config.strategy == AllocationStrategy.ADAPTIVE_BANDIT:
             # Use softmax of arm values for allocation
             exp_values = np.exp(np.array(arm_values) * 2)  # Temperature = 0.5
@@ -686,7 +672,6 @@ class AdaptiveAllocationEngine:
             # Bayesian optimal allocation (Thompson sampling)
             probabilities = bandit._calculate_arm_probabilities()
 
-        # Convert to allocation dictionary
         allocation = {}
         for i, variant in enumerate(variants):
             allocation[variant] = probabilities[i] if i < len(probabilities) else 0.0
@@ -761,7 +746,6 @@ class AdaptiveAllocationEngine:
             try:
                 await asyncio.sleep(self.update_interval)
 
-                # Update allocations for all adaptive experiments
                 updated = await self.update_allocations()
 
                 if updated:
@@ -793,7 +777,6 @@ class AdaptiveAllocationEngine:
             "current_allocation": config.initial_allocation.copy(),
         }
 
-        # Add per-variant statistics
         if hasattr(bandit, "arm_values") and hasattr(bandit, "arm_counts"):
             for i, variant in enumerate(variants):
                 if i < len(bandit.arm_values):

@@ -208,7 +208,6 @@ class MultiVariateAnalyzer:
         # Analyze interaction effects
         interaction_effects = await self._analyze_interactions(pareto_frontier)
 
-        # Compute correlation matrix
         correlation_matrix = self._compute_correlations(pareto_frontier)
 
         # Determine component importance
@@ -277,13 +276,11 @@ class MultiVariateAnalyzer:
             # Store best solutions
             self.best_solutions.extend(fronts[0])
 
-            # Log progress
             if iteration % 10 == 0:
                 logger.info(
                     f"Iteration {iteration}: Pareto front size = {len(fronts[0])}"
                 )
 
-        # Return final Pareto frontier
         final_evaluated = []
         for individual in population:
             metrics = await self._evaluate_individual(individual, evaluation_function)
@@ -346,11 +343,9 @@ class MultiVariateAnalyzer:
         if n == 0:
             return
 
-        # Initialize distances
         for sol in front:
             sol.crowding_distance = 0.0
 
-        # For each metric
         for metric_name in self.metrics:
             # Sort by metric value
             front.sort(key=lambda x: x.metrics.get(metric_name, 0))
@@ -359,7 +354,6 @@ class MultiVariateAnalyzer:
             front[0].crowding_distance = float("inf")
             front[-1].crowding_distance = float("inf")
 
-            # Calculate distances for intermediate points
             metric_range = front[-1].metrics.get(metric_name, 0) - front[0].metrics.get(
                 metric_name, 0
             )
@@ -396,14 +390,12 @@ class MultiVariateAnalyzer:
                 if i >= j:
                     continue
 
-                # Calculate interaction strength
                 for metric1 in component_metrics[comp1]:
                     for metric2 in component_metrics[comp2]:
                         values1 = component_metrics[comp1][metric1]
                         values2 = component_metrics[comp2][metric2]
 
                         if len(values1) > 1 and len(values2) > 1:
-                            # Calculate correlation
                             correlation, p_value = stats.spearmanr(values1, values2)
 
                             # Determine effect type
@@ -414,7 +406,6 @@ class MultiVariateAnalyzer:
                             else:
                                 effect_type = "neutral"
 
-                            # Create interaction effect
                             interaction = InteractionEffect(
                                 component1=comp1,
                                 component2=comp2,
@@ -446,7 +437,6 @@ class MultiVariateAnalyzer:
         """Analyze relative importance of system components."""
         importance = {}
 
-        # Build component graph
         for interaction in interactions:
             if abs(interaction.strength) > 0.3:
                 self.component_graph.add_edge(
@@ -455,7 +445,6 @@ class MultiVariateAnalyzer:
                     weight=abs(interaction.strength),
                 )
 
-        # Calculate centrality measures
         if self.component_graph.nodes():
             centrality = nx.eigenvector_centrality(
                 self.component_graph, weight="weight", max_iter=1000
@@ -466,7 +455,6 @@ class MultiVariateAnalyzer:
             if total > 0:
                 importance = {k: v / total for k, v in centrality.items()}
 
-        # Add components without interactions
         for metric in self.metrics.values():
             if metric.component not in importance:
                 importance[metric.component] = 0.1  # Base importance
@@ -535,7 +523,6 @@ class MultiVariateAnalyzer:
                 sensitivities = []
 
                 for perturbed_value in perturbations:
-                    # Create perturbed parameters
                     perturbed_params = solution.parameters.copy()
                     perturbed_params[param_name] = perturbed_value
 
@@ -544,7 +531,6 @@ class MultiVariateAnalyzer:
                         perturbed_params, evaluation_function
                     )
 
-                    # Calculate sensitivity
                     if metric_name in metrics:
                         sensitivity_value = abs(
                             metrics[metric_name] - solution.metrics.get(metric_name, 0)
@@ -584,12 +570,10 @@ class MultiVariateAnalyzer:
         penalty_weights = penalty_weights or {}
 
         def constrained_objective(params_array: Any) -> float:
-            # Convert array to dict
             params = {}
             for i, (name, _) in enumerate(parameter_bounds.items()):
                 params[name] = params_array[i]
 
-            # Check hard constraints
             for constraint in hard_constraints:
                 if not constraint(params):
                     return float("inf")  # Infeasible
@@ -600,7 +584,6 @@ class MultiVariateAnalyzer:
                 self._evaluate_individual(params, evaluation_function)
             )
 
-            # Calculate objective value
             objective = 0.0
             for metric_name, value in metrics.items():
                 if metric_name in self.metrics:
@@ -610,7 +593,6 @@ class MultiVariateAnalyzer:
                     elif metric.metric_type == MetricType.MAXIMIZE:
                         objective -= value * metric.weight
 
-            # Add soft constraint penalties
             for constraint in soft_constraints:
                 violation = constraint(params)
                 if violation > 0:
@@ -625,7 +607,6 @@ class MultiVariateAnalyzer:
             constrained_objective, bounds, maxiter=100, popsize=50, seed=42
         )
 
-        # Convert result to ParetoSolution
         params = {}
         for i, (name, _) in enumerate(parameter_bounds.items()):
             params[name] = result.x[i]
@@ -668,8 +649,6 @@ class MultiVariateAnalyzer:
                 metric_y, SystemMetric(metric_y, MetricType.MAXIMIZE)
             ).metric_type.value,
         }
-
-    # Helper methods
 
     def _initialize_population(
         self, bounds: dict[str, tuple[float, float]], size: int
@@ -781,8 +760,7 @@ class MultiVariateAnalyzer:
         combined.sort(key=lambda x: (x.rank, -x.crowding_distance))
 
         # Select best individuals
-        selected = [sol.parameters for sol in combined[:size]]
-        return selected
+        return [sol.parameters for sol in combined[:size]]
 
     def _get_convergence_history(self) -> list[float]:
         """Get convergence history of optimization."""
@@ -814,7 +792,6 @@ class MultiVariateAnalyzer:
         solutions = []
 
         for weights in weight_combinations:
-            # Update metric weights
             for i, metric in enumerate(self.metrics.values()):
                 metric.weight = weights[i]
 
@@ -836,9 +813,7 @@ class MultiVariateAnalyzer:
         # Use epsilon-constraint or goal programming
         solutions = []
 
-        # For each metric, optimize while constraining others
         for primary_metric in self.metrics.values():
-            # Set primary metric weight high
             for metric in self.metrics.values():
                 metric.weight = 10.0 if metric == primary_metric else 1.0
 

@@ -66,7 +66,6 @@ class ConfigurationIntegrationService:
         logger.info("Initializing configuration integration service...")
 
         try:
-            # Initialize model configuration manager
             self.model_config_manager = ModelConfigManager(
                 self.config.get("model_config_manager", {})
             )
@@ -79,21 +78,18 @@ class ConfigurationIntegrationService:
 
             self.model_config_manager.add_change_listener(listener)
 
-            # Initialize MASR with configuration manager
             masr_config = self.config.get("masr", {})
             masr_config["model_config_manager"] = self.model_config_manager
             self.masr_router = MASRouter(masr_config)
             self._components["masr_router"] = self.masr_router
             self._configuration_dependent_components.add("masr_router")
 
-            # Initialize cost optimizer with dynamic configuration
             cost_config = self.config.get("cost_optimizer", {})
             cost_config["model_config_manager"] = self.model_config_manager
             self.cost_optimizer = CostOptimizer(cost_config)
             self._components["cost_optimizer"] = self.cost_optimizer
             self._configuration_dependent_components.add("cost_optimizer")
 
-            # Initialize model router with configuration manager
             router_config = self.config.get("model_router", {})
             router_config["model_config_manager"] = self.model_config_manager
             self.model_router = ModelRouter(router_config)
@@ -115,7 +111,6 @@ class ConfigurationIntegrationService:
         logger.info(f"Configuration change detected: {event.change_type}")
 
         try:
-            # Update all configuration-dependent components
             await self._update_components(event)
 
             self.update_count += 1
@@ -129,21 +124,18 @@ class ConfigurationIntegrationService:
     async def _update_components(self, event: ConfigurationChangeEvent) -> None:
         """Update components after configuration change."""
 
-        # Update MASR router
         if (
             self.masr_router
             and "masr_router" in self._configuration_dependent_components
         ):
             await self._update_masr_router(event)
 
-        # Update cost optimizer
         if (
             self.cost_optimizer
             and "cost_optimizer" in self._configuration_dependent_components
         ):
             await self._update_cost_optimizer(event)
 
-        # Update model router
         if (
             self.model_router
             and "model_router" in self._configuration_dependent_components
@@ -227,10 +219,8 @@ class ConfigurationIntegrationService:
         }
 
         try:
-            # Validate model configuration
             config = await self.get_current_configuration()
 
-            # Check that all enabled models have valid providers
             enabled_models = config.get_enabled_models()
             enabled_providers = config.get_enabled_providers()
 
@@ -247,7 +237,6 @@ class ConfigurationIntegrationService:
                     )
                     validation_results["valid"] = False
 
-            # Check provider connectivity
             for provider_name, provider_config in enabled_providers.items():
                 component_status = await self._validate_provider_connectivity(
                     provider_name, provider_config
@@ -257,7 +246,6 @@ class ConfigurationIntegrationService:
                 if not component_status["reachable"]:
                     warnings_list.append(f"Provider '{provider_name}' is not reachable")
 
-            # Validate component health
             for component_name, component in self._components.items():
                 if hasattr(component, "health_check"):
                     try:
@@ -326,7 +314,6 @@ class ConfigurationIntegrationService:
             }
         }
 
-        # Get component statistics
         for component_name, component in self._components.items():
             if hasattr(component, "get_stats") or hasattr(
                 component, "get_configuration_stats"

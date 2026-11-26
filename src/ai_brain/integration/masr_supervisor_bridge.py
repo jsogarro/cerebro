@@ -61,8 +61,6 @@ def _mcp_tool_path_enabled() -> bool:
 
 
 class SupervisorExecutionStatus(Enum):
-    """Status of supervisor execution."""
-
     PENDING = "pending"
     INITIALIZING = "initializing"
     EXECUTING = "executing"
@@ -101,8 +99,6 @@ class SupervisorConfiguration:
 
 @dataclass
 class SupervisorExecutionResult:
-    """Result of supervisor execution."""
-
     execution_id: str
     supervisor_type: str
     domain: str
@@ -192,7 +188,6 @@ class RoutingDecisionTranslator:
             domain_key = DOMAIN_KEYS.get(primary_domain, DOMAIN_KEYS["research"])
             supervisor_type = self.component_registry.resolve(domain_key)
 
-        # Get quality threshold based on routing strategy
         routing_strategy = self._infer_routing_strategy(routing_decision)
         quality_threshold = self.strategy_to_quality.get(routing_strategy, 0.85)
 
@@ -202,7 +197,6 @@ class RoutingDecisionTranslator:
             complexity_level, routing_strategy
         )
 
-        # Get execution mode from collaboration mode
         collaboration_resolver = self.component_registry.resolve(
             COLLABORATION_MODE_WORKFLOW_KEY
         )
@@ -339,7 +333,6 @@ class ResourcePool:
 
         supervisor_type = config.supervisor_type
 
-        # Try to get from pool first
         if supervisor_type in self.supervisor_pools:
             pool = self.supervisor_pools[supervisor_type]
             if pool:
@@ -375,7 +368,6 @@ class ResourcePool:
 
         pool = self.supervisor_pools[supervisor_type]
 
-        # Add to pool if not at capacity
         if len(pool) < self.max_pool_size:
             pool.append(supervisor)
             logger.debug(f"Returned supervisor {supervisor_type} to pool")
@@ -471,7 +463,6 @@ class SupervisorExecutor:
         execution_id = str(uuid.uuid4())
         start_time = datetime.now()
 
-        # Create execution result tracker
         result = SupervisorExecutionResult(
             execution_id=execution_id,
             supervisor_type=config.supervisor_type,
@@ -483,7 +474,6 @@ class SupervisorExecutor:
         self.active_executions[execution_id] = result
 
         try:
-            # Get supervisor from pool
             result.status = SupervisorExecutionStatus.INITIALIZING
             supervisor = await self.resource_pool.get_supervisor(
                 supervisor_class, config
@@ -520,10 +510,8 @@ class SupervisorExecutor:
                 )
                 result.workers_used = len(coordination_metadata.get("workers_used", []))
 
-            # Return supervisor to pool
             await self.resource_pool.return_supervisor(supervisor)
 
-            # Update statistics
             self.execution_stats["successful_executions"] += 1
 
             logger.info(f"Completed execution {execution_id} successfully")
@@ -539,7 +527,6 @@ class SupervisorExecutor:
             result.mark_completed()
             self.execution_stats["total_executions"] += 1
 
-            # Update average execution time
             total_time = (
                 self.execution_stats["average_execution_time"]
                 * (self.execution_stats["total_executions"] - 1)
@@ -607,7 +594,6 @@ class MASRSupervisorBridge:
             component_registry = get_default_component_registry()
         self.component_registry = component_registry
 
-        # Initialize components
         self.translator = RoutingDecisionTranslator(
             self.config.get("translator", {}),
             component_registry=self.component_registry,

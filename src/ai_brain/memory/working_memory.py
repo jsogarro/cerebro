@@ -196,7 +196,6 @@ class WorkingMemoryManager:
         """
 
         try:
-            # Create working memory item
             item = WorkingMemoryItem(
                 key=key,
                 value=value,
@@ -244,7 +243,6 @@ class WorkingMemoryManager:
             if item:
                 self.hit_count += 1
 
-                # Update access statistics
                 item.access_count += 1
                 item.last_accessed = datetime.now()
 
@@ -348,10 +346,8 @@ class WorkingMemoryManager:
 
         context = await self.retrieve_conversation_context(session_id)
         if not context:
-            # Create new context
             context = ConversationContext(session_id=session_id)
 
-        # Add message with timestamp
         message_with_timestamp = {**message, "timestamp": datetime.now().isoformat()}
         context.messages.append(message_with_timestamp)
 
@@ -443,7 +439,6 @@ class WorkingMemoryManager:
         matching_keys = []
 
         try:
-            # Get all keys
             if self.redis_client:
                 pattern = f"{self.key_prefix}*"
                 all_keys = await self.redis_client.keys(pattern)
@@ -455,7 +450,6 @@ class WorkingMemoryManager:
                             item_data = self._deserialize_stored_item(data)
                             item_tags = item_data.get("tags", [])
 
-                            # Check if any of the specified tags match
                             if any(tag in item_tags for tag in tags):
                                 clean_key = key.decode().replace(self.key_prefix, "")
                                 matching_keys.append(clean_key)
@@ -651,7 +645,6 @@ class WorkingMemoryManager:
         """Retrieve item from memory fallback."""
         item = self._memory_fallback.get(key)
 
-        # Check expiration
         if item and item.expires_at and datetime.now() > item.expires_at:
             del self._memory_fallback[key]
             return None
@@ -680,7 +673,6 @@ class WorkingMemoryManager:
         try:
             if self.redis_client:
                 redis_key = self._make_key(key)
-                # Get current TTL
                 ttl = await self.redis_client.ttl(redis_key)
                 if ttl > 0:
                     # Re-store with updated stats

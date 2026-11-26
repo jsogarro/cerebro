@@ -195,7 +195,6 @@ class MASRService:
             )
 
             try:
-                # Parse strategy if provided
                 strategy = None
                 if request.strategy:
                     try:
@@ -206,7 +205,6 @@ class MASRService:
                             detail=f"Invalid routing strategy: {request.strategy}",
                         ) from None
 
-                # Get routing decision
                 routing_decision = await self.masr_router.route(
                     query=request.query,
                     context=request.context,
@@ -220,7 +218,6 @@ class MASRService:
                 )
                 self._update_average_response_time(process_time)
 
-                # Build response
                 return RoutingResponse(
                     query_id=routing_decision.query_id,
                     timestamp=routing_decision.timestamp.isoformat(),
@@ -307,13 +304,11 @@ class MASRService:
         logger.info("Initializing MASR service components...")
 
         try:
-            # Initialize Redis client
             redis_url = self.settings.REDIS_URL
             self.redis_client = redis.from_url(redis_url)
             await self.redis_client.ping()
             logger.info("Redis connection established")
 
-            # Initialize MASR router
             masr_config = settings_to_router_config(self.settings)
             # This service is a legacy diagnostics surface, not an adaptive
             # state authority. Thompson allocation remains dark here even if
@@ -400,7 +395,6 @@ class MASRService:
         uvicorn.run(self.app, **uvicorn_config)  # type: ignore[arg-type]
 
 
-# Create global service instance
 masr_service = MASRService()
 
 

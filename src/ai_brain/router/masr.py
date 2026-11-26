@@ -160,14 +160,12 @@ class MASRouter:
         self.config = config or {}
         self.model_config_manager = model_config_manager
 
-        # Initialize components
         self.complexity_analyzer = QueryComplexityAnalyzer(
             self.config.get("complexity_analyzer", {})
         )
         cost_opt_config = config.get("cost_optimizer", {}) if config else {}
         self.cost_optimizer = CostOptimizer(cost_opt_config, model_config_manager)
 
-        # Initialize cache manager
         cache_config = self.config.get("cache", {})
         self.cache_manager = RoutingCacheManager(
             enabled=self.config.get("enable_caching", True),
@@ -175,7 +173,6 @@ class MASRouter:
             eviction_batch_size=cache_config.get("eviction_batch_size", 100),
         )
 
-        # Initialize metrics collector
         self.default_strategy = RoutingStrategy(
             self.config.get("default_strategy", "balanced")
         )
@@ -500,7 +497,6 @@ class MASRouter:
                             query, context, decision, strategy, constraints
                         )
 
-                    # Update metrics
                     self.metrics_collector.update_metrics(decision)
 
                     # Store in history for learning
@@ -519,7 +515,6 @@ class MASRouter:
                         f"(processing: {processing_time:.1f}ms)"
                     )
 
-                    # Update trace with final routing decision details
                     if trace is not None:
                         try:
                             trace.update(
@@ -568,7 +563,6 @@ class MASRouter:
                             error=str(trace_err),
                             query_id=query_id,
                         )
-                # Return fallback routing decision
                 return self._create_fallback_decision(query_id, query, e)
 
     def _select_routing_strategy(
@@ -576,7 +570,6 @@ class MASRouter:
     ) -> RoutingStrategy:
         """Select the optimal routing strategy based on analysis and context."""
 
-        # Check for explicit strategy in context
         if context and context.get("routing_strategy"):
             return RoutingStrategy(context["routing_strategy"])
 
@@ -649,7 +642,6 @@ class MASRouter:
     ) -> CollaborationMode:
         """Determine optimal agent collaboration mode."""
 
-        # Check for fast path first (bypass all orchestration)
         if self._should_use_fast_path(complexity_analysis):
             return CollaborationMode.FAST_PATH
 
@@ -1254,7 +1246,6 @@ class MASRouter:
         # Ensure we never go below 1
         result: int = max(1, adjusted)
 
-        # Log structured event when adaptation changes allocation
         if capped_delta != 0:
             logger.info(
                 "adaptive_routing_adjustment_applied",
@@ -1493,7 +1484,6 @@ class MASRouter:
             adaptive_recommendation: Optional adaptive engine recommendation (raw value)
         """
 
-        # Get supervisor types based on domains
         supervisor_types = self._get_domain_supervisor_types(
             complexity_analysis.domains
         )
@@ -1682,7 +1672,6 @@ class MASRouter:
             if reasoning_type in reasoning_workers:
                 worker_types.append(reasoning_workers[reasoning_type])
 
-        # Add domain specialists
         worker_types.extend(self._get_domain_worker_types(complexity_analysis.domains))
 
         # Always include a validator for complex queries

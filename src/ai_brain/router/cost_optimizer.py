@@ -146,10 +146,8 @@ class CostOptimizer:
             return True
 
         try:
-            # Load all enabled models
             enabled_models = await self.model_config_manager.get_enabled_models()
 
-            # Convert to the format expected by cost optimizer
             self.models = {}
             for model_name, model_spec in enabled_models.items():
                 # Convert ModelSpecification to ModelSpec for compatibility
@@ -266,7 +264,6 @@ class CostOptimizer:
             quality_score=0.80,
         )
 
-        # Load custom models from config if provided
         custom_models = self.config.get("custom_models", {})
         for name, spec in custom_models.items():
             models[name] = ModelSpec(**spec)
@@ -311,7 +308,6 @@ class CostOptimizer:
         if not candidate_models:
             raise ValueError("No models meet the specified requirements")
 
-        # Calculate costs for each candidate
         cost_estimates = await self._calculate_costs(
             candidate_models, complexity_analysis
         )
@@ -374,7 +370,6 @@ class CostOptimizer:
         )
 
         for model in self.models.values():
-            # Check basic constraints
             estimated_cost = (
                 model.cost_per_1k_tokens * complexity_analysis.estimated_tokens / 1000
             )
@@ -396,7 +391,6 @@ class CostOptimizer:
         if not domains or "general_purpose" in model.strengths:
             return True
 
-        # Check specific domain compatibility
         domain_compatibility = {
             "research": ["reasoning", "analysis", "general_purpose"],
             "content": ["creative_writing", "general_purpose"],
@@ -465,7 +459,6 @@ class CostOptimizer:
         self, model: ModelSpec, complexity_analysis: Any
     ) -> bool:
         """Check if model is a perfect fit for the query domain."""
-        # Check if model's strengths perfectly align with query requirements
         reasoning_types = complexity_analysis.reasoning_types
 
         perfect_fits = {
@@ -517,13 +510,11 @@ class CostOptimizer:
                     "balance_weights", {"cost": 0.4, "quality": 0.4, "latency": 0.2}
                 )
 
-                total_score = float(
+                return float(
                     cost_score * float(weights["cost"])
                     + quality_score * float(weights["quality"])
                     + latency_score * float(weights["latency"])
                 )
-
-                return total_score
 
             return max(cost_estimates.items(), key=score_model)
 
@@ -534,8 +525,6 @@ class CostOptimizer:
         cost_estimates: dict[ModelSpec, CostEstimate],
     ) -> list[ModelSpec]:
         """Select appropriate fallback models."""
-        fallbacks = []
-
         # Remove primary from candidates
         remaining = [m for m in candidates if m != primary_model]
 
@@ -548,9 +537,7 @@ class CostOptimizer:
         )
 
         # Select up to 2 fallback models
-        fallbacks = remaining[:2]
-
-        return fallbacks
+        return remaining[:2]
 
     def _assess_risk_factors(
         self, model: ModelSpec, complexity_analysis: Any, constraints: dict[str, Any]

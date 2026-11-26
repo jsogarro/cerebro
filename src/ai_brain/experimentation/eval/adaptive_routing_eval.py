@@ -176,7 +176,6 @@ class AdaptiveRoutingEvaluator:
 
             worker_dist[allocated] = worker_dist.get(allocated, 0) + 1
 
-        # Compute MAE from optimal
         mae = np.mean(
             [
                 abs(alloc - q.optimal_worker_count)
@@ -197,7 +196,6 @@ class AdaptiveRoutingEvaluator:
             RoutingOutcome,
         )
 
-        # Create MASR instance with adaptive routing enabled
         config = {
             "adaptive_routing_enabled": True,
             "adaptive_routing_min_history": 0,
@@ -234,11 +232,9 @@ class AdaptiveRoutingEvaluator:
             )
 
         for outcome_index, query in enumerate(corpus):
-            # Get baseline (what static would use)
             baseline = query.analytic_worker_count
             analysis = _analysis_for(query)
 
-            # Get adaptive recommendation through the REAL router hook
             recommended = await router._get_adaptive_allocation_adjustment(
                 complexity_analysis=analysis,  # type: ignore[arg-type]
                 collaboration_mode=query.collaboration_mode,
@@ -316,7 +312,6 @@ class AdaptiveRoutingEvaluator:
                 "the adaptive hook never engaged (check guards/wiring)"
             )
 
-        # Compute MAE from optimal
         mae = np.mean(
             [
                 abs(alloc - q.optimal_worker_count)
@@ -384,7 +379,7 @@ class AdaptiveRoutingEvaluator:
                 "horizon; revisit reward shaping or exploration schedule first."
             )
         """Generate markdown report."""
-        report = f"""# Adaptive Routing Offline Evaluation Report
+        return f"""# Adaptive Routing Offline Evaluation Report
 
 Generated: {datetime.now().isoformat()}
 
@@ -432,7 +427,6 @@ This is a **synthetic evaluation** with the following limitations:
 eval (or live A/B in the experimentation harness) shows adaptive matching or
 beating static allocation.
 """
-        return report
 
     def _format_distribution(self, dist: dict[int, int]) -> str:
         """Format worker distribution as markdown table."""
@@ -454,7 +448,6 @@ async def main() -> None:
     report = evaluator.generate_report(metrics)
     print(report)
 
-    # Save JSON summary
     output_path = "/tmp/adaptive_routing_eval_results.json"
     with open(output_path, "w") as f:
         json.dump(asdict(metrics), f, indent=2)

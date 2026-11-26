@@ -87,7 +87,6 @@ class ModelRouter:
         self.success_count = 0
         self.fallback_count = 0
 
-        # Initialize providers
         self._initialize_providers()
 
     def _initialize_providers(self) -> None:
@@ -107,7 +106,6 @@ class ModelRouter:
                     continue
                 provider_class = self.component_registry.resolve(provider_key)
 
-                # Initialize provider
                 provider = provider_class(provider_config)
 
                 self.registry.providers[provider_name] = provider
@@ -204,7 +202,6 @@ class ModelRouter:
         if not provider:
             raise ValueError(f"Provider not available: {provider_name}")
 
-        # Check provider health
         health_status = await self._get_provider_health(provider_name)
         if not health_status.healthy:
             raise Exception(f"Provider {provider_name} is unhealthy")
@@ -212,7 +209,6 @@ class ModelRouter:
         # Generate response
         response = await provider.generate(request, model_name)
 
-        # Update health status based on response
         if not response.success:
             health_status.recent_errors.append(
                 f"{datetime.now()}: {response.error_message}"
@@ -273,7 +269,6 @@ class ModelRouter:
                 primary_provider = available_providers[0]
                 primary_model = None
 
-        # Create fallback list
         fallback_providers = [p for p in available_providers if p != primary_provider]
 
         return {
@@ -289,7 +284,6 @@ class ModelRouter:
         now = datetime.now()
         last_check = self.registry.last_health_check.get(provider_name)
 
-        # Check if we need to refresh health status
         if not last_check or now - last_check > timedelta(
             seconds=self.health_check_interval
         ):
@@ -306,7 +300,6 @@ class ModelRouter:
                         error=str(e),
                         exc_info=True,
                     )
-                    # Create error status
                     health_status = ProviderHealthStatus(
                         provider_name=provider_name, healthy=False, last_error=str(e)
                     )
@@ -320,7 +313,6 @@ class ModelRouter:
     def _create_failure_response(
         self, request: ModelRequest, error_message: str
     ) -> ModelResponse:
-        """Create a failure response."""
         return ModelResponse(
             request_id=request.request_id,
             provider="router",
@@ -355,8 +347,6 @@ class ModelRouter:
         return provider.get_model_info(model_name)
 
     async def get_provider_metrics(self) -> dict[str, Any]:
-        """Get metrics for all providers."""
-
         providers_dict: dict[str, Any] = {}
         metrics: dict[str, Any] = {
             "router": {
@@ -415,7 +405,6 @@ class ModelRouter:
                 yield f"Error: Provider {primary_provider} not available"
                 return
 
-            # Check provider health
             health_status = await self._get_provider_health(primary_provider)
             if not health_status.healthy:
                 yield f"Error: Provider {primary_provider} is unhealthy"
