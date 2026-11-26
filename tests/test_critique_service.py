@@ -586,6 +586,7 @@ def test_a_fix_that_claims_verified_references_gets_the_warning_too() -> None:
         "We recommend acceptance of this manuscript",
         "The editor recommended rejection",
         "rated 10/10",
+        "A solid 8/10 overall",
         "I would rate this paper 7/10",
         "Grade: B-",
         "This is unpublishable",
