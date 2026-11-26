@@ -94,9 +94,10 @@ SANITIZE_PATTERNS = (
 )
 # Beyond the pinned patterns: any leftover tag-shaped opener (attributes follow) loses its
 # "<", and "//host" is a URL whatever the host looks like (IPs, "localhost").
-_STRAY_TAG_OPEN = re.compile(r"<(?=[a-z!?/][^<>]*[\s/=])", re.IGNORECASE)
+_STRAY_TAG_OPEN = re.compile(r"<(?=[a-z][\w-]*[\s/][^<>]*=[^<>]*>)", re.IGNORECASE)
 _ANY_HOST = re.compile(r"(?<![\w:])//[\w.-]+\S*")
-_PRE_CAP_FACTOR = 8
+_PRE_CAP_FACTOR = 2
+_MAX_PASSES = 4
 # The pinned link pattern with its text captured, so the text survives the removal.
 _LINK_KEEPING_TEXT = SANITIZE_PATTERNS[2].replace(
     r"\[[^\]\n]{0,200}\]", r"\[([^\]\n]{0,200})\]"
@@ -126,13 +127,16 @@ def sanitize_model_field(text: str, max_len: int) -> tuple[str, bool]:
     removed = len(window) < len(text) or visible != window
     cleaned = " ".join(visible.split())
     # Removing one construct can splice its neighbours into a new one ("<<b>b>"), so repeat.
-    while True:
+    # Input that keeps changing past the pass budget is hostile nesting: drop the field.
+    for _ in range(_MAX_PASSES):
         before = cleaned
         for pattern, replacement in _RULES:
             cleaned = pattern.sub(replacement, cleaned)
         if cleaned == before:
             break
         removed = True
+    else:
+        return "", True
     cleaned = " ".join(cleaned.split())
     if len(cleaned) > max_len:
         cut = cleaned[:max_len]

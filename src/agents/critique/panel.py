@@ -199,6 +199,11 @@ def template_sha256(role: Role) -> str:
     return hashlib.sha256(template.encode()).hexdigest()
 
 
+def _error_type(exc: Exception) -> str:
+    """Only a type name is kept; a provider message may quote the manuscript."""
+    return str(exc) if isinstance(exc, ProviderCallError) else type(exc).__name__
+
+
 def _classify_finish(reason: str) -> tuple[str, str | None] | None:
     """Return a terminal (status, error_type), or None when the reply may be parsed."""
     if reason == "STOP":
@@ -268,7 +273,10 @@ def _ground_issue(
     if item.category not in role.categories:
         return None, "unsafe_field", 0
     spans: list[_Span] = []
-    for quote in (item.quote, item.second_quote):
+    second = (
+        item.second_quote if item.second_quote and item.second_quote.strip() else None
+    )
+    for quote in (item.quote, second):
         if quote is None:
             continue
         span = _ground_quote(quote, prepared, document)
@@ -279,9 +287,9 @@ def _ground_issue(
     fix, f_removed = sanitize_model_field(item.fix, FIX_MAX_CHARS)
     if not problem:
         return None, "unsafe_field", 0
-    second = spans[1] if len(spans) > 1 else (None, None, None, None)
+    second_span = spans[1] if len(spans) > 1 else (None, None, None, None)
     kept = KeptIssue(
-        role.name, item.category, item.severity, *spans[0], problem, fix, *second
+        role.name, item.category, item.severity, *spans[0], problem, fix, *second_span
     )
     return kept, None, p_removed + f_removed
 
@@ -354,8 +362,8 @@ async def _run_role(
     for _ in range(MAX_PARSE_ATTEMPTS):
         try:
             reply: ModelReply = await model.complete(prompt)
-        except ProviderCallError as exc:
-            return result("failed", error_type=str(exc))
+        except Exception as exc:
+            return result("failed", error_type=_error_type(exc))
         finish = reply.finish_reason
         if reply.input_tokens is not None:
             tokens_in = (tokens_in or 0) + reply.input_tokens
@@ -374,7 +382,9 @@ async def _run_role(
     kept, drops, sanitized = await asyncio.to_thread(
         ground_role, parsed, role, prepared, document, delimiter
     )
-    summary, s_removed = sanitize_model_field(parsed.summary, SUMMARY_MAX_CHARS)
+    summary, s_removed = await asyncio.to_thread(
+        sanitize_model_field, parsed.summary, SUMMARY_MAX_CHARS
+    )
     return result(
         "succeeded",
         issues=tuple(kept),

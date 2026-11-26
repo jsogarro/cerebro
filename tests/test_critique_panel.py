@@ -281,12 +281,29 @@ class TestGrounding:
         )
         assert r.issues == () and r.drops["not_found"] == 1
 
+    def test_blank_second_quote_counts_as_absent(self) -> None:
+        r = self.run([issue(Q1, second_quote=""), issue(Q2, second_quote="  ")])
+        assert len(r.issues) == 2 and r.issues[0].second_quote is None
+
     def test_unknown_category_is_dropped(self) -> None:
         r = self.run([issue(Q1, category="free text invented by the model")])
         assert r.issues == () and r.drops["unsafe_field"] == 1
 
 
 # ---- 4. off-loop -----------------------------------------------------------
+
+
+def test_summary_sanitizing_runs_in_a_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    names: list[str] = []
+    real = asyncio.to_thread
+
+    async def spy(fn: Callable[..., Any], *a: Any, **k: Any) -> Any:
+        names.append(fn.__name__)
+        return await real(fn, *a, **k)
+
+    monkeypatch.setattr(panel_mod.asyncio, "to_thread", spy)
+    asyncio.run(run_panel(DOC, model=by_role()))
+    assert names.count("sanitize_model_field") == 5
 
 
 def test_prepare_and_grounding_run_in_threads(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -416,6 +433,14 @@ class TestStatus:
     def test_empty_finish_reason_fails(self) -> None:
         r, _ = self.run(reply([], finish=""))
         assert r.status == "failed" and r.error_type == "unexpected_finish_reason:"
+
+    def test_any_exception_fails_only_that_role(self) -> None:
+        stub = by_role(statistics=ValueError("echoes SENTINEL"))
+        result = asyncio.run(run_panel(DOC, model=stub))
+        failed = only(result, "statistics")
+        assert (failed.status, failed.error_type) == ("failed", "ValueError")
+        assert only(result, "methods").status == "succeeded"
+        assert only(result, "red_team").status == "succeeded"
 
     def test_exception_records_type_name_only(self) -> None:
         r, _ = self.run(ProviderCallError("ValueError"))
@@ -641,6 +666,20 @@ class TestGeminiReviewModel:
         monkeypatch.setattr(ChatGoogleGenerativeAI, "ainvoke", fake)
         got = asyncio.run(GeminiReviewModel(self.chat(1), _Limiter()).complete("p"))
         assert got.finish_reason == "" and got.input_tokens is None
+
+    def test_missing_metadata_is_a_provider_error_not_an_attribute_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from types import SimpleNamespace
+
+        async def fake(self: Any, prompt: str) -> Any:
+            return SimpleNamespace(
+                text="x", response_metadata=None, usage_metadata=None
+            )
+
+        monkeypatch.setattr(ChatGoogleGenerativeAI, "ainvoke", fake)
+        got = asyncio.run(GeminiReviewModel(self.chat(1), _Limiter()).complete("p"))
+        assert got == ModelReply("x", "", None, None)
 
     def test_provider_exception_message_is_dropped(
         self, monkeypatch: pytest.MonkeyPatch

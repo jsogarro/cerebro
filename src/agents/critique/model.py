@@ -70,12 +70,12 @@ class GeminiReviewModel:
         try:
             async with self._limiter.acquire():
                 message = await self._chat.ainvoke(prompt)
+            usage: Mapping[str, Any] = message.usage_metadata or {}
+            return ModelReply(
+                message.text,
+                str((message.response_metadata or {}).get("finish_reason", "")),
+                usage.get("input_tokens"),
+                usage.get("output_tokens"),
+            )
         except Exception as exc:
             raise ProviderCallError(type(exc).__name__) from None
-        usage: Mapping[str, Any] = message.usage_metadata or {}
-        return ModelReply(
-            message.text,
-            str(message.response_metadata.get("finish_reason", "")),
-            usage.get("input_tokens"),
-            usage.get("output_tokens"),
-        )

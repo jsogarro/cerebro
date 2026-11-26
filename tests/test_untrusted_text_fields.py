@@ -125,3 +125,28 @@ def test_pathological_input_is_bounded() -> None:
     start = time.perf_counter()
     sanitize_model_field("a-" * 100_000, 800)
     assert time.perf_counter() - start < 1
+
+
+def test_comparisons_in_prose_keep_their_angle_bracket() -> None:
+    assert sanitize_model_field("if x<y then z>w and p<0.05", 100) == (
+        "if x<y then z>w and p<0.05",
+        False,
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["<b" * 2400 + ">" * 2400, "a-" * 4800, "<b>" * 3000, "&amp;" * 1500 + "<" * 3000],
+)
+def test_hostile_input_stays_under_a_second(text: str) -> None:
+    import time
+
+    start = time.perf_counter()
+    sanitize_model_field(text, 1200)
+    assert time.perf_counter() - start < 1
+
+
+def test_nested_markup_is_removed_or_the_field_is_dropped() -> None:
+    out, removed = sanitize_model_field("<b" * 50 + ">" * 50 + " tail words here", 800)
+    assert removed
+    assert not re.search(r"<[a-z]", out)
