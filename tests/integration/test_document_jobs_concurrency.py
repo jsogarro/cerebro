@@ -228,6 +228,30 @@ async def test_a_global_count_limit_holds_across_orgs_admitting_concurrently(
     assert results.count(True) == 1
 
 
+async def blocked_on_an_advisory_lock(
+    factory: Factory, task: "asyncio.Task[bool]"
+) -> bool:
+    """True once a backend is waiting on an advisory lock; False if the task finishes first.
+
+    Polls the server instead of sleeping, so the answer does not depend on how long
+    the second connection takes to open.
+    """
+    async with factory() as probe:
+        for _ in range(300):
+            if task.done():
+                return False
+            waiting = await probe.scalar(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE wait_event_type = 'Lock' AND wait_event = 'advisory'"
+                )
+            )
+            if waiting:
+                return True
+            await asyncio.sleep(0.1)
+    return False
+
+
 async def test_a_revision_admission_waits_for_a_critique_admission_holding_the_shared_lock(
     factory: Factory,
 ) -> None:
@@ -251,11 +275,10 @@ async def test_a_revision_admission_waits_for_a_critique_admission_holding_the_s
         waiting = asyncio.create_task(
             admit_critique(factory, document, JobLimits(), kind="revision", **shared)
         )
-        done, _ = await asyncio.wait({waiting}, timeout=1.5)
-        released = not done
+        blocked = await blocked_on_an_advisory_lock(factory, waiting)
         await holder.commit()
     assert await asyncio.wait_for(waiting, 10)
-    assert released, "the revision admission did not wait for the shared lock"
+    assert blocked, "the revision admission did not wait for the shared lock"
 
 
 async def test_admissions_under_different_locks_do_not_wait_for_each_other(
