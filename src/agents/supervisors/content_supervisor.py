@@ -146,7 +146,6 @@ class ContentSupervisor(BaseSupervisor):
         """Build LangGraph workflow for content supervision."""
         self.workflow_graph = StateGraph(dict)
 
-        # Add nodes for each phase
         self.workflow_graph.add_node(
             "plan_content",
             self._create_langgraph_node("plan_content", self._plan_content_phase),
@@ -176,7 +175,6 @@ class ContentSupervisor(BaseSupervisor):
             ),
         )
 
-        # Add edges for content workflow
         self.workflow_graph.set_entry_point("plan_content")
         self.workflow_graph.add_edge("plan_content", "coordinate_drafting")
         self.workflow_graph.add_edge("coordinate_drafting", "coordinate_editing")
@@ -212,7 +210,6 @@ class ContentSupervisor(BaseSupervisor):
         state.current_phase = "planning"
         state = await self._coordinate_workers(state, task)
 
-        # Initialize worker tasks for content creation
         content_query = state.original_query
         state.worker_tasks = {
             "content_planning": {

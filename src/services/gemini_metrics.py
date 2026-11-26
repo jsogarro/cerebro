@@ -217,7 +217,6 @@ def track_gemini_call(method: str) -> Callable[..., Any]:
                 metrics.record_error(type(e).__name__)
                 raise
 
-        # Return appropriate wrapper based on function type
         import asyncio
 
         if asyncio.iscoroutinefunction(func):

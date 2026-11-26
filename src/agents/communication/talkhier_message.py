@@ -179,7 +179,6 @@ class TalkHierMessage:
         elif isinstance(content, dict):
             self.talkhier_content = TalkHierContent(**content)
         else:
-            # Convert string content to structured format
             self.talkhier_content = TalkHierContent(content=str(content))
 
         # Hierarchical metadata
@@ -380,7 +379,6 @@ class TalkHierMessage:
         refinement_data = data.get("refinement_metadata", {})
         refinement_metadata = RefinementMetadata(**refinement_data)
 
-        # Create message
         message = cls(
             from_agent=data["from_agent"],
             to_agent=data["to_agent"],
@@ -397,7 +395,6 @@ class TalkHierMessage:
             context=data.get("context", {}),
         )
 
-        # Set IDs and timestamp
         message.message_id = data["message_id"]
         message.conversation_id = data["conversation_id"]
         message.timestamp = datetime.fromisoformat(data["timestamp"])

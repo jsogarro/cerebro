@@ -113,7 +113,6 @@ class CacheManager:
         full_key = self._make_key(key)
 
         try:
-            # Get value and metadata
             pipe = self.redis.pipeline()
             pipe.get(full_key)
             pipe.get(f"{full_key}:meta")
@@ -126,7 +125,6 @@ class CacheManager:
                 self.metrics["misses"] += 1
                 return None
 
-            # Check if value is compressed
             compressed = False
             if meta_bytes:
                 meta = deserialize_from_cache(meta_bytes)
@@ -136,7 +134,6 @@ class CacheManager:
             value_str = self._decompress_value(value_bytes, compressed)
             value = deserialize_from_cache(value_str)
 
-            # Update strategy (for LRU, etc.)
             await self.strategy.on_get(full_key, self.redis)
 
             self.metrics["hits"] += 1
@@ -181,7 +178,6 @@ class CacheManager:
                 "original_size": len(value_str),
             }
 
-            # Set value and metadata
             pipe = self.redis.pipeline()
             pipe.set(full_key, value_bytes)
             pipe.set(f"{full_key}:meta", serialize_for_cache(meta))
@@ -272,7 +268,6 @@ class CacheManager:
                     results[key] = None
                     self.metrics["misses"] += 1
                 else:
-                    # Check compression
                     compressed = False
                     if meta_bytes:
                         meta = deserialize_from_cache(meta_bytes)
@@ -324,7 +319,6 @@ class CacheManager:
                     "size": len(value_bytes),
                 }
 
-                # Add to pipeline
                 pipe.set(full_key, value_bytes)
                 pipe.set(f"{full_key}:meta", serialize_for_cache(meta))
 
@@ -400,7 +394,6 @@ class CacheManager:
                         count += len(batch)
                     batch = {}
 
-            # Set remaining items
             if batch and await self.batch_set(batch):
                 count += len(batch)
 

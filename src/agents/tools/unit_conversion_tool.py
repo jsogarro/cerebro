@@ -118,7 +118,6 @@ class UnitConversionTool(AgentTool[UnitConversionParams]):
         else:
             raise ValueError(f"Unknown temperature unit: {from_unit}")
 
-        # Convert from Celsius to target
         if to_u in ("fahrenheit", "f"):
             return celsius * 9 / 5 + 32
         elif to_u in ("kelvin", "k"):
@@ -146,7 +145,6 @@ class UnitConversionTool(AgentTool[UnitConversionParams]):
         from_unit = params.from_unit.lower()
         to_unit = params.to_unit.lower()
 
-        # Handle temperature conversions separately
         if from_unit in self._TEMPERATURE_UNITS:
             if to_unit not in self._TEMPERATURE_UNITS:
                 raise ValueError(
@@ -166,14 +164,12 @@ class UnitConversionTool(AgentTool[UnitConversionParams]):
         if table is None:
             raise ValueError(f"Unknown unit: {params.from_unit}")
 
-        # Check if target unit is in the same table
         if to_unit not in table:
             raise ValueError(
                 f"Cannot convert {params.from_unit} to {params.to_unit} "
                 "(different unit types)"
             )
 
-        # Convert: value * from_multiplier / to_multiplier
         result = params.value * table[from_unit] / table[to_unit]
 
         return {

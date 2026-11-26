@@ -68,7 +68,6 @@ class VisualizationGenerator:
         """Initialize visualization generator."""
         self.settings = settings or ReportSettings()
 
-        # Check dependencies
         self._validate_dependencies()
 
         # Default visualization settings
@@ -166,13 +165,11 @@ class VisualizationGenerator:
             x_values = data["labels"]
             y_values = data["values"]
         else:
-            # Try to infer from data structure
             keys = list(data.keys())
             values = list(data.values())
             x_values = keys
             y_values = values
 
-        # Create bar chart
         fig = go.Figure(
             data=[
                 go.Bar(
@@ -184,7 +181,6 @@ class VisualizationGenerator:
             ]
         )
 
-        # Update layout
         fig.update_layout(
             title=viz_spec.title,
             xaxis_title=config.get("x_label", "Category"),
@@ -206,7 +202,6 @@ class VisualizationGenerator:
         data = viz_spec.data
         config = viz_spec.config
 
-        # Create line chart
         fig = go.Figure()
 
         if "series" in data:
@@ -234,7 +229,6 @@ class VisualizationGenerator:
                 )
             )
 
-        # Update layout
         fig.update_layout(
             title=viz_spec.title,
             xaxis_title=config.get("x_label", "X Axis"),
@@ -259,7 +253,6 @@ class VisualizationGenerator:
         labels = data.get("labels", [])
         values = data.get("values", [])
 
-        # Create pie chart
         fig = go.Figure(
             data=[
                 go.Pie(
@@ -271,7 +264,6 @@ class VisualizationGenerator:
             ]
         )
 
-        # Update layout
         fig.update_layout(
             title=viz_spec.title,
             template=theme,
@@ -291,7 +283,6 @@ class VisualizationGenerator:
         data = viz_spec.data
         config = viz_spec.config
 
-        # Create scatter plot
         fig = go.Figure(
             data=go.Scatter(
                 x=data.get("x", []),
@@ -310,7 +301,6 @@ class VisualizationGenerator:
             )
         )
 
-        # Update layout
         fig.update_layout(
             title=viz_spec.title,
             xaxis_title=config.get("x_label", "X Axis"),
@@ -370,7 +360,6 @@ class VisualizationGenerator:
                 )
             )
 
-        # Update layout
         fig.update_layout(
             polar={
                 "radialaxis": {
@@ -403,7 +392,6 @@ class VisualizationGenerator:
         x_labels = data.get("x", None)
         y_labels = data.get("y", None)
 
-        # Create heatmap
         fig = go.Figure(
             data=go.Heatmap(
                 z=z_values,
@@ -415,7 +403,6 @@ class VisualizationGenerator:
             )
         )
 
-        # Update layout
         fig.update_layout(
             title=viz_spec.title,
             xaxis_title=config.get("x_label", "X Axis"),
@@ -439,10 +426,8 @@ class VisualizationGenerator:
         data = viz_spec.data
         config = viz_spec.config
 
-        # Create network graph
         G = nx.Graph()  # noqa: N806
 
-        # Add nodes
         nodes = data.get("nodes", [])
         for node in nodes:
             if isinstance(node, dict):
@@ -450,7 +435,6 @@ class VisualizationGenerator:
             else:
                 G.add_node(node)
 
-        # Add edges
         edges = data.get("edges", [])
         for edge in edges:
             if isinstance(edge, dict):
@@ -493,7 +477,6 @@ class VisualizationGenerator:
             edge_x.extend([x0, x1, None])
             edge_y.extend([y0, y1, None])
 
-        # Create edge trace
         edge_trace = go.Scatter(
             x=edge_x,
             y=edge_y,
@@ -502,7 +485,6 @@ class VisualizationGenerator:
             mode="lines",
         )
 
-        # Create node trace
         node_x = []
         node_y = []
         node_text = []
@@ -544,7 +526,6 @@ class VisualizationGenerator:
 
         node_trace.marker.color = node_adjacencies
 
-        # Create figure
         fig = go.Figure(
             data=[edge_trace, node_trace],
             layout=go.Layout(
@@ -602,7 +583,6 @@ class VisualizationGenerator:
         plt.title(viz_spec.title)
         plt.axis("off")
 
-        # Save to base64
         img_buffer = io.BytesIO()
         plt.savefig(img_buffer, format="png", dpi=150, bbox_inches="tight")
         img_buffer.seek(0)
@@ -656,13 +636,11 @@ class VisualizationGenerator:
                 "Word cloud requires 'text' or 'frequencies' in data"
             )
 
-        # Convert to image
         plt.figure(figsize=(12, 8))
         plt.imshow(wordcloud, interpolation="bilinear")
         plt.axis("off")
         plt.title(viz_spec.title, fontsize=16, pad=20)
 
-        # Save to base64
         img_buffer = io.BytesIO()
         plt.savefig(img_buffer, format="png", dpi=150, bbox_inches="tight")
         img_buffer.seek(0)
@@ -688,7 +666,6 @@ class VisualizationGenerator:
         data = viz_spec.data
         config = viz_spec.config
 
-        # Create histogram
         fig = go.Figure(
             data=[
                 go.Histogram(
@@ -701,7 +678,6 @@ class VisualizationGenerator:
             ]
         )
 
-        # Update layout
         fig.update_layout(
             title=viz_spec.title,
             xaxis_title=config.get("x_label", "Value"),
@@ -746,7 +722,6 @@ class VisualizationGenerator:
                 )
             )
 
-        # Update layout
         fig.update_layout(
             title=viz_spec.title,
             yaxis_title=config.get("y_label", "Value"),
@@ -773,7 +748,6 @@ class VisualizationGenerator:
                 "interactive": True,
             }
         elif format in ["png", "svg", "pdf"]:
-            # Convert to static image
             img_bytes = pio.to_image(
                 fig,
                 format=format,

@@ -105,7 +105,6 @@ class LRUStrategy(CacheStrategy):
 
     async def on_get(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Update access time for the key."""
-        # Update access time in sorted set
         await redis.zadd(self.access_key, {key: time.time()})
 
     async def on_set(
@@ -116,10 +115,8 @@ class LRUStrategy(CacheStrategy):
         dependencies: list[str] | None = None,
     ) -> None:
         """Add key to LRU tracking and evict if necessary."""
-        # Add to access tracking
         await redis.zadd(self.access_key, {key: time.time()})
 
-        # Set TTL
         expiry = ttl or self.ttl
         await redis.expire(key, expiry)
         await redis.expire(f"{key}:meta", expiry)
@@ -174,7 +171,6 @@ class DependencyStrategy(CacheStrategy):
         dependencies: list[str] | None = None,
     ) -> None:
         """Set up dependency tracking."""
-        # Set TTL
         expiry = ttl or self.ttl
         await redis.expire(key, expiry)
         await redis.expire(f"{key}:meta", expiry)
@@ -186,7 +182,6 @@ class DependencyStrategy(CacheStrategy):
             await redis.sadd(deps_key, *dependencies)
             await redis.expire(deps_key, expiry)
 
-            # Add this key as dependent on each dependency
             pipe = redis.pipeline()
             for dep in dependencies:
                 reverse_key = f"{self.deps_prefix}reverse:{dep}"
@@ -196,7 +191,6 @@ class DependencyStrategy(CacheStrategy):
 
     async def on_delete(self, key: str, redis: aioredis.Redis[Any]) -> None:
         """Clean up dependency tracking."""
-        # Get dependencies of this key
         deps_key = f"{self.deps_prefix}{key}"
         dependencies = await redis.smembers(deps_key)
 
@@ -321,7 +315,6 @@ class VersionedCacheStrategy(CacheStrategy):
         dependencies: list[str] | None = None,
     ) -> None:
         """Set version for the key."""
-        # Increment version
         version = await redis.hincrby(self.version_key, key, 1)
 
         # Store version in metadata
@@ -332,7 +325,6 @@ class VersionedCacheStrategy(CacheStrategy):
             meta_dict["version"] = version
             await redis.set(meta_key, serialize_for_cache(meta_dict).decode("utf-8"))
 
-        # Set TTL
         expiry = ttl or self.ttl
         await redis.expire(key, expiry)
         await redis.expire(meta_key, expiry)

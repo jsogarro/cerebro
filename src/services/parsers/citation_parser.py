@@ -28,7 +28,6 @@ def parse_citation(citation: str, style: str = "APA") -> dict[str, str]:
     elif style.upper() == "CHICAGO":
         result = parse_chicago_citation(citation)
     else:
-        # Try to auto-detect and parse
         result = auto_parse_citation(citation)
 
     return result
@@ -234,8 +233,6 @@ def auto_parse_citation(citation: str) -> dict[str, str]:
     """
     result = {}
 
-    # Try to extract common elements
-
     # Year (4 digits, possibly in parentheses)
     year_patterns = [r"\((\d{4})\)", r",\s*(\d{4})[,.]", r"\b(\d{4})\b"]
     for pattern in year_patterns:
@@ -314,8 +311,7 @@ def extract_doi(text: str) -> str | None:
         if match:
             doi = match.group(1)
             # Clean up DOI
-            doi = doi.rstrip(".,;")
-            return doi
+            return doi.rstrip(".,;")
 
     return None
 
@@ -484,7 +480,6 @@ def validate_citation(citation_data: dict[str, str]) -> bool:
         if field not in citation_data or not citation_data[field]:
             return False
 
-    # Validate year format
     if "year" in citation_data:
         year = citation_data["year"]
         if not re.match(r"^\d{4}$", str(year)):

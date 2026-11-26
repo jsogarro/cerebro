@@ -93,7 +93,6 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
             AgentResult containing comparison matrix and recommendations
         """
         try:
-            # Validate input
             items = task.input_data.get("items", [])
             criteria = task.input_data.get("criteria", [])
 
@@ -106,7 +105,6 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
                     task, ValueError("Comparison criteria required")
                 )
 
-            # Check cache first
             cache_key = self._generate_cache_key(task)
             cached_result = await self.get_cached_result(cache_key)
             if cached_result:
@@ -142,7 +140,6 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
                 enhanced_matrix
             )
 
-            # Calculate rankings with statistical significance
             rankings = self.matrix_builder.calculate_rankings(
                 normalized_matrix, criteria
             )
@@ -163,7 +160,6 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
                 comparative_research
             )
 
-            # Calculate confidence score with MCP data quality
             confidence = self._calculate_confidence_with_mcp(
                 items_count=len(items),
                 criteria_count=len(criteria),
@@ -179,7 +175,6 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
                 },
             )
 
-            # Build enhanced output with MCP data
             output = {
                 "items_compared": analysis.get("items_compared", items),
                 "comparison_criteria": criteria,
@@ -221,18 +216,15 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
                 "mcp_integration_status": self._get_mcp_status(),
             }
 
-            # Add rankings if calculated
             if rankings:
                 output["rankings"] = rankings
                 output["statistical_rankings"] = statistical_rankings
 
-            # Add visual data if requested
             if task.input_data.get("generate_visual"):
                 output["visual_data"] = self.matrix_builder.generate_visual_data(
                     normalized_matrix, criteria
                 )
 
-            # Add contextual analysis if context provided
             if "context" in task.input_data:
                 output["context_considerations"] = analysis.get(
                     "context_considerations", []
@@ -286,12 +278,10 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
                 self.log_warning(f"Missing required field: {field}")
                 return False
 
-        # Validate comparison matrix structure
         matrix = output.get("comparison_matrix", {})
         if not isinstance(matrix, dict) or len(matrix) < 2:
             return False
 
-        # Validate items compared
         items = output.get("items_compared", [])
         return not (not isinstance(items, list) or len(items) < 2)
 
@@ -628,7 +618,6 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
 
         text_for_analysis = f"Comparison between {', '.join(items)} using criteria: {', '.join(criteria)}."
 
-        # Add research abstracts if available
         sources = research_data.get("sources", [])
         for source in sources[:3]:  # Use top 3 sources
             abstract = source.get("abstract", "")

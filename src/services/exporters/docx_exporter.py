@@ -63,38 +63,29 @@ class DOCXExporter:
         try:
             logger.info(f"Starting DOCX export for report: {report.id}")
 
-            # Create document
             doc = Document()
 
-            # Set up document styles
             self._setup_document_styles(doc)
 
-            # Add title page
             self._add_title_page(doc, report)
 
-            # Add metadata
             self._add_metadata_section(doc, report)
 
-            # Add executive summary
             if (
                 report.executive_summary
                 and report.configuration.include_executive_summary
             ):
                 self._add_executive_summary(doc, report)
 
-            # Add table of contents placeholder
             if report.configuration.include_toc:
                 self._add_toc_placeholder(doc)
 
-            # Add sections
             for section in report.sections:
                 self._add_section(doc, section)
 
-            # Add citations
             if report.citations and report.configuration.include_citations:
                 self._add_citations(doc, report)
 
-            # Save to bytes
             docx_bytes = self._document_to_bytes(doc)
 
             return ReportOutput(
@@ -112,7 +103,6 @@ class DOCXExporter:
 
     def _setup_document_styles(self, doc: DocxDocument) -> None:
         """Set up custom document styles."""
-        # Get default styles
         styles = doc.styles
 
         # Modify Normal style
@@ -121,7 +111,6 @@ class DOCXExporter:
         normal_font.name = "Calibri"
         normal_font.size = Pt(11)
 
-        # Create custom styles
         try:
             # Title style
             if "Report Title" not in [s.name for s in styles]:
@@ -191,7 +180,6 @@ class DOCXExporter:
         # Metadata heading
         doc.add_heading("Report Metadata", level=1)
 
-        # Create metadata table
         table = doc.add_table(rows=1, cols=2)
         table.style = "Table Grid"
 
@@ -200,13 +188,11 @@ class DOCXExporter:
         header_cells[0].text = "Attribute"
         header_cells[1].text = "Value"
 
-        # Make header bold
         for cell in header_cells:
             for paragraph in cell.paragraphs:
                 for run in paragraph.runs:
                     run.bold = True
 
-        # Add metadata rows
         metadata_items = [
             ("Quality Score", f"{report.metadata.quality_score * 100:.1f}%"),
             ("Confidence Score", f"{report.metadata.confidence_score * 100:.1f}%"),
@@ -234,7 +220,6 @@ class DOCXExporter:
         """Add executive summary section."""
         doc.add_heading("Executive Summary", level=1)
 
-        # Convert markdown-like content to plain text
         summary_text = self._convert_markdown_to_text(report.executive_summary or "")
         doc.add_paragraph(summary_text)
 
@@ -292,7 +277,6 @@ class DOCXExporter:
                 report.configuration.citation_style
             )
 
-            # Add as numbered paragraph
             citation_paragraph = doc.add_paragraph(f"{i}. {citation_text}")
             citation_paragraph.style = "Normal"
 
@@ -324,7 +308,6 @@ class DOCXExporter:
 
     def _document_to_bytes(self, doc: DocxDocument) -> bytes:
         """Convert Document object to bytes."""
-        # Save document to BytesIO
         doc_bytes = io.BytesIO()
         doc.save(doc_bytes)
         doc_bytes.seek(0)

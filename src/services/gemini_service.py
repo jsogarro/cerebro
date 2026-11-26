@@ -66,7 +66,6 @@ class GeminiService:
         self.api_key = self.config.api_key
         self.model_name = self.config.model_name
 
-        # Initialize model with LangChain ChatGoogleGenerativeAI
         self.model = ChatGoogleGenerativeAI(
             model=self.config.model_name,
             google_api_key=self.config.api_key,
@@ -76,14 +75,12 @@ class GeminiService:
             max_output_tokens=self.config.max_output_tokens,
         )
 
-        # Initialize rate limiter
         self.rate_limiter = RateLimiter(
             rate_limit=kwargs.get("rate_limit", self.config.rate_limit),
             rate_period=kwargs.get("rate_period", self.config.rate_period),
             max_concurrent=kwargs.get("max_concurrent", self.config.max_concurrent),
         )
 
-        # Initialize cache client
         self.cache_client = cache_client
         self._cache_enabled = self.config.cache_enabled and cache_client is not None
 
@@ -141,21 +138,18 @@ class GeminiService:
         """
         from langchain_core.output_parsers import PydanticOutputParser
 
-        # Create parser for the schema
         parser = PydanticOutputParser(pydantic_object=schema)
 
         # Enhance prompt with format instructions
         format_instructions = parser.get_format_instructions()
         enhanced_prompt = f"{prompt}\n\n{format_instructions}"
 
-        # Try to generate and parse with retries
         last_error = None
         for attempt in range(max_retries + 1):
             try:
                 # Generate content using existing retry logic
                 response = await self._generate_content(enhanced_prompt)
 
-                # Parse and validate response
                 parsed = parser.parse(response)
                 logger.debug(
                     "structured_output_parsed",
@@ -260,12 +254,10 @@ class GeminiService:
         # Generate cache key
         cache_key = self._generate_cache_key("research_plan", query)
 
-        # Check cache
         cached = await self._get_cached_response(cache_key)
         if cached:
             return cached
 
-        # Create prompt
         from src.services.prompts.research_prompts import (
             generate_query_decomposition_prompt,
         )
@@ -275,7 +267,6 @@ class GeminiService:
         # Generate response
         response = await self._generate_content(prompt)
 
-        # Parse response
         result = self._parse_json_response(response)
 
         # Cache result
@@ -292,12 +283,10 @@ class GeminiService:
         # Generate cache key
         cache_key = self._generate_cache_key("literature", sources)
 
-        # Check cache
         cached = await self._get_cached_response(cache_key)
         if cached:
             return cached
 
-        # Create prompt
         from src.services.prompts.research_prompts import (
             generate_literature_review_prompt,
         )
@@ -307,7 +296,6 @@ class GeminiService:
         # Generate response
         response = await self._generate_content(prompt)
 
-        # Parse response
         result = self._parse_json_response(response)
 
         # Cache result
@@ -326,12 +314,10 @@ class GeminiService:
         # Generate cache key
         cache_key = self._generate_cache_key("synthesis", findings)
 
-        # Check cache
         cached = await self._get_cached_response(cache_key)
         if cached:
             return cached
 
-        # Create prompt
         from src.services.prompts.research_prompts import generate_synthesis_prompt
 
         prompt = generate_synthesis_prompt(findings)
@@ -339,7 +325,6 @@ class GeminiService:
         # Generate response
         response = await self._generate_content(prompt)
 
-        # Parse response
         result = self._parse_json_response(response)
 
         # Cache result
@@ -356,12 +341,10 @@ class GeminiService:
         # Generate cache key
         cache_key = self._generate_cache_key("citations", sources)
 
-        # Check cache
         cached = await self._get_cached_response(cache_key)
         if cached:
             return cached
 
-        # Create prompt
         from src.services.prompts.agent_prompts import generate_citation_agent_prompt
 
         prompt = generate_citation_agent_prompt(sources)
@@ -369,7 +352,6 @@ class GeminiService:
         # Generate response
         response = await self._generate_content(prompt)
 
-        # Parse response
         result = self._parse_json_response(response)
 
         # Cache result
@@ -389,12 +371,10 @@ class GeminiService:
         cache_data = {"hypothesis": hypothesis, "data": data}
         cache_key = self._generate_cache_key("validation", cache_data)
 
-        # Check cache
         cached = await self._get_cached_response(cache_key)
         if cached:
             return cached
 
-        # Create prompt
         from src.services.prompts.validation_prompts import (
             generate_hypothesis_validation_prompt,
         )
@@ -404,7 +384,6 @@ class GeminiService:
         # Generate response
         response = await self._generate_content(prompt)
 
-        # Parse response
         result = self._parse_json_response(response)
 
         # Cache result

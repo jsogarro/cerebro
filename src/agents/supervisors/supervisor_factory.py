@@ -143,20 +143,17 @@ class SupervisorHealthMonitor:
 
         spec = self.supervisor_health[supervisor_type]
 
-        # Update failure count
         if success:
             spec.failure_count = max(0, spec.failure_count - 1)  # Gradual recovery
         else:
             spec.failure_count += 1
 
-        # Update success rate (exponential moving average)
         alpha = 0.1  # Smoothing factor
         if success:
             spec.success_rate = spec.success_rate * (1 - alpha) + alpha
         else:
             spec.success_rate = spec.success_rate * (1 - alpha)
 
-        # Update average execution time
         current_avg = spec.average_execution_time_ms
         spec.average_execution_time_ms = int(
             current_avg * 0.9 + execution_time_ms * 0.1
@@ -178,7 +175,6 @@ class SupervisorHealthMonitor:
         if len(history) > 100:
             history.pop(0)
 
-        # Update health status
         self._update_health_status(spec)
 
     def _update_health_status(self, spec: SupervisorSpecification) -> None:
@@ -201,7 +197,6 @@ class SupervisorHealthMonitor:
 
         spec = self.supervisor_health[supervisor_type]
 
-        # Check if in recovery period after failures
         if spec.health_status == "unhealthy":
             time_since_check = datetime.now() - spec.last_health_check
             if time_since_check.total_seconds() < self.recovery_time:
@@ -415,7 +410,6 @@ class SupervisorFactory:
             "registry_size": 0,
         }
 
-        # Initialize with built-in supervisors
         self._register_builtin_supervisors()
 
     def _register_builtin_supervisors(self) -> None:
@@ -602,7 +596,6 @@ class SupervisorFactory:
         """
 
         try:
-            # Get supervisor specification
             spec = self.supervisor_registry.get(config.supervisor_type)
             if not spec:
                 logger.error(
@@ -612,7 +605,6 @@ class SupervisorFactory:
                 self.factory_stats["failed_creations"] += 1
                 return None
 
-            # Check health status
             if not self.health_monitor.is_supervisor_healthy(config.supervisor_type):
                 logger.warning(
                     "supervisor_creation_skipped_unhealthy",
@@ -621,7 +613,6 @@ class SupervisorFactory:
                 self.factory_stats["failed_creations"] += 1
                 return None
 
-            # Create supervisor configuration dict
             supervisor_config = {
                 "max_workers": config.max_workers,
                 "default_timeout": config.timeout_seconds,
@@ -650,7 +641,6 @@ class SupervisorFactory:
                 supervisor_class = spec.supervisor_class
             supervisor_instance = supervisor_class(**kwargs)
 
-            # Update statistics
             self.factory_stats["total_created"] += 1
             self.factory_stats["successful_creations"] += 1
 
@@ -696,11 +686,9 @@ class SupervisorFactory:
         }
 
         # Use capability matcher to find best supervisor
-        selected = self.capability_matcher.match_supervisor(
+        return self.capability_matcher.match_supervisor(
             requirements, self.get_available_supervisors(), self.health_monitor
         )
-
-        return selected
 
     def _infer_complexity(
         self, config: SupervisorConfiguration, task: AgentTask
@@ -749,7 +737,6 @@ class SupervisorFactory:
             ]
         )
 
-        # Add refinement capability if multiple rounds expected
         if config.max_refinement_rounds > 1:
             capabilities.append(SupervisorCapability.MULTI_ROUND_REFINEMENT)
 

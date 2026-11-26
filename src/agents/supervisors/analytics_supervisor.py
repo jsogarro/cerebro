@@ -124,7 +124,6 @@ class AnalyticsSupervisor(BaseSupervisor):
         """Build LangGraph workflow for analytics supervision."""
         self.workflow_graph = StateGraph(dict)
 
-        # Add nodes for each phase
         self.workflow_graph.add_node(
             "plan_analysis",
             self._create_langgraph_node("plan_analysis", self._plan_analysis_phase),
@@ -154,7 +153,6 @@ class AnalyticsSupervisor(BaseSupervisor):
             ),
         )
 
-        # Add edges for analytics workflow
         self.workflow_graph.set_entry_point("plan_analysis")
         self.workflow_graph.add_edge("plan_analysis", "coordinate_data_analysis")
         self.workflow_graph.add_edge("coordinate_data_analysis", "coordinate_modeling")
@@ -190,7 +188,6 @@ class AnalyticsSupervisor(BaseSupervisor):
         state.current_phase = "planning"
         state = await self._coordinate_workers(state, task)
 
-        # Initialize worker tasks for analytics
         analytics_query = state.original_query
         state.worker_tasks = {
             "data_analysis": {

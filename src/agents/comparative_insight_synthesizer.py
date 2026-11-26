@@ -52,7 +52,6 @@ class ComparativeInsightSynthesizer:
         trade_offs: list[str],
         matrix: dict[str, dict[str, float]],
     ) -> str:
-        """Assess the severity of trade-offs."""
         if not trade_offs:
             return "none"
 

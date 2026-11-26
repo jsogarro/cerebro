@@ -200,7 +200,6 @@ class BaseSupervisor(BaseAgent, ABC):
         self.successful_supervisions = 0
         self.average_supervision_time = 0.0
 
-        # Initialize supervisor-specific components
         self._register_worker_types()
         self._build_workflow_graph()
 
@@ -328,7 +327,6 @@ class BaseSupervisor(BaseAgent, ABC):
                             error=str(e),
                         )
 
-            # Initialize supervision state
             state = SupervisionState(
                 task_id=task.id,
                 original_query=str(task.input_data.get("query", "")),
@@ -384,13 +382,11 @@ class BaseSupervisor(BaseAgent, ABC):
             # Execute LangGraph workflow
             final_state = await self._execute_supervision_workflow(state, task)
 
-            # Build final result
             result = await self._build_supervision_result(final_state, task, start_time)
 
             if result.status == "completed":
                 self.successful_supervisions += 1
 
-            # Update performance metrics
             execution_time = (datetime.now() - start_time).total_seconds()
             self.average_supervision_time = (
                 self.average_supervision_time * (self.supervised_tasks - 1)
@@ -413,7 +409,6 @@ class BaseSupervisor(BaseAgent, ABC):
         if result.status != "completed":
             return False
 
-        # Check if quality threshold was met
         quality_score = result.output.get("supervision_quality", {}).get(
             "overall_quality",
             0.0,
@@ -519,7 +514,6 @@ class BaseSupervisor(BaseAgent, ABC):
         if not self.workflow_graph:
             raise ValueError("Workflow graph not initialized")
 
-        # Convert state to LangGraph format
         langgraph_state = {
             "supervision_state": state,
             "original_task": task,
@@ -576,7 +570,6 @@ class BaseSupervisor(BaseAgent, ABC):
         )
         confidence = min(state.consensus_score, state.quality_score)
 
-        # Build base metadata
         result_metadata = {
             "agent_type": self.get_agent_type(),
             "supervision_mode": state.supervision_mode.value,
@@ -629,7 +622,6 @@ class BaseSupervisor(BaseAgent, ABC):
             logger.error("supervisor_worker_not_found", worker_type=target_worker)
             return None
 
-        # Create TalkHier message
         if isinstance(content, str):
             talkhier_content = TalkHierContent(content=content)
         else:
@@ -649,11 +641,10 @@ class BaseSupervisor(BaseAgent, ABC):
 
         # Send through communication protocol
         try:
-            response = await self.communication_protocol._send_message_to_agent(
+            return await self.communication_protocol._send_message_to_agent(
                 worker,
                 message,
             )
-            return response
 
         except Exception as e:
             logger.error(
@@ -697,7 +688,6 @@ class BaseSupervisor(BaseAgent, ABC):
             supervisor_type=self.supervisor_type,
         )
 
-        # Get refinement prompt
         try:
             prompt_manager = await get_prompt_manager()
 
@@ -713,7 +703,6 @@ class BaseSupervisor(BaseAgent, ABC):
                 refinement_variables,
             )
 
-            # Create refinement message
             refinement_content = TalkHierContent(
                 content=refinement_prompt,
                 background=f"Round {round_number} refinement coordination",
@@ -731,7 +720,6 @@ class BaseSupervisor(BaseAgent, ABC):
                 state.allocated_workers,
             )
 
-            # Update state with refinement round results
             state.refinement_round = round_number
 
             # Measure the FRESH responses returned by broadcast_to_workers, not
@@ -806,7 +794,6 @@ class BaseSupervisor(BaseAgent, ABC):
                     node_name=node_name,
                     error=str(e),
                 )
-                # Return state with error information
                 state["error"] = str(e)
                 state["failed_node"] = node_name
                 return state
@@ -851,7 +838,6 @@ class BaseSupervisor(BaseAgent, ABC):
             # Import lazily to avoid circular dependency
             from ..factory import AgentFactory
 
-            # Create verification agent with the same gemini_service
             verification_agent = AgentFactory(self.component_registry).resolve_agent(
                 "verification",
                 {
@@ -860,7 +846,6 @@ class BaseSupervisor(BaseAgent, ABC):
                 },
             )
 
-            # Build task for verification
             import uuid
 
             from ..models import AgentTask
@@ -874,7 +859,6 @@ class BaseSupervisor(BaseAgent, ABC):
             # Execute verification
             verification_result = await verification_agent.execute(verification_task)
 
-            # Parse the verdict from the output
             report_text = verification_result.output.get("content", "")
             verdict = parse_verdict(report_text)
 
@@ -970,7 +954,6 @@ class BaseSupervisor(BaseAgent, ABC):
             # Look for the ISSUES section
             if stripped.upper().startswith("ISSUES:"):
                 in_issues_section = True
-                # Check if "None" immediately follows
                 after_colon = stripped[len("ISSUES:") :].strip()
                 if after_colon.upper() == "NONE":
                     break
@@ -1374,7 +1357,6 @@ Task: Revise your previous response addressing the feedback while maintaining yo
                     # Worker succeeded
                     worker_results[worker_type] = response_or_error
 
-            # Log partial failure if some workers failed
             if failed_workers:
                 logger.warning(
                     "supervisor_parallel_execution_partial_failure",

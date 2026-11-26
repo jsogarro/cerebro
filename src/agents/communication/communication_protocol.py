@@ -174,7 +174,6 @@ class CommunicationProtocol:
         start_time = datetime.now()
 
         try:
-            # Initialize conversation
             self.active_conversations[conversation_id] = []
             self.conversation_metadata[conversation_id] = {
                 "query": initial_query,
@@ -274,7 +273,6 @@ class CommunicationProtocol:
         )
 
         try:
-            # Create initial messages for all agents
             initial_messages = []
 
             for agent in agents:
@@ -321,7 +319,6 @@ class CommunicationProtocol:
                 round_1.participant_messages
             )
 
-            # Check if consensus threshold met
             round_1.consensus_achieved = (
                 round_1.consensus_score.overall_score >= self.consensus_threshold
             )
@@ -364,7 +361,6 @@ class CommunicationProtocol:
         )
 
         try:
-            # Create validation messages based on Round 1 conflicts
             conflicts = (
                 round_1.consensus_score.conflicts_detected
                 if round_1.consensus_score
@@ -482,7 +478,6 @@ class CommunicationProtocol:
             for round_data in previous_rounds:
                 all_responses.extend(round_data.participant_messages)
 
-            # Create synthesis message
             synthesis_content = TalkHierContent(
                 content="Create final consensus synthesis",
                 background="Final round synthesis of all previous responses",
@@ -632,7 +627,6 @@ class CommunicationProtocol:
                 conversation_id=message.conversation_id,
                 error=str(e),
             )
-            # Return error response
             error_content = TalkHierContent(
                 content=f"Error processing message: {e!s}", confidence_score=0.0
             )
@@ -653,25 +647,20 @@ class CommunicationProtocol:
         if not rounds:
             return RefinementResult()
 
-        # Get final round data
         final_round = rounds[-1]
 
-        # Calculate metrics
         total_duration = int((datetime.now() - start_time).total_seconds() * 1000)
         consensus_achieved = final_round.consensus_achieved
 
         if consensus_achieved:
             self.successful_consensus += 1
 
-        # Update average rounds
         self.average_rounds = (
             self.average_rounds * (self.total_conversations - 1) + len(rounds)
         ) / self.total_conversations
 
-        # Create synthesized response from final round
         synthesized_response = await self._synthesize_final_response(rounds)
 
-        # Calculate quality improvement
         initial_quality = (
             rounds[0].consensus_score.overall_score
             if rounds and rounds[0].consensus_score
@@ -719,7 +708,6 @@ class CommunicationProtocol:
         if not rounds:
             return None
 
-        # Get all responses from final round
         final_messages = rounds[-1].participant_messages
 
         if not final_messages:
@@ -730,13 +718,12 @@ class CommunicationProtocol:
             final_messages, key=lambda msg: msg.talkhier_content.confidence_score
         )
 
-        # Create synthesized content
         _all_contents = [msg.talkhier_content.content for msg in final_messages]
         all_evidence = []
         for msg in final_messages:
             all_evidence.extend(msg.talkhier_content.evidence)
 
-        synthesized = TalkHierContent(
+        return TalkHierContent(
             content=best_response.talkhier_content.content,
             background=f"Synthesized from {len(final_messages)} agent responses across {len(rounds)} refinement rounds",
             intermediate_outputs={
@@ -752,8 +739,6 @@ class CommunicationProtocol:
             ),
             evidence=list(set(all_evidence)),  # Deduplicate evidence
         )
-
-        return synthesized
 
     async def send_hierarchical_message(
         self, message: TalkHierMessage, target_agents: list[BaseAgent]

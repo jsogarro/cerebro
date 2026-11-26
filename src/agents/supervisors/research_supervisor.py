@@ -101,10 +101,8 @@ class ResearchSupervisor(BaseSupervisor):
 
     def _build_workflow_graph(self) -> None:
         """Build LangGraph workflow for research supervision."""
-        # Create workflow graph
         self.workflow_graph = StateGraph(dict)
 
-        # Add nodes for each phase
         self.workflow_graph.add_node(
             "plan_research",
             self._create_langgraph_node("plan_research", self._plan_research_phase),
@@ -181,7 +179,6 @@ class ResearchSupervisor(BaseSupervisor):
             ),
         )
 
-        # Add edges for research workflow
         self.workflow_graph.set_entry_point("plan_research")
         self.workflow_graph.add_edge("plan_research", "coordinate_literature")
         self.workflow_graph.add_edge("coordinate_literature", "validate_sources")
@@ -229,7 +226,6 @@ class ResearchSupervisor(BaseSupervisor):
         allocated_workers = await self.allocate_workers(task)
         state.allocated_workers = allocated_workers
 
-        # Set research-specific context
         state.context.update(self.query_planner.build_research_context())
 
         return state
@@ -248,7 +244,6 @@ class ResearchSupervisor(BaseSupervisor):
         state.current_phase = "planning"
         state = await self._coordinate_workers(state, task)
 
-        # Initialize worker tasks
         research_query = state.original_query
 
         state.worker_tasks = self.query_planner.build_worker_tasks(
