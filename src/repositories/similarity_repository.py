@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.memory_encryption import (
@@ -28,6 +28,7 @@ from src.models.db.similarity_check import (
     SimilarityCheck,
     SimilarityMatch,
 )
+from src.models.db.uploaded_document import UsageLedger
 from src.repositories.tenant_scope import normalize_organization_id, scope_to_owner
 from src.repositories.uploaded_document_repository import UndecryptableDocumentError
 from src.services.document_jobs import flip_if_stale, is_stale, stale_cutoff
@@ -433,6 +434,11 @@ class SimilarityRepository:
         ).scalar_one_or_none()
         if row is None:
             return False
+        if row.status == "queued" and row.ledger_id is not None:
+            # Never started, so nothing was used; a started run keeps its charge.
+            await self._session.execute(
+                delete(UsageLedger).where(UsageLedger.id == row.ledger_id)
+            )
         await self._session.delete(row)
         await self._session.flush()
         return True

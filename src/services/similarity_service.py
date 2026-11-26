@@ -225,7 +225,9 @@ async def _load_uploads(
         if extracted is None or meta is None:
             raise LookupError("document unavailable")
         wanted = [
-            ("comparison", uuid.UUID(i)) for i in job.options["comparison_document_ids"]
+            ("comparison", i)
+            for i in map(uuid.UUID, job.options["comparison_document_ids"])
+            if i != job.document_id
         ]
         if job.options["own_uploads"]:
             recent = await repository.list_recent(
@@ -276,6 +278,15 @@ def _source_id(candidate: Candidate, origin: str) -> str:
     )
 
 
+def _licence_metadata(candidate: Candidate) -> dict[str, Any]:
+    """The stored licence, bounded: its identifier and statement come from a third party."""
+    metadata = dict(candidate.licence.as_metadata())
+    if metadata.get("identifier"):
+        metadata["identifier"] = str(metadata["identifier"])[:64]
+    metadata["statement"] = None
+    return metadata
+
+
 def _record(match: Any, candidate: Candidate, origin: str) -> MatchRecord:
     excerpt = (
         candidate.text[match.src_start : match.src_end][:MAX_EXCERPT_CHARS]
@@ -296,7 +307,7 @@ def _record(match: Any, candidate: Candidate, origin: str) -> MatchRecord:
         source_id=_source_id(candidate, origin),
         source_title=_clean_title(candidate.title),
         source_year=candidate.year,
-        source_licence=dict(candidate.licence.as_metadata()),
+        source_licence=_licence_metadata(candidate),
         source_text_kind=candidate.text_kind,
         src_start=match.src_start,
         src_end=match.src_end,

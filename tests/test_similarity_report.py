@@ -260,3 +260,36 @@ def test_the_reasons_a_check_is_partial_are_listed():
 
 def test_a_check_with_no_partial_reason_says_nothing_about_it():
     assert "Partial because" not in render_report(check(partial_reasons=[]), DOC)
+
+
+def test_each_work_is_counted_once_even_when_arxiv_upgrades_it():
+    sources = {
+        "openalex": {
+            "candidates": 2,
+            "full_text": 2,
+            "abstract_only": 0,
+            "skipped_budget": 0,
+            "failures": {},
+            "queries_sent": 1,
+        },
+        "arxiv": {
+            "candidates": 2,
+            "full_text": 2,
+            "abstract_only": 0,
+            "skipped_budget": 0,
+            "failures": {},
+            "queries_sent": 2,
+        },
+    }
+    text = render_report(check(sources_searched=sources), DOC)
+    assert "No matching text was found in the 2 sources searched." in text
+
+
+def test_a_hostile_licence_identifier_cannot_forge_lines_or_links():
+    hostile = {
+        "identifier": "x\nhttp://evil.example/?q=1 SENTINEL",
+        "declared_by": "api_field",
+    }
+    text = render_report(check(match(source_excerpt=None, source_licence=hostile)), DOC)
+    assert "evil.example" not in text and 'licence "unrecognised"' in text
+    assert "\nhttp" not in text

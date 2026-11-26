@@ -42,6 +42,7 @@ DETECTION_LIMITS = (
 )
 _VERBATIM_KINDS = ("verbatim", "normalized")
 _WORD = re.compile(r"\S+")
+_LICENCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}")
 
 
 def _one_line(text: str) -> str:
@@ -71,7 +72,12 @@ def _covered_tokens(text: str, matches: tuple[MatchView, ...]) -> tuple[int, int
 
 def _source_count(check: CheckView) -> int:
     sources = check.coverage.get("sources_searched", {})
-    return sum(int(origin.get("candidates", 0)) for origin in sources.values())
+    # The arXiv row counts works OpenAlex already returned, so it is not added again.
+    return sum(
+        int(row.get("candidates", 0))
+        for origin, row in sources.items()
+        if origin != "arxiv"
+    )
 
 
 def _coverage_lines(check: CheckView) -> list[str]:
@@ -108,7 +114,14 @@ def _coverage_lines(check: CheckView) -> list[str]:
 
 
 def _licence_label(match: MatchView) -> str:
-    return match.source_licence.get("identifier") or '"undeclared"'
+    identifier = match.source_licence.get("identifier")
+    if not identifier:
+        return '"undeclared"'
+    # A licence id comes from a third party and is printed unquoted, so only a plain
+    # identifier is shown.
+    return (
+        str(identifier) if _LICENCE_ID.fullmatch(str(identifier)) else '"unrecognised"'
+    )
 
 
 def _match_lines(number: int, m: MatchView, text: str) -> list[str]:

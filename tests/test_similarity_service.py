@@ -456,3 +456,26 @@ async def test_a_stored_excerpt_is_capped(
     match = max(view.matches, key=lambda m: m.tokens)
     assert match.tokens >= 600
     assert len(match.source_excerpt or "") == service.MAX_EXCERPT_CHARS
+
+
+async def test_a_document_is_never_compared_with_itself(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    target = await make_document(factory)
+    _, view = await run_check(
+        factory, target, options={"comparison_document_ids": [str(target)]}
+    )
+    assert view.matches == ()
+
+
+async def test_a_hostile_licence_is_bounded_before_it_is_stored(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    target = await make_document(factory)
+    retrieve, _ = stub_retrieve(
+        (candidate("W1", licence="x" * 5000),), openalex=SourceCoverage(candidates=1)
+    )
+    _, view = await run_check(
+        factory, target, options={"open_sources": True}, retrieve=retrieve
+    )
+    assert len(view.matches[0].source_licence["identifier"]) == 64

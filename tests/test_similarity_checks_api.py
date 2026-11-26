@@ -429,7 +429,7 @@ async def test_a_busy_worker_refuses_new_checks_without_reserving_quota(
 ) -> None:
     document_id = await make_document(factory)
     sleepers = {
-        asyncio.create_task(asyncio.sleep(60))
+        asyncio.create_task(asyncio.sleep(60), name=f"similarity:{uuid.uuid4()}")
         for _ in range(similarity_routes.MAX_QUEUED_PER_WORKER)
     }
     app.state.document_jobs.update(sleepers)
@@ -605,3 +605,75 @@ async def test_a_check_whose_document_expired_reads_as_missing(
     assert (
         await client.get(f"/api/v1/similarity-checks/{check_id}/report")
     ).status_code == 404
+
+
+async def test_a_document_cannot_be_its_own_comparison_document(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    document_id = await make_document(factory)
+    body = {"comparison_document_ids": [str(document_id)]}
+    response = await start(client, document_id, body)
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "comparison_includes_the_document"
+    assert await count(factory, SimilarityCheck) == 0
+
+
+async def test_only_similarity_tasks_count_toward_the_worker_cap(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    document_id = await make_document(factory)
+    others = {
+        asyncio.create_task(asyncio.sleep(60), name="critique:x") for _ in range(5)
+    }
+    app.state.document_jobs.update(others)
+    assert (await start(client, document_id)).status_code == 202
+    for task in others:
+        task.cancel()
+    app.state.document_jobs.difference_update(others)
+
+
+async def test_concurrent_starts_cannot_pass_the_worker_cap_together(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    retrieval: Retrieval,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(service, "SIMILARITY_LIMITS", service.JobLimits())
+    document_id = await make_document(factory)
+    retrieval.gate.clear()
+    responses = await asyncio.gather(
+        *(start(client, document_id, {"open_sources": consent()}) for _ in range(12))
+    )
+    codes = sorted(r.status_code for r in responses)
+    assert codes.count(202) == similarity_routes.MAX_QUEUED_PER_WORKER
+    assert set(codes) == {202, 429}
+    retrieval.gate.set()
+    await drain()
+
+
+async def test_error_responses_are_not_cached(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    document_id = await make_document(factory)
+    mismatch = await start(
+        client, document_id, {"open_sources": consent(consent_text_version="old")}
+    )
+    assert mismatch.status_code == 409
+    assert mismatch.headers["cache-control"] == "no-store"
+    missing = await client.get(f"/api/v1/similarity-checks/{uuid.uuid4()}")
+    assert missing.status_code == 404 and missing.headers["cache-control"] == "no-store"
+
+
+async def test_deleting_a_check_that_never_started_gives_its_quota_back(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    document_id = await make_document(factory)
+    await app.state.similarity_semaphore.acquire()
+    try:
+        check_id = (await start(client, document_id)).json()["id"]
+        assert await count(factory, UsageLedger) == 1
+        deleted = await client.delete(f"/api/v1/similarity-checks/{check_id}")
+        assert deleted.status_code == 204
+    finally:
+        app.state.similarity_semaphore.release()
+    assert await count(factory, UsageLedger) == 0

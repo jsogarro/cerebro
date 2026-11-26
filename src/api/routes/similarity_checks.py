@@ -8,7 +8,8 @@ served as plain text.
 
 import asyncio
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Annotated, Any
 
@@ -179,7 +180,15 @@ def _error(code: int, name: str, details: Any = None) -> HTTPException:
     detail: dict[str, Any] = {"code": name}
     if details is not None:
         detail["details"] = details
-    return HTTPException(status_code=code, detail=detail)
+    return HTTPException(
+        status_code=code, detail=detail, headers={"Cache-Control": NO_STORE}
+    )
+
+
+def _missing() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, headers={"Cache-Control": NO_STORE}
+    )
 
 
 TenantDep = Annotated[TenantContext, Depends(get_tenant_context)]
@@ -227,7 +236,7 @@ RunnerDep = Annotated[Runner, Depends(get_runner)]
 async def _enabled(response: Response, _: TenantDep) -> None:
     """Runs after authentication and before the body is parsed, so a dark feature is a 404."""
     if not settings.SIMILARITY_CHECKS_ENABLED:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        raise _missing()
     response.headers["Cache-Control"] = NO_STORE
 
 
@@ -251,7 +260,7 @@ async def _owned_document(scope: Scope, document_id: uuid.UUID) -> DocumentMeta:
         user_id=scope.ids.user_id,
     )
     if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        raise _missing()
     return document
 
 
@@ -276,9 +285,15 @@ async def similarity_config(_: IdentityDep) -> dict[str, Any]:
     }
 
 
-async def _check_comparison_documents(scope: Scope, request: SimilarityRequest) -> None:
+async def _check_comparison_documents(
+    scope: Scope, request: SimilarityRequest, own_id: uuid.UUID
+) -> None:
     repository = UploadedDocumentRepository(scope.session, _cipher())
     chars = 0
+    if own_id in request.comparison_document_ids:
+        raise _error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "comparison_includes_the_document"
+        )
     for document_id in dict.fromkeys(request.comparison_document_ids):
         meta = await repository.get_meta(
             document_id,
@@ -286,7 +301,7 @@ async def _check_comparison_documents(scope: Scope, request: SimilarityRequest) 
             user_id=scope.ids.user_id,
         )
         if meta is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+            raise _missing()
         chars += meta.char_count
     if chars > service.CANDIDATE_CHAR_BUDGET:
         raise _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "candidate_budget_exceeded")
@@ -321,6 +336,24 @@ async def _check_open_sources(
                 ),
             },
         )
+
+
+@contextmanager
+def _reserve_worker_slot(state: Any) -> Iterator[None]:
+    """Count a start as load from the check until its task is registered.
+
+    Between the check and ``document_jobs.add`` the handler awaits, so concurrent
+    starts would otherwise all pass the same check.
+    """
+    running = sum(t.get_name().startswith("similarity:") for t in state.document_jobs)
+    reserved = getattr(state, "similarity_reserved", 0)
+    if running + reserved >= MAX_QUEUED_PER_WORKER:
+        raise _error(status.HTTP_429_TOO_MANY_REQUESTS, "worker_busy")
+    state.similarity_reserved = reserved + 1
+    try:
+        yield
+    finally:
+        state.similarity_reserved -= 1
 
 
 async def _admit(scope: Scope, *, open_sources: bool) -> uuid.UUID:
@@ -363,23 +396,32 @@ async def start_check(
     scope: ScopeDep,
     runner: RunnerDep,
 ) -> CheckAccepted:
-    ids = scope.ids
     await _owned_document(scope, document_id)
-    await _check_comparison_documents(scope, body)
+    await _check_comparison_documents(scope, body, document_id)
     consented = (
         body.open_sources if body.open_sources and body.open_sources.enabled else None
     )
     if consented:
         await _check_open_sources(scope, consented, document_id)
-    if len(runner.state.document_jobs) >= MAX_QUEUED_PER_WORKER:
-        raise _error(status.HTTP_429_TOO_MANY_REQUESTS, "worker_busy")
-    ledger_id = await _admit(scope, open_sources=consented is not None)
+    with _reserve_worker_slot(runner.state):
+        return await _schedule(scope, runner, document_id, body, consented is not None)
+
+
+async def _schedule(
+    scope: Scope,
+    runner: Runner,
+    document_id: uuid.UUID,
+    body: SimilarityRequest,
+    open_sources: bool,
+) -> CheckAccepted:
+    ids = scope.ids
+    ledger_id = await _admit(scope, open_sources=open_sources)
     options = {
         "own_uploads": body.own_uploads,
         "comparison_document_ids": [
             str(i) for i in dict.fromkeys(body.comparison_document_ids)
         ],
-        "open_sources": consented is not None,
+        "open_sources": open_sources,
         "semantic": body.semantic,
     }
     row = await _repository(scope.session).create(
@@ -390,9 +432,9 @@ async def start_check(
             options=options,
             policy_versions=service.policy_versions(),
             consent_text_version=(
-                service.SIMILARITY_CONSENT_TEXT_VERSION if consented else None
+                service.SIMILARITY_CONSENT_TEXT_VERSION if open_sources else None
             ),
-            consent_text_sha256=service.consent_sha256() if consented else None,
+            consent_text_sha256=service.consent_sha256() if open_sources else None,
             ledger_id=ledger_id,
         )
     )
@@ -464,7 +506,7 @@ async def _owned_check(
         limit=limit,
     )
     if view is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        raise _missing()
     await _owned_document(scope, view.document_id)
     return view
 
@@ -494,7 +536,7 @@ async def get_report(check_id: uuid.UUID, scope: ScopeDep) -> Response:
         user_id=scope.ids.user_id,
     )
     if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        raise _missing()
     return Response(
         render_report(view, document.text),
         media_type="text/plain; charset=utf-8",
@@ -518,7 +560,7 @@ async def delete_check(
         organization_id=scope.ids.organization_id,
         user_id=scope.ids.user_id,
     ):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        raise _missing()
     await scope.session.commit()
     # Stop the work too; its quota stays spent. Only this worker's tasks are visible
     # here, so a run on another worker finishes and discards its result.
