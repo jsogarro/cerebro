@@ -20,7 +20,12 @@ from src.services.text_reuse.types import (
     ReuseBudget,
     source_link,
 )
-from src.services.text_reuse.verbatim import find_verbatim_reuse
+from src.services.text_reuse.verbatim import (
+    _Attributor,
+    _runs,
+    author_key,
+    find_verbatim_reuse,
+)
 
 M = MIN_MATCH_TOKENS
 OWN_ID = str(uuid.uuid4())
@@ -135,17 +140,26 @@ def test_two_candidates_and_overlapping_seeds_merge():
 # -- 6 work cap --------------------------------------------------------------
 
 
-def test_repetitive_text_is_bounded_and_planted_passage_found():
-    rep = "a b c d e f g h " * 100_000
+def test_repetitive_text_skips_common_shingles_and_finds_planted_passage():
+    rep = "a b c d e f g h " * 20_000
     plant = sentence("plant", 20)
-    t0 = time.monotonic()
-    res = run(
-        f"{rep} zz1 {plant} zz2 {rep}"[:1_900_000],
-        [cand(f"{rep} yy1 {plant} yy2 {rep}"[:1_900_000])],
-    )
-    assert time.monotonic() - t0 < 5
+    res = run(f"{rep} zz1 {plant} zz2 {rep}", [cand(f"{rep} yy1 {plant} yy2 {rep}")])
     assert res.skipped_common_shingles >= 1
     assert [m.tokens for m in res.matches] == [20]
+
+
+def test_matcher_work_scales_linearly_on_repetitive_keys():
+    def elapsed(reps: int) -> float:
+        keys = list("abcdefgh") * reps
+        best = float("inf")
+        for _ in range(3):
+            t0 = time.perf_counter()
+            _runs(keys, [(0, len(keys))], keys)
+            best = min(best, time.perf_counter() - t0)
+        return best
+
+    small, large = elapsed(3_000), elapsed(6_000)
+    assert large <= 3.2 * small + 0.25
 
 
 # -- 7 budget ----------------------------------------------------------------
@@ -395,13 +409,23 @@ def test_module_is_pure_and_uses_public_citation_api():
 # -- bug-finder regressions ----------------------------------------------------
 
 
-def test_many_matches_on_one_long_line_stay_fast():
-    doc = " ".join(f"u{i % 9}" for i in range(9 * 10000))
+def test_blockquote_check_cost_does_not_grow_with_line_length():
+    raw = "w " * 1_000_000
+    attributor = _Attributor(raw, [("w", 0, 1)], 0, len(raw))
+
+    def elapsed(start: int) -> float:
+        t0 = time.perf_counter()
+        for _ in range(200):
+            attributor._quoted(0, 1, start, start + 10)
+        return time.perf_counter() - t0
+
+    assert elapsed(1_900_000) <= 3.2 * elapsed(1_000) + 0.1
+
+
+def test_many_matches_on_one_long_line_are_all_reported():
+    doc = " ".join(f"u{i % 9}" for i in range(9 * 500))
     src = " ".join(f"u{i % 9}" for i in range(9 * 60))
-    t0 = time.monotonic()
-    res = run(doc, [cand(src)])
-    assert res.matches
-    assert time.monotonic() - t0 < 10
+    assert len(run(doc, [cand(src)]).matches) > 100
 
 
 def test_citation_after_match_in_appendix_counts():
@@ -427,3 +451,144 @@ def test_year_first_reference_entry_does_not_inflate_count():
 def test_candidate_rejects_non_ascii_digits_and_control_chars(kw):
     with pytest.raises(ValueError):
         make(**kw)
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("Smith, John", ("smith", "j")),
+        ("Smith JA", ("smith", "j")),
+        ("J. A. Smith", ("smith", "j")),
+        ("Jan van der Berg", ("van der berg", "j")),
+        ("van der Berg, Jan", ("van der berg", "j")),
+        ("Jos\u00e9 N\u00fa\u00f1ez", ("nunez", "j")),
+    ],
+)
+def test_author_key_formats(name, expected):
+    assert author_key(name) == expected
+
+
+def test_wrapped_markdown_blockquote_is_one_match():
+    p = passage().split()
+    quoted = "\n".join("> " + " ".join(p[i : i + 6]) for i in range(0, 30, 6))
+    res = run(f"{sentence('a', 25)}.\n\n{quoted}\n> (Smith, 2020)", [cand(" ".join(p))])
+    assert [m.tokens for m in res.matches] == [30]
+    assert res.matches[0].attribution is Attribution.QUOTED_AND_CITED
+
+
+def test_blockquote_marker_without_space_keeps_first_word():
+    p = passage().split()
+    doc = f"{sentence('a', 25)}.\n\n>{' '.join(p[:15])}\n>{' '.join(p[15:])}"
+    assert [m.tokens for m in run(doc, [cand(" ".join(p))]).matches] == [30]
+
+
+def test_crlf_reference_heading_is_recognised():
+    p = passage()
+    doc = f"{sentence('a', 30)}\r\n\r\nReferences\r\n\r\n[1] {p}\r\n"
+    res = run(doc, [cand(p)])
+    assert res.matches == () and res.excluded_regions
+
+
+def test_et_al_period_is_not_a_sentence_start():
+    p = passage()
+    doc = f'{sentence("a", 25)}. Smith et al. (2020) writes: "{p}".'
+    assert attribution(doc) is Attribution.QUOTED_AND_CITED
+
+
+def test_gapped_reference_numbering_still_counts_highest_entry():
+    p = passage()
+    doc = f"{sentence('a', 25)}. {p} [4].\n\nReferences\n\n[1] A.\n[2] B.\n[4] D.\n"
+    assert attribution(doc) is Attribution.CITED_UNQUOTED
+
+
+def test_empty_candidate_author_never_overlaps():
+    p = passage()
+    m = run(p, [cand(p, authors=("",))], authors=[("", "")]).matches[0]
+    assert not m.declared_author_overlap
+
+
+def test_blank_lines_after_reference_heading_cost_linear_time():
+    doc = "intro\n\nReferences\n" + "\n" * 40_000 + "x"
+    t0 = time.perf_counter()
+    run(doc, [cand("hello world")])
+    assert time.perf_counter() - t0 < 2
+
+
+def test_deadline_is_enforced_inside_a_single_candidate():
+    hostile = cand("a b c d e f g h " * 64)
+    t0 = time.perf_counter()
+    res = run(
+        "a b c d e f g h " * 20_000, [hostile], budget=ReuseBudget(deadline_s=0.5)
+    )
+    assert time.perf_counter() - t0 < 5
+    assert dict(res.skipped) == {"W1": "deadline_reached"}
+    assert res.matches == ()
+
+
+def test_own_upload_id_must_be_canonical_uuid():
+    for bad in (
+        OWN_ID.upper(),
+        OWN_ID.replace("-", ""),
+        f"urn:uuid:{OWN_ID}",
+        "{" + OWN_ID + "}",
+    ):
+        with pytest.raises(ValueError):
+            make(origin="own_upload", source_id=bad)
+
+
+@pytest.mark.parametrize("heading", ["Bibliography", "5. References", "## References"])
+def test_reference_heading_variants(heading):
+    p = passage()
+    res = run(f"{sentence('a', 30)}\n\n{heading}\n\n{p}\n", [cand(p)])
+    assert res.matches == () and res.excluded_regions
+
+
+def test_last_reference_heading_wins():
+    p = passage()
+    doc = f"References\n\nx y.\n\n{p}\n\nReferences\n\n[1] z.\n"
+    assert len(run(doc, [cand(p)]).matches) == 1
+
+
+@pytest.mark.parametrize("heading", ["Appendices", "Supplementary Material"])
+def test_appendix_heading_variants_end_the_reference_region(heading):
+    p = passage()
+    doc = f"{sentence('a', 30)}\n\nReferences\n\n[1] x.\n\n{heading}\n\n{p}\n"
+    assert len(run(doc, [cand(p)]).matches) == 1
+
+
+def test_quoted_share_boundary():
+    w = passage().split()
+    low = f'{sentence("a", 25)}. "{" ".join(w[:21])}" {" ".join(w[21:])}.'
+    assert attribution(low) is Attribution.UNATTRIBUTED
+    high = f'{sentence("a", 25)}. "{" ".join(w[:25])}" {" ".join(w[25:])}.'
+    assert attribution(high) is Attribution.QUOTED_UNCITED
+
+
+def test_numeric_citation_above_reference_count_is_not_cited():
+    p = passage()
+    refs = "\n\nReferences\n\n[1] A.\n[2] B.\n"
+    assert (
+        attribution(f"{sentence('a', 25)}. {p} [3].{refs}") is Attribution.UNATTRIBUTED
+    )
+    assert (
+        attribution(f"{sentence('a', 25)}. {p} [2].{refs}")
+        is Attribution.CITED_UNQUOTED
+    )
+
+
+def test_blockquote_needs_every_line_marked():
+    p = passage().split()
+    doc = f"{sentence('a', 25)}.\n\n> {' '.join(p[:15])}\n{' '.join(p[15:])}"
+    assert attribution(doc) is Attribution.UNATTRIBUTED
+
+
+def test_blockquote_marker_beyond_lookback_is_not_assumed():
+    p = passage()
+    doc = f"> {sentence('a', 300)} {p}"
+    assert attribution(doc) is Attribution.UNATTRIBUTED
+
+
+def test_citation_in_an_earlier_sentence_does_not_cite_the_match():
+    p = passage()
+    doc = f"{sentence('a', 10)}. (Jones, 2019) showed this. {p}."
+    assert attribution(doc) is Attribution.UNATTRIBUTED

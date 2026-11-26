@@ -34,7 +34,7 @@ _HEADING = r"^[ \t]*(?:#{1,6}[ \t]*)?(?:\d+\.?[ \t]*)?"
 _REFERENCES = re.compile(
     _HEADING
     + r"(?:references|bibliography|works cited|literature cited"
-    + r"|notes and references|references and notes)[ \t]*:?[ \t]*$",
+    + r"|notes and references|references and notes)[ \t]*:?[ \t\r]*$",
     re.I | re.M,
 )
 _APPENDIX = re.compile(
@@ -48,14 +48,19 @@ _STATEMENT = re.compile(
     + r"|author contributions)[ \t]*:?[ \t]*$",
     re.I,
 )
-_REFERENCE_ENTRY = re.compile(r"^\s*(?:\[(\d+)\]|(\d+)\.)\s", re.M)
+_REFERENCE_ENTRY = re.compile(r"^[ \t]*(?:\[(\d+)\]|(\d+)\.)[ \t]", re.M)
 _DOUBLE_QUOTES = str.maketrans(dict.fromkeys("“”„‟″«»", '"'))
 _QUOTED = re.compile(r'"[^"]*"')
-_SENTENCE_END = re.compile(r"[.!?]\s")
+_SENTENCE_END = re.compile(r"(?<!\bal)[.!?]\s")
 _QUOTED_SHARE = 0.8
 _WINDOW_BEFORE = 150
 _WINDOW_AFTER = 300
 _LINE_LOOKBACK = 200
+
+
+def _strippable(ch: str) -> bool:
+    # ">" and "|" are Markdown quote and table markers, not words.
+    return unicodedata.category(ch).startswith("P") or ch in ">|"
 
 
 def _token_key(token: str) -> str:
@@ -63,9 +68,9 @@ def _token_key(token: str) -> str:
     if key[0].isalnum() and key[-1].isalnum():
         return key
     lo, hi = 0, len(key)
-    while lo < hi and unicodedata.category(key[lo]).startswith("P"):
+    while lo < hi and _strippable(key[lo]):
         lo += 1
-    while hi > lo and unicodedata.category(key[hi - 1]).startswith("P"):
+    while hi > lo and _strippable(key[hi - 1]):
         hi -= 1
     return key[lo:hi]
 
@@ -85,8 +90,17 @@ def author_key(name: str) -> tuple[str, str]:
     if "," in name:
         surname, _, given = name.partition(",")
     else:
-        *given_parts, surname = name.split() or [""]
-        given = " ".join(given_parts)
+        parts = name.split() or [""]
+        last = parts[-1]
+        if len(parts) > 1 and last.isalpha() and last.isupper() and len(last) <= 3:
+            # "Smith JA": trailing initials
+            surname, given = " ".join(parts[:-1]), last
+        else:
+            # "Jan van der Berg": the surname starts at the first lowercase particle
+            k = next(
+                (n for n, p in enumerate(parts) if n and p[0].islower()), len(parts) - 1
+            )
+            surname, given = " ".join(parts[k:]), " ".join(parts[:k])
     return _fold(surname), _fold(given)[:1]
 
 
@@ -108,11 +122,9 @@ def _reference_region(raw: str) -> tuple[int, int] | None:
 
 
 def _reference_count(region: str) -> int:
-    nums = {int(a or b) for a, b in _REFERENCE_ENTRY.findall(region)}
-    count = 0
-    while count + 1 in nums:
-        count += 1
-    return count
+    # Entries above 999 are years ("2019. Title"), not list numbers.
+    nums = (int(a or b) for a, b in _REFERENCE_ENTRY.findall(region))
+    return max((n for n in nums if n < 1000), default=0)
 
 
 def _statement_ranges(raw: str) -> list[tuple[int, int]]:
@@ -148,8 +160,15 @@ def _index(keys: list[str]) -> tuple[dict[tuple[str, ...], list[int]], int]:
     return index, len(common)
 
 
+class _DeadlineReached(Exception):
+    pass
+
+
 def _runs(
-    doc: list[str], segments: list[tuple[int, int]], cand: list[str]
+    doc: list[str],
+    segments: list[tuple[int, int]],
+    cand: list[str],
+    deadline: float = float("inf"),
 ) -> tuple[list[tuple[int, int, int, int]], int]:
     index, common = _index(cand)
     last_end: dict[int, int] = {}
@@ -157,6 +176,8 @@ def _runs(
     for lo, hi in segments:
         for i in range(lo, hi - SHINGLE_TOKENS + 1):
             for j in index.get(tuple(doc[i : i + SHINGLE_TOKENS]), ()):
+                if time.monotonic() > deadline:
+                    raise _DeadlineReached
                 d = i - j
                 if last_end.get(d, -1) > i:
                     continue
@@ -272,9 +293,18 @@ def find_verbatim_reuse(
         total_chars += len(c.text)
 
         src_tokens = _tokenize(c.text)
-        runs, common = _runs(doc_keys, segments, [t[0] for t in src_tokens])
+        try:
+            runs, common = _runs(
+                doc_keys,
+                segments,
+                [t[0] for t in src_tokens],
+                started + budget.deadline_s,
+            )
+        except _DeadlineReached:
+            skipped.append((c.source_id, "deadline_reached"))
+            continue
         common_total += common
-        overlap = any(author_key(a) in declared for a in c.authors)
+        overlap = any(k[0] and k in declared for k in map(author_key, c.authors))
         for i0, i1, j0, j1 in sorted(runs):
             d_start, d_end = doc_tokens[i0][1], doc_tokens[i1 - 1][2]
             doc_raw = _slice(document, doc_tokens, i0, i1)

@@ -44,10 +44,9 @@ def _valid_source_id(origin: str, source_id: str) -> bool:
         return _ARXIV.fullmatch(source_id) is not None
     if origin == "own_upload":
         try:
-            uuid.UUID(source_id)
+            return str(uuid.UUID(source_id)) == source_id
         except ValueError:
             return False
-        return True
     return False
 
 
