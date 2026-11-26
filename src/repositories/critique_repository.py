@@ -104,7 +104,7 @@ class CritiqueRepository:
 
     def _decrypt(self, value: str) -> str:
         if not value.startswith(ENCRYPTED_TEXT_PREFIX):
-            raise ValueError("stored critique value is not encrypted")
+            raise UndecryptableDocumentError("stored critique value is not encrypted")
         if self._cipher is None:
             raise DocumentEncryptionUnavailable("no cipher was supplied")
         try:
@@ -139,6 +139,7 @@ class CritiqueRepository:
         consent_text_version: str,
         consent_text_sha256: str,
         reserved_units: int,
+        ledger_id: uuid.UUID | None = None,
     ) -> DocumentCritique:
         now = datetime.now(UTC)
         row = DocumentCritique(
@@ -153,6 +154,7 @@ class CritiqueRepository:
             consent_text_sha256=consent_text_sha256,
             consent_recorded_at=now,
             reserved_units=reserved_units,
+            ledger_id=ledger_id,
             role_outcomes={},
             created_at=now,
         )

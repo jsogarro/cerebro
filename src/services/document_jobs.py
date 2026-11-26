@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, TypeVar
 
-from sqlalchemy import Table, func, select, text, update
+from sqlalchemy import Table, delete, func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
@@ -117,6 +117,19 @@ async def transition(
     return bool(result.rowcount == 1)  # type: ignore[attr-defined]
 
 
+async def _release_reservation(
+    session: AsyncSession, table: Table, job_id: uuid.UUID
+) -> None:
+    """Give back the ledger row a run never used; a job without one has nothing to give."""
+    if "ledger_id" not in table.c:
+        return
+    ledger_id = await session.scalar(
+        select(table.c.ledger_id).where(table.c.id == job_id)
+    )
+    if ledger_id is not None:
+        await session.execute(delete(UsageLedger).where(UsageLedger.id == ledger_id))
+
+
 async def flip_if_stale(
     session: AsyncSession, table: Table, row: _JobRow, deadline_s: float
 ) -> bool:
@@ -124,7 +137,7 @@ async def flip_if_stale(
     now = datetime.now(UTC)
     if not is_stale(row.status, row.created_at, deadline_s, now):
         return False
-    return await transition(
+    flipped = await transition(
         session,
         table,
         row.id,
@@ -133,6 +146,9 @@ async def flip_if_stale(
         status_reason="deadline_exceeded",
         completed_at=now,
     )
+    if flipped and row.status == "queued":
+        await _release_reservation(session, table, row.id)
+    return flipped
 
 
 async def _used(session: AsyncSession, *conditions: Any) -> tuple[int, int]:
@@ -196,8 +212,10 @@ async def admit(
     count_active: Callable[[AsyncSession, uuid.UUID, datetime], Awaitable[int]],
     lock: str | None = None,
     budget_kinds: tuple[str, ...] | None = None,
-) -> None:
+) -> uuid.UUID:
     """Check every limit, then record ``units`` in the ledger; raise ``QuotaExceeded``.
+
+    Returns the ledger row's id, so a run that never starts can release it.
 
     Runs in the caller's transaction before the job row exists. The check comes
     first so a refused request writes nothing, even if the caller's session
@@ -217,16 +235,17 @@ async def admit(
         active = await count_active(session, organization_id, now)
         if active >= limits.per_org_concurrent:
             raise QuotaExceeded("org_concurrent")
-    session.add(
-        UsageLedger(
-            organization_id=organization_id,
-            user_id=user_id,
-            kind=kind,
-            units=units,
-            created_at=now,
-        )
+    entry = UsageLedger(
+        id=uuid.uuid4(),
+        organization_id=organization_id,
+        user_id=user_id,
+        kind=kind,
+        units=units,
+        created_at=now,
     )
+    session.add(entry)
     await session.flush()
+    return entry.id
 
 
 @dataclass(frozen=True)
@@ -238,11 +257,15 @@ class _Job:
 
 
 async def _fail(job: _Job, *, expected: str, reason: str) -> None:
-    """Best effort: a row this cannot fail is failed by the stale rule on its next read."""
+    """Best effort: a row this cannot fail is failed by the stale rule on its next read.
+
+    A run failed while still ``queued`` never reached the provider, so it gives its
+    reservation back; one that had started keeps its charge.
+    """
     try:
         async with job.session_factory() as session:
             await set_postgres_tenant_context(session, str(job.organization_id))
-            await transition(
+            failed = await transition(
                 session,
                 job.table,
                 job.id,
@@ -251,6 +274,8 @@ async def _fail(job: _Job, *, expected: str, reason: str) -> None:
                 status_reason=reason,
                 completed_at=datetime.now(UTC),
             )
+            if failed and expected == "queued":
+                await _release_reservation(session, job.table, job.id)
             await session.commit()
     except (SQLAlchemyError, OSError) as exc:
         logger.warning(

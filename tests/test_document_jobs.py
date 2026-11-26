@@ -58,9 +58,21 @@ async def insert_job(
     status: str = "queued",
     created_at: datetime | None = None,
     org: uuid.UUID = ORG,
+    with_ledger: bool = False,
 ) -> uuid.UUID:
     job_id = uuid.uuid4()
+    ledger_id = uuid.uuid4() if with_ledger else None
     async with factory() as session:
+        if ledger_id:
+            session.add(
+                UsageLedger(
+                    id=ledger_id,
+                    organization_id=org,
+                    user_id=USER,
+                    kind="critique",
+                    units=5,
+                )
+            )
         session.add(
             DocumentCritique(
                 id=job_id,
@@ -76,11 +88,17 @@ async def insert_job(
                 consent_recorded_at=NOW,
                 reserved_units=1,
                 role_outcomes={},
+                ledger_id=ledger_id,
                 created_at=created_at or datetime.now(UTC),
             )
         )
         await session.commit()
     return job_id
+
+
+async def ledger_ids(factory: Factory) -> set[uuid.UUID]:
+    async with factory() as session:
+        return set((await session.execute(select(UsageLedger.id))).scalars())
 
 
 async def row_of(factory: Factory, job_id: uuid.UUID) -> DocumentCritique | None:
@@ -481,6 +499,80 @@ async def test_every_reason_a_run_writes_is_a_declared_reason(
     await cancel_all({task})
     reasons.add((await row_of(factory, job_id)).status_reason)  # type: ignore[union-attr]
     assert reasons == set(RUN_JOB_REASONS)
+
+
+# ---- a reservation is released only for a run that never started ---------------
+
+
+async def test_a_run_that_expires_before_it_starts_releases_its_reservation(
+    factory: Factory,
+) -> None:
+    old = datetime.now(UTC) - timedelta(seconds=100)
+    job_id = await insert_job(factory, created_at=old, with_ledger=True)
+    work = Spy()
+    await start(factory, job_id, work, deadline_s=30, created_at=old)
+    assert work.calls == 0
+    assert (await row_of(factory, job_id)).status_reason == "deadline_exceeded"  # type: ignore[union-attr]
+    assert await ledger_ids(factory) == set()
+
+
+async def test_a_run_that_started_keeps_its_charge_when_it_hits_the_deadline(
+    factory: Factory,
+) -> None:
+    job_id = await insert_job(factory, with_ledger=True)
+    never = asyncio.Event()
+
+    async def hang() -> None:
+        await never.wait()
+
+    await asyncio.wait_for(start(factory, job_id, hang, deadline_s=0.05), 5)
+    assert (await row_of(factory, job_id)).status_reason == "deadline_exceeded"  # type: ignore[union-attr]
+    assert len(await ledger_ids(factory)) == 1
+
+
+async def test_a_run_cancelled_before_it_starts_releases_its_reservation(
+    factory: Factory,
+) -> None:
+    job_id = await insert_job(factory, with_ledger=True)
+    task = asyncio.create_task(
+        run_job(
+            table=TABLE,
+            job_id=job_id,
+            organization_id=ORG,
+            created_at=datetime.now(UTC),
+            deadline_s=30,
+            session_factory=factory,
+            semaphore=asyncio.Semaphore(0),
+            work=Spy(),
+            persist=finished,
+        )
+    )
+    await asyncio.sleep(0.05)
+    await asyncio.wait_for(cancel_all({task}), 5)
+    assert await ledger_ids(factory) == set()
+
+
+@pytest.mark.parametrize(("status", "kept"), [("queued", 0), ("running", 1)])
+async def test_a_stale_row_releases_its_reservation_only_if_it_never_started(
+    factory: Factory, status: str, kept: int
+) -> None:
+    old = datetime.now(UTC) - timedelta(seconds=30 + STALE_GRACE_S + 5)
+    job_id = await insert_job(factory, status=status, created_at=old, with_ledger=True)
+    async with factory() as session:
+        row = await session.get(DocumentCritique, job_id)
+        assert row is not None
+        assert await flip_if_stale(session, TABLE, row, 30)
+        await session.commit()
+    assert len(await ledger_ids(factory)) == kept
+
+
+async def test_a_job_with_no_recorded_reservation_fails_without_error(
+    factory: Factory,
+) -> None:
+    old = datetime.now(UTC) - timedelta(seconds=100)
+    job_id = await insert_job(factory, created_at=old)
+    await start(factory, job_id, Spy(), deadline_s=30, created_at=old)
+    assert (await row_of(factory, job_id)).status == "failed"  # type: ignore[union-attr]
 
 
 # ---- admission rules (single connection; the races are in the integration suite) --

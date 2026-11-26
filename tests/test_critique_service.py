@@ -271,7 +271,7 @@ async def test_with_no_key_persist_raises_and_writes_nothing(
         assert (await session.execute(select(CritiqueFinding))).first() is None
 
 
-async def test_a_value_stored_without_the_prefix_is_refused_not_served(
+async def test_a_value_stored_without_the_prefix_reads_as_missing(
     factory: async_sessionmaker[AsyncSession],
 ) -> None:
     critique_id = await stored(factory)
@@ -287,10 +287,10 @@ async def test_a_value_stored_without_the_prefix_is_refused_not_served(
         await session.commit()
     await mark_finished(factory, critique_id)
     async with factory() as session:
-        with pytest.raises(ValueError, match="not encrypted"):
-            await CritiqueRepository(session, service.document_cipher()).get(
-                critique_id, organization_id=ORG, user_id=USER
-            )
+        view = await CritiqueRepository(session, service.document_cipher()).get(
+            critique_id, organization_id=ORG, user_id=USER
+        )
+    assert view is None
 
 
 # ---- report ---------------------------------------------------------------------
@@ -564,3 +564,71 @@ def test_a_fix_that_claims_verified_references_gets_the_warning_too() -> None:
     )
     view = a_view(status="succeeded", status_reason=None, findings=(finding,))
     assert service.REFERENCE_WARNING in service.render_report(view, "d" * 64)
+
+
+@pytest.mark.parametrize(
+    "wording",
+    [
+        "This deserves a score of 4",
+        "Scored poorly",
+        "I would accept this paper",
+        "Accepted with changes",
+        "Reject the manuscript",
+        "A clear rejection",
+        "Verdict: pass/fail",
+        "Pass or fail?",
+        "The approach is original",
+        "Lacks originality",
+        "plagiarism-free",
+        "Plagiarism free",
+        "about 40% of the sample",
+        "12.5 % drop",
+    ],
+)
+def test_verdict_wording_in_model_text_gets_a_visible_warning_and_stays(
+    wording: str,
+) -> None:
+    from src.repositories.critique_repository import FindingView
+
+    for field in ("problem", "fix"):
+        finding = FindingView(
+            "methods",
+            "design",
+            "major",
+            "q",
+            0,
+            1,
+            1,
+            "exact",
+            **{"problem": "p", "fix": "f", field: wording},
+        )
+        view = a_view(status="succeeded", status_reason=None, findings=(finding,))
+        text = service.render_report(view, "d" * 64)
+        assert text.count(service.VERDICT_WARNING) == 1, (field, wording)
+        assert wording in text
+
+
+@pytest.mark.parametrize(
+    "wording",
+    [
+        "The sample is small",
+        "Passage three repeats itself",
+        "The accepting rate was not reported",
+        "Report an interval of 0.4 to 0.6",
+        "Their originals are cited",
+    ],
+)
+def test_ordinary_review_wording_is_not_flagged_as_a_verdict(wording: str) -> None:
+    from src.repositories.critique_repository import FindingView
+
+    finding = FindingView(
+        "methods", "design", "major", "q", 0, 1, 1, "exact", wording, "f"
+    )
+    view = a_view(status="succeeded", status_reason=None, findings=(finding,))
+    text = service.render_report(view, "d" * 64)
+    assert service.VERDICT_WARNING not in text
+
+
+def test_the_verdict_warning_itself_uses_no_verdict_wording() -> None:
+    for pattern in FORBIDDEN:
+        assert not re.search(pattern, service.VERDICT_WARNING, re.I), pattern

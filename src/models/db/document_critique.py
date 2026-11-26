@@ -61,6 +61,8 @@ class DocumentCritique(Base):
         DateTime(timezone=True), nullable=False
     )
     reserved_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The usage_ledger row this run was admitted under, released if it never starts.
+    ledger_id: Mapped[uuid.UUID | None] = mapped_column(UUID(), nullable=True)
     role_outcomes: Mapped[dict[str, dict[str, object]]] = mapped_column(
         JSON, nullable=False, default=dict
     )

@@ -89,11 +89,18 @@ class GatedModel:
 
     def __init__(self) -> None:
         self.gate = asyncio.Event()
+        self.entered = asyncio.Event()
+        self.cancelled = False
         self.completed = 0
         self.handler: Any = lambda prompt: reply([issue(Q1)])
 
     async def complete(self, prompt: str) -> ModelReply:
-        await self.gate.wait()
+        self.entered.set()
+        try:
+            await self.gate.wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
         self.completed += 1
         out = self.handler(prompt)
         if isinstance(out, Exception):
@@ -893,6 +900,80 @@ async def test_a_worker_with_a_full_queue_refuses_before_reserving_anything(
     assert await count(factory, UsageLedger) == ledger_before
     model.gate.set()
     await drain()
+
+
+async def test_deleting_a_running_critique_stops_its_model_call(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    model: GatedModel,
+) -> None:
+    model.gate.clear()
+    critique_id = (await start(client, await make_document(factory))).json()["id"]
+    await asyncio.wait_for(model.entered.wait(), 5)
+    assert (await client.delete(f"/api/v1/critiques/{critique_id}")).status_code == 204
+    await drain()
+    assert model.cancelled
+    assert app.state.document_jobs == set()
+    assert (await client.get(f"/api/v1/critiques/{critique_id}")).status_code == 404
+    assert await count(factory, DocumentCritique) == 0
+    assert await count(factory, CritiqueFinding) == 0
+    assert await count(factory, UsageLedger) == 1
+
+
+async def test_a_critique_records_the_reservation_it_was_admitted_under(
+    client: httpx.AsyncClient, factory: async_sessionmaker[AsyncSession]
+) -> None:
+    critique_id = await run_to_end(client, await make_document(factory))
+    async with factory() as session:
+        row = await session.get(DocumentCritique, uuid.UUID(critique_id))
+        ledger = (await session.execute(select(UsageLedger))).scalar_one()
+    assert row is not None and row.ledger_id == ledger.id
+
+
+async def test_a_value_that_is_not_encrypted_reads_as_missing_like_an_undecryptable_one(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_id = await make_document(factory)
+    critique_id = await run_to_end(client, document_id)
+    async with factory() as session:
+        finding = (await session.execute(select(CritiqueFinding))).scalars().first()
+        assert finding is not None
+        finding.problem_enc = "plain text, no prefix"
+        await session.commit()
+    unprefixed = await client.get(f"/api/v1/critiques/{critique_id}")
+    assert unprefixed.status_code == 404
+    assert (
+        await client.get(f"/api/v1/critiques/{critique_id}/report")
+    ).status_code == 404
+    monkeypatch.setattr(
+        settings, "DOCUMENT_ENCRYPTION_KEY", Fernet.generate_key().decode()
+    )
+    other_key = await client.get(f"/api/v1/critiques/{critique_id}")
+    assert other_key.status_code == 404
+    assert other_key.json() == unprefixed.json()
+
+
+async def test_verdict_wording_the_model_wrote_is_flagged_in_the_served_report(
+    client: httpx.AsyncClient,
+    factory: async_sessionmaker[AsyncSession],
+    model: GatedModel,
+) -> None:
+    model.handler = lambda prompt: reply(
+        [
+            issue(
+                Q1,
+                category=role_named(role_of(prompt)).categories[0],
+                problem="I would give this a score of 3 and reject it.",
+                fix="Report the 95% interval.",
+            )
+        ]
+    )
+    critique_id = await run_to_end(client, await make_document(factory))
+    text = (await client.get(f"/api/v1/critiques/{critique_id}/report")).text
+    assert text.count(service.VERDICT_WARNING) == 5
+    assert "score of 3" in text
 
 
 # ---- lifespan -------------------------------------------------------------------------

@@ -1,7 +1,6 @@
 """Admission is atomic across sessions, and a background run carries its tenant context."""
 
 import asyncio
-import contextlib
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
@@ -229,78 +228,56 @@ async def test_a_global_count_limit_holds_across_orgs_admitting_concurrently(
     assert results.count(True) == 1
 
 
-async def count_both_kinds_unblocked(
-    session: AsyncSession, org: uuid.UUID, now: datetime
-) -> int:
-    return int(
-        await session.scalar(
-            select(func.count())
-            .select_from(UsageLedger)
-            .where(
-                UsageLedger.organization_id == org,
-                UsageLedger.kind.in_(MODEL_JOB_KINDS),
-            )
-        )
-        or 0
+async def test_a_revision_admission_waits_for_a_critique_admission_holding_the_shared_lock(
+    factory: Factory,
+) -> None:
+    """Deterministic: no race, only whether the second admission blocks at all."""
+    document = await document_for(factory, ORG)
+    shared: dict[str, Any] = {
+        "lock": MODEL_ADMIT_LOCK,
+        "budget_kinds": MODEL_JOB_KINDS,
+    }
+    holder = factory()
+    await admit(
+        holder,
+        kind="critique",
+        organization_id=ORG,
+        user_id=USERS[ORG],
+        units=10,
+        limits=JobLimits(),
+        count_active=active_model_jobs,
+        **shared,
     )
+    waiting = asyncio.create_task(
+        admit_critique(factory, document, JobLimits(), kind="revision", **shared)
+    )
+    done, _ = await asyncio.wait({waiting}, timeout=1.5)
+    assert not done, "the revision admission did not wait for the shared lock"
+    await holder.commit()
+    await holder.close()
+    assert await asyncio.wait_for(waiting, 10)
 
 
-def counting_both_kinds_after_a_meeting() -> Any:
-    """Counts both kinds, but only after both admissions have reached the count.
-
-    With one shared lock the second admission cannot reach it until the first
-    commits, so the wait times out and the race is decided by the lock; without
-    one, both arrive together and both see a free slot.
-    """
-    meeting = asyncio.Barrier(2)
-
-    async def count(session: AsyncSession, org: uuid.UUID, now: datetime) -> int:
-        with contextlib.suppress(TimeoutError, asyncio.BrokenBarrierError):
-            await asyncio.wait_for(meeting.wait(), 3)
-        return int(
-            await session.scalar(
-                select(func.count())
-                .select_from(UsageLedger)
-                .where(
-                    UsageLedger.organization_id == org,
-                    UsageLedger.kind.in_(MODEL_JOB_KINDS),
-                )
-            )
-            or 0
-        )
-
-    return count
-
-
-async def test_a_critique_and_a_revision_racing_for_the_last_slot_admit_exactly_one(
+async def test_admissions_under_different_locks_do_not_wait_for_each_other(
     factory: Factory,
 ) -> None:
     document = await document_for(factory, ORG)
-    limits = JobLimits(per_org_concurrent=2)
-    shared = {"lock": MODEL_ADMIT_LOCK, "budget_kinds": MODEL_JOB_KINDS}
-    assert await admit_critique(
-        factory, document, limits, count_active=count_both_kinds_unblocked, **shared
+    holder = factory()
+    await admit(
+        holder,
+        kind="critique",
+        organization_id=ORG,
+        user_id=USERS[ORG],
+        units=10,
+        limits=JobLimits(),
+        count_active=active_model_jobs,
+        lock="elsewhere",
     )
-    count_active = counting_both_kinds_after_a_meeting()
-    results = await asyncio.gather(
-        admit_critique(
-            factory,
-            document,
-            limits,
-            kind="critique",
-            count_active=count_active,
-            **shared,
-        ),
-        admit_critique(
-            factory,
-            document,
-            limits,
-            kind="revision",
-            count_active=count_active,
-            **shared,
-        ),
+    assert await asyncio.wait_for(
+        admit_critique(factory, document, JobLimits(), kind="revision"), 10
     )
-    assert results.count(True) == 1
+    await holder.rollback()
+    await holder.close()
 
 
 async def test_revision_units_count_against_a_critiques_org_budget_not_its_user_limit(

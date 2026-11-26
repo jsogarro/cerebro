@@ -49,6 +49,7 @@ from src.services.document_jobs import (
     MODEL_JOB_KINDS,
     QuotaExceeded,
     admit,
+    cancel_all,
     run_job,
 )
 
@@ -264,7 +265,7 @@ async def start_critique(
     model = model_factory()
     units = service.reserved_units(document.char_count)
     try:
-        await admit(
+        ledger_id = await admit(
             session,
             kind="critique",
             organization_id=ids.organization_id,
@@ -287,6 +288,7 @@ async def start_critique(
         consent_text_version=consent.version,
         consent_text_sha256=consent.sha256,
         reserved_units=units,
+        ledger_id=ledger_id,
     )
     critique_id, created_at = row.id, row.created_at
     # The task must find the committed row, so commit before scheduling it.
@@ -302,8 +304,7 @@ async def start_critique(
             created_at=created_at,
             deadline_s=CRITIQUE_DEADLINE_S,
             session_factory=session_factory,
-            semaphore=getattr(state, "critique_semaphore", None)
-            or asyncio.Semaphore(1),
+            semaphore=state.critique_semaphore,
             work=service.make_work(
                 session_factory=session_factory,
                 document_id=document_id,
@@ -316,7 +317,8 @@ async def start_critique(
                 organization_id=ids.organization_id,
                 user_id=ids.user_id,
             ),
-        )
+        ),
+        name=f"critique:{critique_id}",
     )
     jobs.add(task)
     task.add_done_callback(jobs.discard)
@@ -398,6 +400,7 @@ async def get_report(
 )
 async def delete_critique(
     critique_id: uuid.UUID,
+    request: Request,
     session: AsyncSession = Depends(get_session),
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> Response:
@@ -407,4 +410,12 @@ async def delete_critique(
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     await session.commit()
+    # Stop the model call too; its quota stays spent. Only this worker's tasks are
+    # visible here, so a run on another worker finishes and discards its result.
+    running = {
+        task
+        for task in request.app.state.document_jobs
+        if task.get_name() == f"critique:{critique_id}"
+    }
+    await cancel_all(running)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

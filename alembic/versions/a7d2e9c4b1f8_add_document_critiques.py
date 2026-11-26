@@ -57,6 +57,7 @@ def upgrade() -> None:
         sa.Column("consent_text_sha256", sa.String(64), nullable=False),
         sa.Column("consent_recorded_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("reserved_units", sa.Integer(), nullable=False),
+        sa.Column("ledger_id", sa.UUID(), nullable=True),
         sa.Column("role_outcomes", sa.JSON(), nullable=False),
         sa.Column(
             "created_at",

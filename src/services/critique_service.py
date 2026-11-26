@@ -6,6 +6,7 @@ text report rendered on each read.
 """
 
 import hashlib
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -98,6 +99,15 @@ REPORT_FOOTER = (
 REPORT_DISCLAIMER = (
     "Model-assisted and uncalibrated. All roles use one model family; they are not "
     "independent reviewers."
+)
+VERDICT_WARNING = (
+    "Warning: this finding uses verdict wording, which this system does not produce."
+)
+_VERDICT_WORDING = re.compile(
+    r"\bscor(?:e|es|ed|ing)\b|\baccept(?:ed)?\b|\breject(?:ed|ion)?\b"
+    r"|\bpass(?:\s*/\s*|\s+or\s+)fail\b|\boriginal(?:ity)?\b|plagiarism[- ]free"
+    r"|\d+(?:\.\d+)?\s*%",
+    re.IGNORECASE,
 )
 REFERENCE_WARNING = (
     "Warning: this finding asserts something about references that no part of this "
@@ -244,5 +254,9 @@ def render_report(critique: CritiqueView, document_text_sha256: str) -> str:
             finding.problem
         ) or claims_reference_verification(finding.fix):
             lines.append(f"   {REFERENCE_WARNING}")
+        if _VERDICT_WORDING.search(finding.problem) or _VERDICT_WORDING.search(
+            finding.fix
+        ):
+            lines.append(f"   {VERDICT_WARNING}")
     lines += ["", *REPORT_FOOTER]
     return "\n".join(lines) + "\n"
