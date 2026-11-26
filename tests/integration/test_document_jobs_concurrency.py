@@ -1,6 +1,7 @@
 """Admission is atomic across sessions, and a background run carries its tenant context."""
 
 import asyncio
+import contextlib
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
@@ -254,10 +255,8 @@ def counting_both_kinds_after_a_meeting() -> Any:
     meeting = asyncio.Barrier(2)
 
     async def count(session: AsyncSession, org: uuid.UUID, now: datetime) -> int:
-        try:
+        with contextlib.suppress(TimeoutError, asyncio.BrokenBarrierError):
             await asyncio.wait_for(meeting.wait(), 3)
-        except (TimeoutError, asyncio.BrokenBarrierError):
-            pass
         return int(
             await session.scalar(
                 select(func.count())
