@@ -41,7 +41,6 @@ class CitationAgent(LLMWorkerAgentBase):
             AgentResult containing formatted citations
         """
         try:
-            # Validate input
             sources = task.input_data.get("sources", [])
             if not sources:
                 return self.handle_error(
@@ -50,7 +49,6 @@ class CitationAgent(LLMWorkerAgentBase):
 
             style = task.input_data.get("style", "APA")
 
-            # Check cache first
             cache_key = self._generate_cache_key(task)
             cached_result = await self.get_cached_result(cache_key)
             if cached_result:
@@ -81,7 +79,6 @@ class CitationAgent(LLMWorkerAgentBase):
                 verified_count=verification_result.get("verified_count", 0),
             )
 
-            # Build enhanced output with MCP data
             output = {
                 "formatted_citations": citation_result.get("formatted_citations", []),
                 "bibliography": bibliography_result.get("bibliography", []),
@@ -178,7 +175,6 @@ class CitationAgent(LLMWorkerAgentBase):
         sources = task.input_data.get("sources", [])
         style = task.input_data.get("style", "APA")
 
-        # Create a stable hash from sources
         source_str = orjson.dumps(sources, option=orjson.OPT_SORT_KEYS).decode()
         key_parts = [
             self.get_agent_type(),
@@ -330,7 +326,6 @@ Return formatted citations as structured JSON."""
                 prompt, CitationSchema, task=None, tier="simple"
             )
 
-            # Convert Pydantic model to expected dict format
             formatted_citations = [
                 {
                     "citation": citation.citation_text,
@@ -421,7 +416,6 @@ Return formatted citations as structured JSON."""
             issues.append(f"Missing fields: {', '.join(missing_fields)}")
             quality_score -= 0.2
 
-        # Check DOI resolution if available
         if source.get("doi"):
             doi_info = await self._resolve_doi(source["doi"])
             if doi_info.get("resolved"):
@@ -431,7 +425,6 @@ Return formatted citations as structured JSON."""
             else:
                 issues.append("DOI could not be resolved")
 
-        # Check publication year
         year = source.get("year")
         if year:
             try:

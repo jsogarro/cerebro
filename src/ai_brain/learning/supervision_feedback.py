@@ -137,10 +137,8 @@ class RoutingStrategyAnalyzer:
 
         strategy_name = strategy.value if hasattr(strategy, "value") else str(strategy)
 
-        # Add to event history
         self.strategy_events[strategy_name].append(feedback)
 
-        # Update aggregated metrics
         metrics = self.strategy_metrics[strategy_name]
         metrics.total_executions += 1
 
@@ -155,7 +153,6 @@ class RoutingStrategyAnalyzer:
             metrics.average_cost_accuracy * (1 - alpha) + feedback.cost_accuracy * alpha
         )
 
-        # Update quality metrics
         metrics.average_quality_score = (
             metrics.average_quality_score * (1 - alpha)
             + feedback.actual_quality * alpha
@@ -186,7 +183,6 @@ class RoutingStrategyAnalyzer:
             if len(recent_events) < self.min_samples_for_analysis:
                 continue
 
-            # Calculate detailed metrics
             cost_accuracies = [e.cost_accuracy for e in recent_events]
             quality_scores = [e.actual_quality for e in recent_events]
             latency_ratios = [
@@ -249,8 +245,7 @@ class RoutingStrategyAnalyzer:
         if denominator == 0:
             return 0.0
 
-        slope = numerator / denominator
-        return slope
+        return numerator / denominator
 
     def _calculate_overall_strategy_score(self, events: list[FeedbackEvent]) -> float:
         """Calculate overall performance score for a strategy."""
@@ -273,14 +268,12 @@ class RoutingStrategyAnalyzer:
             ]
         )
 
-        overall_score = (
+        return (
             success_score * success_weight
             + cost_score * cost_accuracy_weight
             + quality_score * quality_weight
             + latency_score * latency_weight
         )
-
-        return overall_score
 
     def get_optimal_strategy_recommendation(
         self, context: dict[str, Any]
@@ -355,7 +348,6 @@ class CostPredictionOptimizer:
         if len(self.cost_predictions) < self.min_samples_for_update:
             return self.cost_factors
 
-        # Calculate prediction errors
         errors = [
             (actual - predicted) / predicted
             for predicted, actual in self.cost_predictions[-100:]
@@ -365,7 +357,6 @@ class CostPredictionOptimizer:
         if not errors:
             return self.cost_factors
 
-        # Calculate bias and adjust factors
         average_error = statistics.mean(errors)
 
         # Adjust cost factors to reduce bias
@@ -391,7 +382,6 @@ class CostPredictionOptimizer:
         if not self.cost_predictions:
             return {"accuracy": 0.0, "bias": 0.0, "variance": 0.0}
 
-        # Calculate metrics
         accuracies = [
             1.0 - abs(actual - predicted) / predicted
             for predicted, actual in self.cost_predictions
@@ -424,7 +414,6 @@ class SupervisionFeedbackLearner:
         """Initialize supervision feedback learner."""
         self.config = config or {}
 
-        # Initialize learning components
         self.strategy_analyzer = RoutingStrategyAnalyzer(
             self.config.get("strategy_analyzer", {})
         )
@@ -474,7 +463,6 @@ class SupervisionFeedbackLearner:
             user_feedback: Optional user satisfaction feedback
         """
 
-        # Calculate accuracy metrics
         cost_accuracy = 1.0 - abs(
             execution_result.actual_cost - routing_decision.estimated_cost
         ) / max(routing_decision.estimated_cost, 0.001)
@@ -488,7 +476,6 @@ class SupervisionFeedbackLearner:
             - routing_decision.estimated_latency_ms
         ) / max(routing_decision.estimated_latency_ms, 1)
 
-        # Create feedback event
         feedback_event = FeedbackEvent(
             event_id=f"feedback_{len(self.feedback_events)}_{datetime.now().timestamp()}",
             timestamp=datetime.now(),
@@ -527,7 +514,6 @@ class SupervisionFeedbackLearner:
             int(current_count) + 1 if isinstance(current_count, int) else 1
         )
 
-        # Update component learners
         routing_strategy_value = routing_decision.__dict__.get(
             "routing_strategy", "balanced"
         )
@@ -543,7 +529,6 @@ class SupervisionFeedbackLearner:
             routing_decision.estimated_cost, execution_result.actual_cost
         )
 
-        # Update supervisor performance
         supervisor_metrics = self.supervisor_performance[
             execution_result.supervisor_type
         ]
@@ -596,7 +581,6 @@ class SupervisionFeedbackLearner:
             supervisor_report = self._generate_supervisor_performance_report()
             improvements["supervisor"] = len(supervisor_report)
 
-            # Update learning stats
             cycles_count = self.learning_stats.get("learning_cycles_completed", 0)
             self.learning_stats["learning_cycles_completed"] = (
                 (int(cycles_count) + 1) if isinstance(cycles_count, int) else 1
@@ -650,7 +634,6 @@ class SupervisionFeedbackLearner:
             if metrics.total_executions == 0:
                 continue
 
-            # Calculate recent performance (last 24 hours)
             recent_events = [
                 event
                 for event in self.feedback_events
@@ -690,12 +673,10 @@ class SupervisionFeedbackLearner:
     def get_routing_recommendations(self, context: dict[str, Any]) -> dict[str, Any]:
         """Get routing recommendations based on learned patterns."""
 
-        # Get optimal strategy
         optimal_strategy, confidence = (
             self.strategy_analyzer.get_optimal_strategy_recommendation(context)
         )
 
-        # Get cost optimization suggestions
         cost_factors = self.cost_optimizer.cost_factors
 
         # Generate supervisor recommendations
@@ -729,7 +710,6 @@ class SupervisionFeedbackLearner:
             if metrics.total_executions < 3:  # Need minimum data
                 continue
 
-            # Calculate context-specific score
             base_score = metrics.success_rate
 
             # Adjust for domain match (simplified)
@@ -784,7 +764,6 @@ class SupervisionFeedbackLearner:
             strategy, "Selected based on performance history"
         )
 
-        # Add context-specific reasoning
         complexity = context.get("complexity", "moderate")
         if complexity == "complex" and strategy == "quality_focused":
             base_explanation += " (complex queries require higher quality thresholds)"
@@ -810,10 +789,7 @@ class SupervisionFeedbackLearner:
             recent_events / 100, 1.0
         )  # Max confidence at 100 recent events
 
-        # Calculate overall confidence
-        overall_confidence = data_confidence * 0.6 + recency_confidence * 0.4
-
-        return overall_confidence
+        return data_confidence * 0.6 + recency_confidence * 0.4
 
     async def get_learning_stats(self) -> dict[str, Any]:
         """Get comprehensive learning system statistics."""

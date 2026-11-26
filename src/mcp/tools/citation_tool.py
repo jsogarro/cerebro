@@ -75,13 +75,11 @@ class CitationTool(BaseMCPTool):
             Formatted citations or resolved DOI
         """
         try:
-            # Handle DOI resolution
             if "doi" in kwargs:
                 return await self._resolve_doi(
                     kwargs["doi"], kwargs.get("style", "APA")
                 )
 
-            # Handle citation formatting
             sources = kwargs.get("sources", [])
             style = kwargs.get("style", "APA")
             output_format = kwargs.get("format", "text")
@@ -143,7 +141,6 @@ class CitationTool(BaseMCPTool):
         else:
             author_str = "Unknown"
 
-        # Build citation
         citation = f"{author_str} ({year}). {title}."
         if journal:
             citation += f" {journal}"
@@ -168,7 +165,6 @@ class CitationTool(BaseMCPTool):
         else:
             author_str = "Unknown"
 
-        # Build citation
         citation = f'{author_str}. "{title}."'
         if publisher:
             citation += f" {publisher},"
@@ -187,7 +183,6 @@ class CitationTool(BaseMCPTool):
         # Format authors
         author_str = ", ".join(authors) if authors else "Unknown"
 
-        # Build citation
         citation = f'{author_str}. "{title}."'
         if year:
             citation += f" ({year})"

@@ -423,7 +423,6 @@ class TestResourceCleanup:
 
     async def test_close_client(self, openrouter_provider):
         """Close should clean up HTTP client."""
-        # Create mock client
         mock_client = AsyncMock()
         openrouter_provider.client = mock_client
 

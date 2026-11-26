@@ -149,11 +149,9 @@ class RealTimeDashboard:
         sample_sizes: dict[str, int],
         statistical_analysis: dict[str, Any] | None = None,
     ) -> None:
-        """Update metrics for an experiment."""
         if experiment_id not in self.active_experiments:
             return
 
-        # Create snapshot
         snapshot = ExperimentSnapshot(
             experiment_id=experiment_id,
             timestamp=datetime.now(UTC),
@@ -161,7 +159,6 @@ class RealTimeDashboard:
             sample_sizes=sample_sizes,
         )
 
-        # Add statistical analysis if provided
         if statistical_analysis:
             snapshot.p_value = statistical_analysis.get("p_value")
             snapshot.effect_size = statistical_analysis.get("effect_size")
@@ -228,7 +225,6 @@ class RealTimeDashboard:
             "alerts": [],
         }
 
-        # Add current metrics
         for variant_id, metrics in snapshot.variants.items():
             update["metrics"][variant_id] = {
                 "sample_size": snapshot.sample_sizes.get(variant_id, 0),
@@ -252,7 +248,6 @@ class RealTimeDashboard:
         alerts = self._check_for_alerts(snapshot)
         update["alerts"] = alerts
 
-        # Add recommendation
         update["recommendation"] = {
             "text": snapshot.recommendation,
             "confidence": snapshot.confidence_level,
@@ -306,7 +301,6 @@ class RealTimeDashboard:
         """Generate distribution comparison chart."""
         variants = list(snapshot.variants.keys())
 
-        # Create bar chart for each metric
         traces = []
         for metric in self.config.metrics_to_show:
             metric_name = metric.value
@@ -334,7 +328,6 @@ class RealTimeDashboard:
         """Generate statistical significance visualization."""
         variants = list(snapshot.variants.keys())
 
-        # Create confidence interval chart
         control = variants[0] if variants else None
         if not control:
             return {}
@@ -342,7 +335,6 @@ class RealTimeDashboard:
         control_metrics = snapshot.variants.get(control, {})
         control_quality = control_metrics.get("quality_score", 0)
 
-        # Calculate relative improvements
         improvements = []
         confidence_intervals = []
 
@@ -377,7 +369,6 @@ class RealTimeDashboard:
             "name": "Relative Improvement %",
         }
 
-        # Add significance line
         significance_line = {
             "x": variants[1:],
             "y": [0] * len(variants[1:]),
@@ -403,7 +394,6 @@ class RealTimeDashboard:
         """Check for conditions that should trigger alerts."""
         alerts = []
 
-        # Check sample size
         for variant, size in snapshot.sample_sizes.items():
             if size < self.config.min_sample_size_alert:
                 alerts.append(
@@ -414,7 +404,6 @@ class RealTimeDashboard:
                     }
                 )
 
-        # Check statistical significance
         if (
             snapshot.p_value is not None
             and snapshot.p_value < self.config.max_p_value_alert
@@ -427,7 +416,6 @@ class RealTimeDashboard:
                 }
             )
 
-        # Check effect size
         if (
             snapshot.effect_size is not None
             and abs(snapshot.effect_size) < self.config.min_effect_size_alert
@@ -488,7 +476,6 @@ class RealTimeDashboard:
         logger.info(f"Dashboard client {client_id} connected")
 
     async def disconnect_dashboard_client(self, client_id: str) -> None:
-        """Disconnect a dashboard client."""
         self.dashboard_clients.discard(client_id)
         await self.connection_manager.disconnect(client_id)
 

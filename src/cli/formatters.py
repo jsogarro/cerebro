@@ -45,7 +45,6 @@ class OutputFormatter:
             return self._project_to_table(project)
 
     def format_projects_list(self, projects: list[ResearchProject]) -> str:
-        """Format a list of projects."""
         if not projects:
             return "No projects found."
 
@@ -92,7 +91,6 @@ class OutputFormatter:
         table.add_column("Field", style="cyan", width=20)
         table.add_column("Value")
 
-        # Add project details
         table.add_row("ID", str(project.id))
         table.add_row("Title", project.title)
         table.add_row("Status", self._format_status(project.status))
@@ -149,7 +147,6 @@ class OutputFormatter:
 
     def _progress_to_display(self, progress: ResearchProgress) -> str:
         """Convert progress to visual display."""
-        # Create progress bar
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -161,7 +158,6 @@ class OutputFormatter:
                 completed=progress.completed_tasks,
             )
 
-        # Create stats table
         table = Table(show_header=False, box=None)
         table.add_column("Metric", style="cyan")
         table.add_column("Value", style="yellow")

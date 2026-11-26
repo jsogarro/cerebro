@@ -56,7 +56,6 @@ class TestAgentFactory:
         assert isinstance(agents, list)
         assert len(agents) >= 1  # At least Literature Review Agent
 
-        # Check agent types
         agent_types = [agent.get_agent_type() for agent in agents]
         assert "literature_review" in agent_types
 
@@ -104,7 +103,6 @@ class TestAgentFactory:
         from src.agents.factory import AgentFactory
         from src.agents.models import AgentResult, AgentTask
 
-        # Create a custom agent
         class CustomAgent(BaseAgent):
             async def execute(self, task: AgentTask) -> AgentResult:
                 return AgentResult(
@@ -125,7 +123,6 @@ class TestAgentFactory:
         # Register the custom agent
         AgentFactory.register_agent("custom", CustomAgent)
 
-        # Create an instance
         agent = AgentFactory.create_agent("custom", {})
 
         assert isinstance(agent, CustomAgent)

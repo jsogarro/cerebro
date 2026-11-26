@@ -24,8 +24,6 @@ from src.ai_brain.experimentation.optimization.feedback_loop_optimizer import (
 
 
 class TestFeedbackLoopOptimizer:
-    """Test the feedback loop optimizer."""
-
     @pytest.fixture
     def optimizer(self) -> FeedbackLoopOptimizer:
         """Create an optimizer instance for testing."""

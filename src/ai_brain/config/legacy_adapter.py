@@ -169,14 +169,12 @@ class LegacyConfigurationAdapter:
             )
             models.update(migrated_models)
 
-            # Create provider configuration
             provider_config = self.create_provider_configuration(
                 provider_name, legacy_config
             )
             providers[provider_name] = provider_config
 
-        # Create complete configuration
-        config = ModelConfiguration(
+        return ModelConfiguration(
             version="2.0.0",
             metadata=ConfigurationMetadata(
                 config_name=environment,
@@ -189,8 +187,6 @@ class LegacyConfigurationAdapter:
             providers=providers,
             routing_config=RoutingConfiguration(),
         )
-
-        return config
 
     def _infer_model_tier(self, legacy_spec: dict[str, Any]) -> ModelTier:
         """Infer model tier from legacy specification."""
@@ -254,12 +250,10 @@ class LegacyProviderWrapper:
     async def get_legacy_model_specs(self) -> dict[str, dict[str, Any]]:
         """Get model specifications in legacy format."""
 
-        # Get current model specifications from configuration
         model_specs = await self.model_config_manager.get_models_for_provider(
             self.provider.provider_name
         )
 
-        # Convert to legacy format
         legacy_specs = {}
 
         for model_name, model_spec in model_specs.items():
@@ -283,7 +277,6 @@ class LegacyProviderWrapper:
     async def get_legacy_capabilities(self) -> list[LegacyModelCapability]:
         """Get capabilities in legacy format."""
 
-        # Get all capabilities from configured models
         model_specs = await self.model_config_manager.get_models_for_provider(
             self.provider.provider_name
         )
@@ -292,7 +285,6 @@ class LegacyProviderWrapper:
         for model_spec in model_specs.values():
             all_capabilities.update(model_spec.capabilities)
 
-        # Convert to legacy format
         return self.adapter.convert_config_capabilities_to_legacy(
             list(all_capabilities)
         )

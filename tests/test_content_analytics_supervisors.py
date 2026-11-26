@@ -267,8 +267,6 @@ class TestAnalyticsSupervisor:
 
 
 class TestSupervisorFactoryRegistration:
-    """Test supervisor factory registration."""
-
     @pytest.fixture
     def factory(self):
         """Create a SupervisorFactory instance."""

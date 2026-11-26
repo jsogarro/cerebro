@@ -109,7 +109,6 @@ class SemanticMemoryManager:
         # Embedding model configuration
         self.embedding_model_name = config.get("embedding_model", "all-MiniLM-L6-v2")
 
-        # Initialize components
         self.embedding_model = None
         self.vector_client = None
 
@@ -123,7 +122,6 @@ class SemanticMemoryManager:
     async def initialize(self) -> None:
         """Initialize the semantic memory system."""
 
-        # Initialize embedding model
         if SentenceTransformer:
             try:
                 self.embedding_model = SentenceTransformer(self.embedding_model_name)
@@ -132,12 +130,10 @@ class SemanticMemoryManager:
                 logger.error(f"Failed to load embedding model: {e}")
                 self.embedding_model = None
 
-        # Initialize vector database
         if QdrantClient and models:
             try:
                 self.vector_client = QdrantClient(url=self.vector_db_url)
 
-                # Create collection if it doesn't exist
                 await self._ensure_collection_exists()
 
                 logger.info("Semantic memory initialized with Qdrant")
@@ -273,7 +269,6 @@ class SemanticMemoryManager:
 
         results = await self.search(search_query)
 
-        # Convert to simple knowledge format
         knowledge_items = []
         for result in results:
             knowledge_items.append(
@@ -300,7 +295,6 @@ class SemanticMemoryManager:
                 # This is a simplified approach
                 return False  # Not implemented in this version
             else:
-                # Update in fallback storage
                 for item in self._fallback_storage:
                     if item.id == item_id:
                         for key, value in updates.items():
@@ -418,12 +412,10 @@ class SemanticMemoryManager:
         assert models is not None
 
         try:
-            # Check if collection exists
             collections = await self.vector_client.get_collections()
             collection_names = [c.name for c in collections.collections]
 
             if self.collection_name not in collection_names:
-                # Create collection
                 await self.vector_client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config=models.VectorParams(
@@ -468,7 +460,6 @@ class SemanticMemoryManager:
         assert self.vector_client is not None
         assert models is not None
 
-        # Build filter conditions
         filter_conditions = []
 
         if query.domain:
@@ -509,7 +500,6 @@ class SemanticMemoryManager:
             score_threshold=query.similarity_threshold,
         )
 
-        # Convert to SemanticResult objects
         results = []
         for hit in search_result:
             # Reconstruct SemanticItem from payload

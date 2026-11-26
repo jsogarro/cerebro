@@ -399,7 +399,6 @@ class ConnectionManager:
         """Background task to monitor connection health."""
         while not self._shutdown:
             try:
-                # Check all connections for health
                 unhealthy_clients = []
                 for client_id, connection in list(self.connections.items()):
                     if not connection.is_healthy():

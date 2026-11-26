@@ -245,7 +245,6 @@ class StatisticsTool(BaseMCPTool):
                 # Default to histogram
                 fig = go.Figure(data=[go.Histogram(x=data)])
 
-            # Convert to HTML
             plot_html = fig.to_html(include_plotlyjs="cdn")
 
             return {

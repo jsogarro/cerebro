@@ -152,7 +152,6 @@ class PromptManager:
         """Initialize the prompt manager."""
         logger.info("Initializing advanced prompt manager...")
 
-        # Load all template files
         await self._load_all_templates()
 
         logger.info(f"Prompt manager initialized with {len(self._templates)} templates")
@@ -179,10 +178,8 @@ class PromptManager:
 
         variables = variables or {}
 
-        # Create cache key
         cache_key = self._create_cache_key(template_name, variables, role, domain)
 
-        # Check cache first
         if self._cache:
             cached_prompt = self._cache.get(cache_key)
             if cached_prompt:
@@ -205,7 +202,6 @@ class PromptManager:
             if self._cache:
                 self._cache.set(cache_key, compiled_prompt)
 
-            # Update usage statistics
             await self._update_usage_stats(template_name, True)
 
             return compiled_prompt
@@ -296,7 +292,6 @@ class PromptManager:
                 # Store template
                 self._templates[template_name] = template
 
-                # Handle inheritance
                 if template.inherits_from:
                     self._template_inheritance[template_name] = template.inherits_from
 
@@ -330,7 +325,6 @@ class PromptManager:
             if not template:
                 return False
 
-            # Update metadata
             template.metadata.usage_count += 1
 
             # Update success rate (exponential moving average)
@@ -339,7 +333,6 @@ class PromptManager:
                 1 - alpha
             ) * template.metadata.success_rate + alpha * (1.0 if success else 0.0)
 
-            # Update quality score
             template.metadata.avg_quality_score = (
                 1 - alpha
             ) * template.metadata.avg_quality_score + alpha * quality_score
@@ -403,7 +396,6 @@ class PromptManager:
     async def _load_template_file(self, template_path: Path) -> None:
         """Load a single template file."""
 
-        # Read YAML file
         content = await asyncio.get_event_loop().run_in_executor(
             None, template_path.read_text, "utf-8"
         )
@@ -411,19 +403,16 @@ class PromptManager:
         # Environment variable substitution
         content_with_env = os.path.expandvars(content)
 
-        # Parse YAML
         template_data = yaml.safe_load(content_with_env)
 
         if not template_data:
             return
 
-        # Handle single template vs collection
         if "templates" in template_data:
             # This is a collection
             collection = PromptCollection(**template_data)
             self._collections[collection.name] = collection
 
-            # Add individual templates
             for template_name, template in collection.templates.items():
                 self._templates[template_name] = template
         else:
@@ -438,7 +427,6 @@ class PromptManager:
 
             self._templates[template_name] = template
 
-            # Handle inheritance
             if template.inherits_from:
                 self._template_inheritance[template_name] = template.inherits_from
 
@@ -476,7 +464,6 @@ class PromptManager:
         # Resolve inheritance first
         resolved_template = await self._resolve_inheritance(template)
 
-        # Validate variables
         await self._validate_variables(resolved_template, variables)
 
         # Compile each prompt part
@@ -498,14 +485,12 @@ class PromptManager:
             )
             parts.append(f"ASSISTANT: {assistant}")
 
-        # Add examples if present
         if resolved_template.examples:
             examples_text = await self._compile_examples(
                 resolved_template.examples, variables
             )
             parts.append(f"EXAMPLES:\n{examples_text}")
 
-        # Add output format specification
         if resolved_template.expected_output_schema:
             schema_text = self._format_output_schema(
                 resolved_template.expected_output_schema
@@ -520,7 +505,6 @@ class PromptManager:
         if not template.inherits_from:
             return template
 
-        # Get base template
         base_template = self._templates.get(template.inherits_from)
         if not base_template:
             logger.warning(f"Base template not found: {template.inherits_from}")
@@ -530,7 +514,7 @@ class PromptManager:
         resolved_base = await self._resolve_inheritance(base_template)
 
         # Merge templates (child overrides base)
-        merged_template = PromptTemplate(
+        return PromptTemplate(
             metadata=template.metadata,  # Child metadata wins
             system_prompt=template.system_prompt or resolved_base.system_prompt,
             user_prompt=template.user_prompt or resolved_base.user_prompt,
@@ -548,8 +532,6 @@ class PromptManager:
             consensus_threshold=template.consensus_threshold,
         )
 
-        return merged_template
-
     def _substitute_variables(
         self, template_text: str, variables: dict[str, Any]
     ) -> str:
@@ -557,10 +539,8 @@ class PromptManager:
 
         result = template_text
 
-        # Handle simple {variable} substitution
         for var_name, var_value in variables.items():
             if isinstance(var_value, (dict, list)):
-                # Convert complex types to formatted strings
                 var_str = self._format_complex_variable(var_value)
             else:
                 var_str = str(var_value)
@@ -572,9 +552,7 @@ class PromptManager:
         result = self._process_conditional_blocks(result, variables)
 
         # Handle loops {{#each items}}...{{/each}}
-        result = self._process_loop_blocks(result, variables)
-
-        return result
+        return self._process_loop_blocks(result, variables)
 
     def _sanitize_template_variable(self, value: str) -> str:
         """Sanitize untrusted variable values before template substitution."""
@@ -669,7 +647,6 @@ class PromptManager:
                 input_vars = example.input_variables
                 expected_output = example.expected_output
             else:
-                # Handle dict format
                 input_vars = example.get("input_variables", {})
                 expected_output = example.get("expected_output", "")
 
@@ -736,8 +713,6 @@ class PromptManager:
         old_template: PromptTemplate | None,
         new_template: PromptTemplate | None,
     ) -> None:
-        """Notify change listeners."""
-
         event = PromptChangeEvent(
             change_type, template_path, template_name, old_template, new_template
         )

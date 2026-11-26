@@ -164,7 +164,6 @@ class OpenRouterProvider(BaseProvider):
                 model.get("id") for model in catalog_models if model.get("id")
             }
 
-            # Check each tier_mapping slug against catalog
             for tier, slug in self.tier_mapping.items():
                 if slug in available_slugs:
                     valid_slugs[tier] = slug
@@ -193,14 +192,12 @@ class OpenRouterProvider(BaseProvider):
 
     async def load_configuration(self) -> None:
         """Load OpenRouter-specific configuration."""
-        # Load base configuration
         await super().load_configuration()
 
         # Configure API settings from provider configuration
         if self._provider_config:
             self.api_endpoint = self._provider_config.api_endpoint
 
-            # Get API key from environment if specified
             if self._provider_config.api_key_env:
                 import os
 
@@ -229,7 +226,6 @@ class OpenRouterProvider(BaseProvider):
                 limits=httpx.Limits(max_keepalive_connections=10, max_connections=100),
             )
 
-        # Validate model slugs on startup if enabled and provider is ready
         if self.validate_slugs_on_startup and self.api_key and self.client:
             validation_result = await self.validate_model_slugs()
 
@@ -336,10 +332,8 @@ class OpenRouterProvider(BaseProvider):
             },
         ) as span:
             try:
-                # Build OpenAI-compatible request payload
                 payload = self._build_request_payload(request, selected_model)
 
-                # Make API request
                 response_data = await self._make_api_request(payload)
 
                 # Process response
@@ -389,7 +383,6 @@ class OpenRouterProvider(BaseProvider):
         self, request: ModelRequest, model_name: str
     ) -> dict[str, Any]:
         """Build OpenAI-compatible request payload for OpenRouter API."""
-        # Convert to chat messages format
         messages = []
 
         if request.system_prompt:
@@ -399,7 +392,6 @@ class OpenRouterProvider(BaseProvider):
             # Already in messages format
             messages.extend(request.messages)
         elif request.prompt:
-            # Convert prompt to message
             messages.append({"role": "user", "content": request.prompt})
 
         payload: dict[str, Any] = {
@@ -410,7 +402,6 @@ class OpenRouterProvider(BaseProvider):
             "top_p": request.top_p,
         }
 
-        # Add top_k if specified and supported
         if request.top_k is not None:
             payload["top_k"] = request.top_k
 
@@ -491,7 +482,6 @@ class OpenRouterProvider(BaseProvider):
         completion_tokens = usage.get("completion_tokens", 0)
         total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
 
-        # Calculate cost
         cost = self._calculate_cost(prompt_tokens, completion_tokens, model_name)
 
         # Estimate confidence based on response characteristics
@@ -586,13 +576,11 @@ class OpenRouterProvider(BaseProvider):
             response = await self.generate(test_request)
             latency = (datetime.now() - start_time).total_seconds() * 1000
 
-            # Update health status
             self.health_status.healthy = response.success
             self.health_status.last_check = datetime.now()
             self.health_status.avg_latency_ms = latency
 
             if response.success:
-                # Check for reasonable response
                 if "4" in response.content:
                     self.health_status.api_status = "operational"
                 else:
@@ -635,7 +623,6 @@ class OpenRouterProvider(BaseProvider):
         if request.max_tokens > 8000:
             return False  # General output limit for most models
 
-        # Check context window usage (conservative estimate)
         estimated_tokens = len((request.prompt or "").split()) * 1.3
         return estimated_tokens <= 100000
 

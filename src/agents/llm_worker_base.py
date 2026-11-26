@@ -594,7 +594,6 @@ class LLMWorkerAgentBase(BaseAgent):
             else:
                 routing_tier = "balanced"
 
-            # Build ModelRequest with JSON response format in metadata
             metadata = {
                 "tier": routing_tier,
                 "response_format": {
@@ -633,7 +632,6 @@ class LLMWorkerAgentBase(BaseAgent):
                     parsed_data = parse_json_response(response.content)
                     validated = schema.model_validate(parsed_data)
 
-                    # Check if truncation occurred (finish_reason == "length")
                     if response.finish_reason == "length":
                         needs_retry = True
                         retry_reason = "finish_reason_length"
@@ -664,7 +662,6 @@ class LLMWorkerAgentBase(BaseAgent):
                         retry_max_tokens=retry_max_tokens,
                     )
 
-                    # Build retry request with increased token budget
                     retry_request = ModelRequest(
                         prompt=enhanced_prompt,
                         max_tokens=retry_max_tokens,
@@ -1022,7 +1019,6 @@ class LLMWorkerAgentBase(BaseAgent):
         # Run optional precomputation hook
         computed = self._precompute(task)
 
-        # Build base prompt
         prompt = self._build_prompt(query, task)
 
         # Append procedural memory context if available (feature-flagged)
@@ -1075,7 +1071,6 @@ class LLMWorkerAgentBase(BaseAgent):
                 computed,
             )
 
-        # Build output with optional computed field
         output: dict[str, Any] = {
             "content": content,
             "analysis": content,

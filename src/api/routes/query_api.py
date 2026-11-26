@@ -204,7 +204,6 @@ async def intelligent_research_query(
 
         execution_service = _resolved_research_kernel(execution_service)
 
-        # Create research project for execution
         from ...models.research_project import ResearchProject, ResearchScope
 
         project = ResearchProject(
@@ -234,7 +233,6 @@ async def intelligent_research_query(
             organization_id=tenant_context.organization_id,
         )
 
-        # Get execution status for response
         execution_status = await get_kernel_execution_status(
             execution_service,
             execution_id,
@@ -552,7 +550,6 @@ async def resume_execution(
     try:
         execution_service = _resolved_research_kernel(execution_service)
 
-        # Convert project_id string to UUID
         try:
             project_uuid = uuid.UUID(project_id)
         except ValueError as ve:

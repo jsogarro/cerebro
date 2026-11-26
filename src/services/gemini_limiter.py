@@ -80,7 +80,6 @@ class RateLimiter:
                     self._tokens -= 1
                     return
 
-                # Calculate wait time
                 tokens_needed = 1 - self._tokens
                 refill_rate = self.rate_limit / self.rate_period
                 wait_time = tokens_needed / refill_rate
@@ -196,11 +195,9 @@ class CircuitBreaker:
             Exception: If circuit is open or function fails
         """
         async with self._lock:
-            # Check if circuit should attempt reset
             if self._should_attempt_reset():
                 self._state = "half-open"
 
-            # Check circuit state
             if self._state == "open":
                 raise Exception("Circuit breaker is open")
 
@@ -217,7 +214,6 @@ class CircuitBreaker:
             return result
 
         except self.expected_exception as e:
-            # Handle failure
             async with self._lock:
                 self._failure_count += 1
                 self._last_failure_time = time.time()

@@ -82,7 +82,6 @@ class ValuationAgent(_FinanceAgentBase):
         """Compute exact DCF when structured parameters provided."""
         params = task.input_data.get("parameters", {})
 
-        # Check for explicit operation dispatch
         operation = params.get("operation")
         if operation == "dcf":
             try:

@@ -57,13 +57,10 @@ class BaseAgent(ABC):
         self.cache_client = cache_client
         self.config = config or {}
 
-        # Initialize MCP integration if provided
         self.mcp_integration = config.get("mcp_integration") if config else None
 
-        # Initialize metrics
         self._metrics = AgentMetrics(agent_type=self.get_agent_type())
 
-        # Initialize state
         self._state = AgentState(agent_type=self.get_agent_type(), status="idle")
 
         # Message queue for inter-agent communication
@@ -242,14 +239,12 @@ class BaseAgent(ABC):
         """
         start_time = time.time()
 
-        # Update state
         self._state = self._state.with_new_status("processing", task.id)
 
         try:
             # Execute with timeout
             result = await asyncio.wait_for(self.execute(task), timeout=task.timeout)
 
-            # Validate result
             if not await self.validate_result(result):
                 self.log_warning(f"Task {task.id} produced invalid result")
                 result = AgentResult(
@@ -261,7 +256,6 @@ class BaseAgent(ABC):
                     metadata={"agent_type": self.get_agent_type()},
                 )
 
-            # Update metrics
             self._metrics = self._metrics.with_new_task(result)
 
             return result
@@ -285,7 +279,6 @@ class BaseAgent(ABC):
             raise  # Re-raise for retry logic
 
         finally:
-            # Update state back to idle
             self._state = self._state.with_new_status("idle")
 
     def get_metrics(self) -> AgentMetrics:

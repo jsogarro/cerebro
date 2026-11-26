@@ -69,7 +69,6 @@ class PasswordService:
         self.password_history_limit = password_history_limit
         self.check_breaches = check_breaches
 
-        # Initialize password context
         self.pwd_context = CryptContext(
             schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=bcrypt_rounds
         )
@@ -209,7 +208,6 @@ class PasswordService:
             issues.append("Password contains too many repeating characters")
             score -= 10
 
-        # Calculate entropy
         entropy = self._calculate_entropy(password)
         if entropy < 40:
             issues.append("Password entropy is too low")
@@ -237,7 +235,6 @@ class PasswordService:
             return False
 
         try:
-            # Calculate SHA-1 hash
             sha1 = hashlib.sha1(password.encode()).hexdigest().upper()
             prefix = sha1[:5]
             suffix = sha1[5:]
@@ -249,7 +246,6 @@ class PasswordService:
             )
 
             if response.status_code == 200:
-                # Check if suffix appears in response
                 for line in response.text.splitlines():
                     hash_suffix, count = line.split(":")
                     if hash_suffix == suffix:
@@ -291,7 +287,6 @@ class PasswordService:
 
         history_key = f"{self.history_prefix}{user_id}"
 
-        # Add to history list
         await store.lpush(history_key, password_hash)
 
         # Trim to limit
@@ -535,13 +530,11 @@ class PasswordService:
         for i in range(len(password) - max_seq + 1):
             substr = password[i : i + max_seq]
 
-            # Check ascending
             if all(
                 ord(substr[j]) == ord(substr[j - 1]) + 1 for j in range(1, len(substr))
             ):
                 return True
 
-            # Check descending
             if all(
                 ord(substr[j]) == ord(substr[j - 1]) - 1 for j in range(1, len(substr))
             ):

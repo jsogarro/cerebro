@@ -136,7 +136,6 @@ class ReportStorageService:
                 )
                 formats_generated.append(format_enum.value)
 
-            # Update report with completion details
             await self.report_repo.mark_report_completed(
                 db_report.id,
                 formats_generated,
@@ -241,7 +240,6 @@ class ReportStorageService:
         }
         extension = extensions.get(format_type, f".{format_type}")
 
-        # Create file path
         file_path = os.path.join(report_dir, f"report{extension}")
 
         # Write file
@@ -252,12 +250,10 @@ class ReportStorageService:
         with open(file_path, "wb") as f:
             f.write(content_bytes)
 
-        # Calculate file hash
         file_hash = hashlib.sha256(content_bytes).hexdigest()
 
-        # Create database record
         format_started = time.perf_counter()
-        format_record = await self.format_repo.create_format(
+        return await self.format_repo.create_format(
             report_id=report_id,
             format_type=format_type,
             mime_type=output.mime_type,
@@ -273,7 +269,6 @@ class ReportStorageService:
             organization_id=organization_id,
             user_id=user_id,
         )
-        return format_record
 
     def _prepare_content_for_storage(self, content: Any, encoding: str) -> bytes:
         """Prepare content for file storage."""
@@ -282,7 +277,6 @@ class ReportStorageService:
         elif isinstance(content, str):
             return content.encode(encoding if encoding != "binary" else "utf-8")
         else:
-            # Convert other types to string first
             return str(content).encode(encoding if encoding != "binary" else "utf-8")
 
     def _extract_content_preview(self, report: Report, max_length: int = 500) -> str:
@@ -298,7 +292,6 @@ class ReportStorageService:
             preview_parts.append(summary_preview)
             current_length += len(summary_preview)
 
-        # Add content from sections
         for section in report.sections:
             if current_length >= max_length:
                 break
@@ -398,7 +391,6 @@ class ReportStorageService:
         organization_id: UUID | str,
         offset: int = 0,
     ) -> list[GeneratedReport]:
-        """List reports for a user."""
         return await self.report_repo.get_by_user_id(
             user_id,
             limit,
@@ -427,7 +419,6 @@ class ReportStorageService:
         organization_id: UUID | str,
         user_id: UUID | str | None = None,
     ) -> list[GeneratedReport]:
-        """List reports for a project."""
         return await self.report_repo.get_by_project_id(
             project_id,
             limit,
@@ -538,7 +529,6 @@ class ReportStorageService:
             organization_id=organization_id,
         )
 
-        # Add file system statistics
         try:
             storage_paths = await self.report_repo.get_storage_paths(
                 organization_id=organization_id,
@@ -691,12 +681,10 @@ class ReportStorageService:
             "errors": [],
         }
 
-        # Check each format
         for format_obj in report.formats:
             integrity_results["formats_checked"] += 1
 
             try:
-                # Check if file exists
                 if format_obj.file_path and not os.path.exists(format_obj.file_path):
                     integrity_results["missing_files"].append(format_obj.format_type)
                     continue

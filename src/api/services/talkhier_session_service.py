@@ -245,7 +245,6 @@ class TalkHierSessionService:
 
         session_id = str(uuid.uuid4())
 
-        # Get protocol configuration
         protocol_config = self.protocol_configs[request.protocol_type]
 
         # Route query through MASR for intelligent supervisor selection
@@ -253,7 +252,6 @@ class TalkHierSessionService:
             request.query, request.domains
         )
 
-        # Create supervisor based on routing decision
         supervisor = await self._create_supervisor(
             routing_decision, request.supervisor_type
         )
@@ -263,7 +261,6 @@ class TalkHierSessionService:
             request.participants, routing_decision, supervisor
         )
 
-        # Create session
         session = TalkHierSession(
             session_id=session_id,
             user_id=user_id,
@@ -291,14 +288,11 @@ class TalkHierSessionService:
         # Store session
         self.state_manager.store_session(session_id, session)
 
-        # Initialize session metrics
         self.state_manager.initialize_metrics(session_id)
 
-        # Update status to active
         session.status = SessionStatus.ACTIVE
         session.started_at = datetime.now(UTC)
 
-        # Calculate estimated duration
         estimated_duration = self._estimate_duration(
             request.max_rounds, len(participants), protocol_config
         )
@@ -346,7 +340,6 @@ class TalkHierSessionService:
             organization_id=organization_id,
         )
 
-        # Calculate elapsed and remaining time
         elapsed_seconds = 0
         remaining_seconds = None
 
@@ -481,11 +474,9 @@ class TalkHierSessionService:
         else:
             final_status = session.status
 
-        # Update session
         session.status = final_status
         session.completed_at = datetime.now(UTC)
 
-        # Calculate total duration
         total_duration = 0
         if session.started_at and session.completed_at:
             total_duration = int(
@@ -554,22 +545,18 @@ class TalkHierSessionService:
         # Detect protocol type
         protocol_detected = await self._detect_protocol_type(request.messages)
 
-        # Validate structure
         if request.check_structure:
             structural_errors = await self._validate_message_structure(
                 request.messages, protocol_detected
             )
 
-        # Validate timing
         if request.check_timing:
             timing_errors = await self._validate_message_timing(request.messages)
 
-        # Validate roles
         role_errors = await self._validate_message_roles(
             request.messages, protocol_detected
         )
 
-        # Calculate quality assessment
         quality_assessment = await self._assess_communication_quality(request.messages)
 
         # Generate recommendations
@@ -886,7 +873,6 @@ class TalkHierSessionService:
         elif len(messages) >= 10:
             return ProtocolType.DEEP_ANALYSIS
 
-        # Check for supervisor messages
         has_supervisor = any(
             m.get("role") == MessageRole.SUPERVISOR.value for m in messages
         )
@@ -909,7 +895,6 @@ class TalkHierSessionService:
             if "content" not in msg:
                 errors.append(f"Message {i}: missing 'content' field")
 
-        # Check protocol-specific requirements
         if protocol == ProtocolType.SUPERVISED:
             supervisor_msgs = [
                 m for m in messages if m.get("role") == MessageRole.SUPERVISOR.value
@@ -976,16 +961,13 @@ class TalkHierSessionService:
         for msg in messages:
             score = 0.5  # Base score
 
-            # Check content length
             content = msg.get("content", "")
             if len(content) > 100:
                 score += 0.2
 
-            # Check confidence
             if "confidence" in msg:
                 score += msg["confidence"] * 0.2
 
-            # Check evidence
             if msg.get("supporting_evidence"):
                 score += 0.1
 

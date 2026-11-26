@@ -90,7 +90,6 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         Returns:
             Number of checkpoints deleted
         """
-        # Get checkpoints to keep
         keep_query = (
             select(WorkflowCheckpoint.id)
             .where(
@@ -133,7 +132,6 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         Returns:
             Best recovery checkpoint or None
         """
-        # Get the most recent recoverable checkpoint
         query = (
             self.build_query()
             .where(
@@ -172,7 +170,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         Returns:
             Created checkpoint
         """
-        checkpoint = await self.create(
+        return await self.create(
             workflow_id=workflow_id,
             project_id=project_id,
             checkpoint_data=checkpoint_data,
@@ -181,8 +179,6 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             execution_metrics=execution_metrics,
             is_recoverable=True,
         )
-
-        return checkpoint
 
     async def list_checkpoints(
         self, workflow_id: str, limit: int = 10, phase: str | None = None
@@ -225,7 +221,6 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         if not checkpoint or not checkpoint.is_recoverable:
             return None
 
-        # Return checkpoint data with metadata
         return {
             "checkpoint_id": str(checkpoint.id),
             "workflow_id": checkpoint.workflow_id,
@@ -376,7 +371,6 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         cutoff = datetime.now(UTC) - timedelta(days=days_old)
 
         # Keep at least one checkpoint per workflow
-        # Get the latest checkpoint for each workflow
         latest_query = (
             select(
                 WorkflowCheckpoint.workflow_id,

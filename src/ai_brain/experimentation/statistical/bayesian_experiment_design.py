@@ -99,8 +99,6 @@ class ParameterPrior:
 
 @dataclass
 class BayesianOptimizationResult:
-    """Result from Bayesian optimization."""
-
     best_params: dict[str, float]
     best_value: float
     all_params: list[dict[str, float]]
@@ -146,7 +144,6 @@ class BayesianExperimentDesigner:
         self.n_initial_points = n_initial_points
         self.random_state = random_state
 
-        # Initialize Gaussian Process
         self.gp_model = self._create_gp_model(kernel_type)
 
         # Storage for observations
@@ -206,7 +203,6 @@ class BayesianExperimentDesigner:
         if len(self.X_observed) < self.n_initial_points:
             await self._initial_sampling(obj_func, self.n_initial_points)
 
-        # Main optimization loop
         for iteration in range(n_iterations):
             # Fit GP model to observations
             if len(self.X_observed) > 0:
@@ -214,7 +210,6 @@ class BayesianExperimentDesigner:
                 y = np.array(self.y_observed)
                 self.gp_model.fit(X, y)
 
-            # Get next points to evaluate
             next_points = await self._get_next_points(parallel_evaluations)
 
             # Evaluate objective function
@@ -226,7 +221,6 @@ class BayesianExperimentDesigner:
                 # Sequential evaluation
                 results = [await self._evaluate_async(obj_func, next_points[0])]
 
-            # Update observations
             for point, value in zip(next_points, results, strict=True):
                 self.X_observed.append(point)
                 self.y_observed.append(value)
@@ -238,24 +232,20 @@ class BayesianExperimentDesigner:
                     }
                 )
 
-            # Check convergence
             if self._check_convergence(convergence_threshold):
                 logger.info(f"Converged after {iteration} iterations")
                 break
 
-            # Log progress
             if iteration % 10 == 0:
                 best_idx = np.argmax(self.y_observed)
                 logger.info(
                     f"Iteration {iteration}: Best value = {self.y_observed[best_idx]}"
                 )
 
-        # Get best result
         best_idx = np.argmax(self.y_observed)
         best_params = self._array_to_dict(self.X_observed[best_idx])
         best_value = self.y_observed[best_idx]
 
-        # Get posterior samples
         posterior_samples = self._sample_posterior(n_samples=1000)
 
         return BayesianOptimizationResult(
@@ -308,7 +298,6 @@ class BayesianExperimentDesigner:
 
     def _optimize_acquisition(self) -> np.ndarray:
         """Optimize acquisition function to get next point."""
-        # Define bounds for optimization
         bounds = []
         for _name, prior in self.parameter_priors.items():
             bounds.append(prior.bounds)
@@ -343,7 +332,6 @@ class BayesianExperimentDesigner:
         """Compute acquisition function value for a point."""
         x_reshaped = x.reshape(1, -1)
 
-        # Get GP predictions
         mu, sigma = self.gp_model.predict(x_reshaped, return_std=True)
         mu_val = float(mu[0])
         sigma_val = float(sigma[0])
@@ -381,7 +369,6 @@ class BayesianExperimentDesigner:
         self, objective_function: Callable[..., Any], point: np.ndarray
     ) -> float:
         """Evaluate objective function asynchronously."""
-        # Convert array to dict for function call
         params = self._array_to_dict(point)
 
         # Run objective function
@@ -406,7 +393,6 @@ class BayesianExperimentDesigner:
         if len(self.optimization_history) < 10:
             return False
 
-        # Check if best value hasn't improved significantly
         recent_values = [h["value"] for h in self.optimization_history[-10:]]
         improvement = np.max(recent_values) - np.min(recent_values)
 
@@ -417,7 +403,6 @@ class BayesianExperimentDesigner:
         if len(self.X_observed) == 0:
             return np.array([])
 
-        # Create grid for sampling
         bounds = []
         for _name, prior in self.parameter_priors.items():
             bounds.append(prior.bounds)
@@ -455,14 +440,12 @@ class BayesianExperimentDesigner:
         Returns:
             Dictionary with posterior samples and diagnostics
         """
-        # Build PyMC model
         with model_builder(data, self.parameter_priors) as _model:
             # Sample from posterior
             trace = pm.sample(
                 n_samples, chains=n_chains, return_inferencedata=True, progressbar=True
             )
 
-            # Get posterior predictive samples
             posterior_predictive = pm.sample_posterior_predictive(
                 trace, progressbar=True
             )
@@ -499,7 +482,6 @@ class BayesianExperimentDesigner:
             new_observations: List of (parameters, value) tuples
         """
         for params, value in new_observations:
-            # Convert dict to array
             point_list = []
             for name in self.parameter_priors:
                 point_list.append(params[name])
@@ -526,10 +508,8 @@ class BayesianExperimentDesigner:
             Dictionary mapping parameter names to confidence intervals
         """
         if len(self.X_observed) == 0:
-            # Return prior bounds if no observations
             return {name: prior.bounds for name, prior in self.parameter_priors.items()}
 
-        # Compute confidence intervals from GP predictions
         intervals = {}
         for i, name in enumerate(self.parameter_priors.keys()):
             _values = [x[i] for x in self.X_observed]
@@ -541,7 +521,6 @@ class BayesianExperimentDesigner:
                 100,
             )
 
-            # Create test points
             test_points_list: list[np.ndarray] = []
             for val in param_range:
                 point = self.X_observed[-1].copy()  # Use last observation as base
@@ -551,7 +530,6 @@ class BayesianExperimentDesigner:
             test_points = np.array(test_points_list)
             mu, sigma = self.gp_model.predict(test_points, return_std=True)
 
-            # Compute confidence interval
             z_score = norm.ppf((1 + confidence_level) / 2)
             lower = mu - z_score * sigma
             _upper = mu + z_score * sigma

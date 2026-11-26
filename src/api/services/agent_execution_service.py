@@ -147,7 +147,6 @@ class AgentExecutionService:
         execution_id = str(uuid.uuid4())
         start_time = datetime.now()
 
-        # Check capacity
         if len(self.active_executions) >= self.max_concurrent_executions:
             raise RuntimeError(
                 f"Maximum concurrent executions ({self.max_concurrent_executions}) reached"
@@ -167,10 +166,8 @@ class AgentExecutionService:
         try:
             execution_context["status"] = "running"
 
-            # Get agent instance
             agent = await self._get_agent_instance(agent_type)
 
-            # Create agent task
             task = AgentTask(
                 id=f"api_{execution_id}",
                 agent_type=agent_type.value,
@@ -192,7 +189,6 @@ class AgentExecutionService:
                 else request.timeout_seconds,
             )
 
-            # Build response
             execution_time = (datetime.now() - start_time).total_seconds()
 
             response = AgentExecutionResponse(
@@ -211,7 +207,6 @@ class AgentExecutionService:
                 consensus_achieved=agent_result.status == "success",
             )
 
-            # Update metrics
             await self._update_agent_metrics(
                 agent_type,
                 response,
@@ -305,7 +300,6 @@ class AgentExecutionService:
             f"Starting Chain-of-Agents execution: {[a.value for a in request.agent_chain]}"
         )
 
-        # Initialize chain response
         response = ChainOfAgentsResponse(
             execution_id=execution_id,
             status="running",
@@ -355,7 +349,6 @@ class AgentExecutionService:
                 step_failed = agent_response.status in _FAILED_STATUSES
                 failed_steps += step_failed
 
-                # Check for early stopping
                 if (
                     request.early_stopping
                     and agent_response.quality_score < request.quality_threshold
@@ -374,7 +367,6 @@ class AgentExecutionService:
                     )
                     accumulated_context["chain_step"] = step_number + 1
 
-            # Calculate final results
             response.final_result = (
                 response.intermediate_results[-1]
                 if response.intermediate_results
@@ -387,7 +379,6 @@ class AgentExecutionService:
                 statistics.mean(quality_scores) if quality_scores else 0.0
             )
 
-            # Calculate quality improvement
             if len(quality_scores) > 1:
                 response.quality_improvement = quality_scores[-1] - quality_scores[0]
 
@@ -438,7 +429,6 @@ class AgentExecutionService:
             f"Starting Mixture-of-Agents execution: {[a.value for a in request.agent_types]}"
         )
 
-        # Initialize response
         response = MixtureOfAgentsResponse(
             execution_id=execution_id,
             status="running",
@@ -521,7 +511,6 @@ class AgentExecutionService:
                 request.consensus_threshold,
             )
 
-            # Build final response
             response.agent_results = {
                 agent_type: result.output
                 for agent_type, result in agent_results.items()
@@ -531,7 +520,6 @@ class AgentExecutionService:
             response.consensus_achieved = aggregated_result["consensus_achieved"]
             response.agent_weights = aggregated_result["weights"]
 
-            # Calculate quality metrics
             quality_scores = [result.quality_score for result in agent_results.values()]
             if quality_scores:
                 response.mixture_quality_score = statistics.mean(quality_scores)
@@ -595,7 +583,6 @@ class AgentExecutionService:
                 "weights": {},
             }
 
-        # Calculate weights
         if weight_by_confidence:
             total_confidence = sum(
                 result.confidence for result in agent_results.values()
@@ -628,7 +615,6 @@ class AgentExecutionService:
             # Default to consensus
             aggregated = await self._consensus_aggregation(agent_results, weights)
 
-        # Calculate consensus score
         confidence_scores = [result.confidence for result in agent_results.values()]
         consensus_score = (
             1.0 - statistics.stdev(confidence_scores)
@@ -659,7 +645,6 @@ class AgentExecutionService:
             "confidence_weighted_summary": "",
         }
 
-        # Add each agent's contribution
         for agent_type, result in agent_results.items():
             weight = weights.get(agent_type, 0.0)
 
@@ -720,7 +705,7 @@ class AgentExecutionService:
 
         best_agent_type, best_result = best_agent
 
-        aggregated = {
+        return {
             "aggregation_method": "best_quality",
             "selected_agent": best_agent_type,
             "primary_result": best_result.output,
@@ -731,8 +716,6 @@ class AgentExecutionService:
                 if agent_type != best_agent_type
             },
         }
-
-        return aggregated
 
     async def get_agent_list(self) -> list[AgentInfo]:
         """Get list of available agents with capabilities."""
@@ -909,7 +892,6 @@ class AgentExecutionService:
 
         metrics_data = self._metrics_for(organization_id).get(agent_type, {})
 
-        # Calculate derived metrics
         total_executions = metrics_data.get("total_executions", 0)
         successful_executions = metrics_data.get("successful_executions", 0)
         success_rate = successful_executions / max(total_executions, 1)
@@ -1027,14 +1009,12 @@ class AgentExecutionService:
         metrics: dict[str, Any], response: AgentExecutionResponse, success: bool
     ) -> None:
 
-        # Update counters
         metrics["total_executions"] += 1
         if success:
             metrics["successful_executions"] += 1
         else:
             metrics["failed_executions"] += 1
 
-        # Update totals
         metrics["total_execution_time"] += response.execution_time_seconds
         if success:
             metrics["total_quality_score"] += response.quality_score

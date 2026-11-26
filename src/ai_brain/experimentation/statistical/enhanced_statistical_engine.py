@@ -221,7 +221,6 @@ class FrequentistAnalyzer:
             treatment_data, control_data, equal_var=False, alternative=alternative
         )
 
-        # Calculate effect size (Cohen's d)
         pooled_std = np.sqrt(
             (
                 (len(control_data) - 1) * np.var(control_data, ddof=1)
@@ -232,7 +231,6 @@ class FrequentistAnalyzer:
 
         effect_size = (np.mean(treatment_data) - np.mean(control_data)) / pooled_std
 
-        # Calculate confidence interval for difference in means
         diff_mean = np.mean(treatment_data) - np.mean(control_data)
         se_diff = np.sqrt(
             np.var(control_data, ddof=1) / len(control_data)
@@ -244,7 +242,6 @@ class FrequentistAnalyzer:
         ci_lower = diff_mean - t_critical * se_diff
         ci_upper = diff_mean + t_critical * se_diff
 
-        # Calculate statistical power (post-hoc)
         if STATSMODELS_AVAILABLE:
             try:
                 power = smp.ttest_power(
@@ -284,7 +281,6 @@ class FrequentistAnalyzer:
     ) -> StatisticalTestResult:
         """Analyze proportion metrics using proportion z-test."""
 
-        # Convert to counts for proportion test
         control_successes = int(sum(control_data))
         control_total = len(control_data)
         treatment_successes = int(sum(treatment_data))
@@ -314,7 +310,6 @@ class FrequentistAnalyzer:
                 control_successes, control_total, treatment_successes, treatment_total
             )
 
-        # Calculate effect size (Cohen's h)
         p1 = control_successes / control_total
         p2 = treatment_successes / treatment_total
         effect_size = 2 * (np.arcsin(np.sqrt(p2)) - np.arcsin(np.sqrt(p1)))
@@ -527,7 +522,6 @@ class BayesianAnalyzer:
         """
 
         try:
-            # Create Bayesian model
             with pm.Model() as _model:
                 # Priors
                 mu_control = pm.Normal(
@@ -560,7 +554,6 @@ class BayesianAnalyzer:
             # Extract results
             posterior_diff = trace.posterior["diff"].values.flatten()
 
-            # Calculate credible interval
             ci_lower, ci_upper = np.percentile(
                 posterior_diff,
                 [
@@ -664,7 +657,6 @@ class MultiBanditOptimizer:
         self.algorithm = algorithm
         self.context_features = context_features or []
 
-        # Initialize arm statistics
         self.arm_counts = [0] * num_arms
         self.arm_rewards = [[] for _ in range(num_arms)]
         self.arm_reward_sums = [0.0] * num_arms
@@ -829,7 +821,6 @@ class MultiBanditOptimizer:
         self.arm_counts[arm] += 1
         self.arm_reward_sums[arm] += reward
 
-        # Update arm value (running average)
         self.arm_values[arm] = self.arm_reward_sums[arm] / self.arm_counts[arm]
 
         # Algorithm-specific updates
@@ -883,7 +874,6 @@ class EnhancedStatisticalEngine:
         """Initialize enhanced statistical engine."""
         self.config = config or {}
 
-        # Initialize analyzers
         self.frequentist = FrequentistAnalyzer(self.config.get("frequentist", {}))
 
         if BAYESIAN_AVAILABLE:
@@ -922,7 +912,6 @@ class EnhancedStatisticalEngine:
         results = {}
         p_values = []
 
-        # Get all pairwise combinations
         variant_names = list(experiment_data.keys())
 
         if len(variant_names) < 2:
@@ -1000,7 +989,6 @@ class EnhancedStatisticalEngine:
         if len(variant_names) < 2:
             return {"can_stop": False, "reason": "Need at least 2 variants"}
 
-        # Check minimum sample size
         min_samples = min(len(data) for data in experiment_data.values())
         if min_samples < minimum_sample_size:
             return {
@@ -1044,7 +1032,6 @@ class EnhancedStatisticalEngine:
             # Fallback to frequentist analysis
             results = await self.comprehensive_analysis(experiment_data)
 
-            # Check for significant results
             significant_results = [
                 (name, result)
                 for name, result in results.items()

@@ -62,7 +62,6 @@ class ReportStructureBuilder:
     async def build_introduction_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build introduction section."""
         content = f"""
         This research investigates the following question: "{report.query}"
 
@@ -77,7 +76,6 @@ class ReportStructureBuilder:
     async def build_methodology_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build methodology section."""
         methodologies = results.get("methodologies", {})
 
         content = "## Research Methodology\n\n"
@@ -117,7 +115,6 @@ class ReportStructureBuilder:
     async def build_findings_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build findings section."""
         findings = results.get("findings", {})
 
         if not findings:
@@ -159,7 +156,6 @@ class ReportStructureBuilder:
     async def build_analysis_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build analysis section."""
         comparisons = results.get("comparisons", {})
 
         content = "## Analysis\n\n"
@@ -182,7 +178,6 @@ class ReportStructureBuilder:
     async def build_discussion_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build discussion section."""
         insights = results.get("insights", [])
         conflicts = results.get("conflict_resolutions", [])
 
@@ -208,7 +203,6 @@ class ReportStructureBuilder:
     async def build_conclusions_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build conclusions section."""
         confidence_score = results.get("confidence_score", 0.7)
         metrics = results.get("metrics", {})
 
@@ -228,7 +222,6 @@ class ReportStructureBuilder:
     async def build_recommendations_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build recommendations section."""
         recommendations = results.get("recommendations", [])
 
         if not recommendations:
@@ -244,7 +237,6 @@ class ReportStructureBuilder:
     async def build_limitations_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build limitations section."""
         limitations = results.get("limitations", [])
         quality_report = results.get("quality_report", {})
         issues = quality_report.get("issues_found", [])
@@ -321,7 +313,6 @@ class ReportStructureBuilder:
     async def build_insights_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        """Build insights section."""
         insights = results.get("insights", [])
 
         high_importance = []

@@ -157,7 +157,6 @@ class ContentSanitizer:
                         (NeutralizationReason.ENCODED_PAYLOAD, match[:50] + "..."),
                     )
 
-        # Build result
         was_modified = sanitized != text
         result = SanitizationResult(
             sanitized_text=sanitized,
@@ -166,7 +165,6 @@ class ContentSanitizer:
             original_hash=original_hash,
         )
 
-        # Log if modified
         if was_modified and self.enable_logging:
             logger.info(
                 "content_sanitization_neutralized_injection",

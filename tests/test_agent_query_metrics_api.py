@@ -152,8 +152,6 @@ class TestIntelligentQueryAPI:
 
 
 class TestResearchPatternImplementation:
-    """Test implementation of research patterns."""
-
     @pytest.mark.asyncio
     async def test_chain_of_agents_pattern(self) -> None:
         """Test Chain-of-Agents pattern implementation."""
@@ -475,7 +473,6 @@ class TestPerformanceAndMetrics:
             assert field in data
 
     def test_system_health_summary(self, client: TestClient) -> None:
-        """Test system health summary."""
         response = client.get("/api/v1/agents/health/summary")
 
         assert response.status_code == 200
@@ -507,7 +504,6 @@ class TestAgentAPIIntegration:
 
     @pytest.mark.asyncio
     async def test_agent_factory_integration(self) -> None:
-        """Test integration with agent factory."""
         service = AgentExecutionService()
 
         agents = await service.get_agent_list()

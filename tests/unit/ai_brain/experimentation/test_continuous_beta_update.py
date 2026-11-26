@@ -17,8 +17,7 @@ from src.ai_brain.experimentation.statistical.enhanced_statistical_engine import
 @pytest.fixture
 def bandit():
     """Create a Thompson Sampling bandit with 5 arms."""
-    optimizer = MultiBanditOptimizer({})
-    return optimizer
+    return MultiBanditOptimizer({})
 
 
 @pytest.mark.asyncio
@@ -43,7 +42,6 @@ async def test_continuous_update_separates_posteriors(bandit):
     assert bandit.alpha_params[4] < 35.0
     assert bandit.beta_params[4] > 17.0
 
-    # Compute posterior means (alpha/(alpha+beta))
     good_arm_mean = bandit.alpha_params[2] / (
         bandit.alpha_params[2] + bandit.beta_params[2]
     )
@@ -119,7 +117,6 @@ async def test_continuous_update_idempotent_order(bandit):
     for r in rewards_1:
         await bandit.update_bandit(1, r)
 
-    # Save state
     alpha_0_a = bandit.alpha_params[0]
     alpha_1_a = bandit.alpha_params[1]
 

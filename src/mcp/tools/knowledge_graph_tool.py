@@ -125,7 +125,6 @@ class KnowledgeGraphTool(BaseMCPTool):
             )
 
             if word[0].isupper() and (i == 0 or not prev_is_sentence_end):
-                # Check if it's part of a multi-word entity
                 entity_text = word
                 j = i + 1
                 while j < len(words) and (
@@ -183,7 +182,6 @@ class KnowledgeGraphTool(BaseMCPTool):
         # Clear existing graph
         self.graph.clear()
 
-        # Add nodes (entities)
         for entity in entities:
             self.graph.add_node(
                 entity["id"],
@@ -191,7 +189,6 @@ class KnowledgeGraphTool(BaseMCPTool):
                 type=entity.get("type", "unknown"),
             )
 
-        # Add edges (relationships)
         for rel in relationships:
             self.graph.add_edge(
                 rel["source"], rel["target"], type=rel.get("type", "related")
@@ -213,7 +210,6 @@ class KnowledgeGraphTool(BaseMCPTool):
         if self.graph.number_of_nodes() == 0:
             return {"success": False, "error": "No graph built yet"}
 
-        # Calculate various metrics
         metrics: dict[str, Any] = {}
 
         # Centrality measures
@@ -294,7 +290,6 @@ class KnowledgeGraphTool(BaseMCPTool):
             edge_x.extend([x0, x1, None])
             edge_y.extend([y0, y1, None])
 
-        # Create Plotly figure
         edge_trace = go.Scatter(
             x=edge_x,
             y=edge_y,
@@ -329,7 +324,6 @@ class KnowledgeGraphTool(BaseMCPTool):
 
         node_trace.marker.color = node_adjacencies
 
-        # Create figure
         fig = go.Figure(
             data=[edge_trace, node_trace],
             layout=go.Layout(
@@ -342,7 +336,6 @@ class KnowledgeGraphTool(BaseMCPTool):
             ),
         )
 
-        # Convert to HTML
         html = fig.to_html(include_plotlyjs="cdn")
 
         return {

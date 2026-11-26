@@ -89,11 +89,9 @@ class CLIWebSocketClient:
             True if connection successful, False otherwise
         """
         try:
-            # Build WebSocket URL
             ws_url = self._ws_url(endpoint)
             self._log(f"Connecting to {self._ws_url(endpoint, with_token=False)}")
 
-            # Add CLI user agent
             headers = {"User-Agent": "research-cli/0.1.0"}
 
             # Connect to WebSocket
@@ -179,7 +177,6 @@ class CLIWebSocketClient:
 
         print_info(f"🔗 Streaming updates for project {project_id} (Ctrl+C to stop)")
 
-        # Initialize progress tracking
         _progress = Progress()
         _progress_task: TaskID | None = None
 
@@ -195,21 +192,17 @@ class CLIWebSocketClient:
                         break
 
                     try:
-                        # Parse message
                         message_data = deserialize(message)
                         ws_message = WSMessage(**message_data)
 
-                        # Handle heartbeat
                         if ws_message.type == WSMessageType.HEARTBEAT:
                             await self.send_heartbeat_response()
                             continue
 
-                        # Handle custom message handler
                         if message_handler:
                             message_handler(ws_message)
                             continue
 
-                        # Handle different message types
                         if ws_message.type == WSMessageType.PROGRESS:
                             progress_data = ws_message.data
                             progress_percentage = progress_data.get(
@@ -220,7 +213,6 @@ class CLIWebSocketClient:
                             )
                             current_status = f"Progress: {progress_percentage:.1f}% - {current_agent}"
 
-                            # Update live display
                             live.update(
                                 Panel(
                                     f"[green]{current_status}[/green]\n"
@@ -363,7 +355,6 @@ class CLIWebSocketClient:
                     message_data = deserialize(message)
                     ws_message = WSMessage(**message_data)
 
-                    # Handle heartbeat
                     if ws_message.type == WSMessageType.HEARTBEAT:
                         await self.send_heartbeat_response()
                         continue

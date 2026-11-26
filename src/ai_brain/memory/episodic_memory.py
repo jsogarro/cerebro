@@ -248,19 +248,16 @@ class EpisodicMemoryManager:
 
         if self.database_url and HAS_SQLALCHEMY:
             try:
-                # Create async engine
                 self.engine = create_async_engine(
                     self.database_url, echo=self.config.get("sql_debug", False)
                 )
 
-                # Create session factory
                 from sqlalchemy.ext.asyncio import async_sessionmaker
 
                 self.session_factory = async_sessionmaker(
                     bind=self.engine, class_=AsyncSession, expire_on_commit=False
                 )
 
-                # Create tables
                 if Base is not None:
                     async with self.engine.begin() as conn:
                         await conn.run_sync(Base.metadata.create_all)
@@ -367,7 +364,6 @@ class EpisodicMemoryManager:
 
         recent_episodes = await self.retrieve_episodes(query)
 
-        # Calculate similarity scores
         similar_episodes = []
 
         for episode in recent_episodes:
@@ -510,19 +506,16 @@ class EpisodicMemoryManager:
         try:
             if self.engine and self.session_factory:
                 async with self.session_factory() as session:
-                    # Get episode count
                     result = await session.execute(
                         text("SELECT COUNT(*) FROM episodic_events")
                     )
                     stats["total_episodes"] = result.scalar() or 0
 
-                    # Get session count
                     result = await session.execute(
                         text("SELECT COUNT(*) FROM episodic_sessions")
                     )
                     stats["total_sessions"] = result.scalar() or 0
 
-                    # Get recent activity
                     recent_date = datetime.now() - timedelta(days=7)
                     result = await session.execute(
                         text(
@@ -579,7 +572,6 @@ class EpisodicMemoryManager:
         from sqlalchemy import select
 
         async with self.session_factory() as session:
-            # Build query
             db_query = select(EpisodicEvent)
 
             if query.session_id:
@@ -625,7 +617,6 @@ class EpisodicMemoryManager:
             result = await session.execute(db_query)
             db_episodes = result.scalars().all()
 
-            # Convert to Episode objects
             episodes: list[Episode] = []
             for db_episode in db_episodes:
                 episode = self._decrypt_episode_from_storage(

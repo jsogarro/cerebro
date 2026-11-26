@@ -136,7 +136,6 @@ class HierarchicalCostEstimate:
         self.total_communication_cost = sum(self.communication_costs.values())
         self.total_efficiency_savings = sum(self.efficiency_savings.values())
 
-        # Calculate gross cost
         self.gross_cost = (
             self.base_model_cost
             + self.total_instantiation_cost
@@ -156,14 +155,12 @@ class SupervisorCostCalculator:
         """Initialize supervisor cost calculator."""
         self.config = config or {}
 
-        # Initialize supervisor cost profiles
         self.supervisor_profiles: dict[str, SupervisorCostProfile] = {}
         self._initialize_supervisor_profiles()
 
         # Cost factors
         self.cost_factors = HierarchicalCostFactors()
 
-        # Update cost factors from config
         if self.config:
             for field in [
                 "supervisor_instantiation_cost",
@@ -211,8 +208,6 @@ class SupervisorCostCalculator:
     def calculate_supervisor_instantiation_cost(
         self, supervisor_type: str, worker_count: int, complexity_level: ComplexityLevel
     ) -> float:
-        """Calculate cost of supervisor instantiation."""
-
         profile = self.supervisor_profiles.get(supervisor_type)
         if not profile:
             # Use default profile
@@ -236,9 +231,7 @@ class SupervisorCostCalculator:
             ComplexityLevel.COMPLEX: 1.3,
         }.get(complexity_level, 1.0)
 
-        instantiation_cost = base_cost * worker_scaling * complexity_scaling
-
-        return instantiation_cost
+        return base_cost * worker_scaling * complexity_scaling
 
     def calculate_supervisor_runtime_cost(
         self,
@@ -269,11 +262,7 @@ class SupervisorCostCalculator:
         # Apply refinement round multiplier
         refinement_multiplier = 1.0 + (refinement_rounds - 1) * 0.3
 
-        total_runtime_cost = (
-            base_runtime_cost * efficiency_multiplier * refinement_multiplier
-        )
-
-        return total_runtime_cost
+        return base_runtime_cost * efficiency_multiplier * refinement_multiplier
 
 
 class WorkerCoordinationCostCalculator:
@@ -306,14 +295,12 @@ class WorkerCoordinationCostCalculator:
         specialized_workers = len(set(worker_types))  # Unique worker types
         specialization_multiplier = 1.0 + (specialized_workers - 1) * 0.15
 
-        total_cost = (
+        return (
             base_cost_per_worker
             * worker_count
             * complexity_multiplier
             * specialization_multiplier
         )
-
-        return total_cost
 
     def calculate_coordination_overhead(
         self,
@@ -331,7 +318,6 @@ class WorkerCoordinationCostCalculator:
             SupervisionMode.ADAPTIVE: 5,  # Highest coordination
         }.get(supervision_mode, 3)
 
-        # Calculate total coordination events
         runtime_minutes = estimated_runtime_seconds / 60.0
         total_events = worker_count * events_per_worker_per_minute * runtime_minutes
 
@@ -340,13 +326,11 @@ class WorkerCoordinationCostCalculator:
             1.0 + (worker_count - 1) * self.cost_factors.worker_coordination_scaling
         )
 
-        coordination_cost = (
+        return (
             total_events
             * self.cost_factors.coordination_overhead_cost
             * coordination_scaling
         )
-
-        return coordination_cost
 
 
 class TalkHierCommunicationCostCalculator:
@@ -414,14 +398,12 @@ class TalkHierCommunicationCostCalculator:
         # Cost for supervisors to share context and coordinate
         supervisor_pairs = supervisor_count * (supervisor_count - 1)
 
-        communication_cost = (
+        return (
             supervisor_pairs
             * estimated_tokens_per_supervisor
             * self.cost_factors.message_cost_per_token
             * 2.0  # Premium for cross-supervisor coordination
         )
-
-        return communication_cost
 
 
 class EfficiencySavingsCalculator:
@@ -489,7 +471,6 @@ class HierarchicalCostOptimizer:
         self.base_optimizer = base_cost_optimizer
         self.config = config or {}
 
-        # Initialize hierarchical cost components
         self.cost_factors = HierarchicalCostFactors()
         self.supervisor_calculator = SupervisorCostCalculator(
             self.config.get("supervisor_calculator", {})
@@ -536,7 +517,6 @@ class HierarchicalCostOptimizer:
             Comprehensive hierarchical cost estimate
         """
 
-        # Get base model cost estimate from existing optimizer
         from .cost_optimizer import OptimizationStrategy
 
         base_result = await self.base_optimizer.optimize(
@@ -550,12 +530,10 @@ class HierarchicalCostOptimizer:
             base_cost = 0.0
             estimated_tokens = 0
 
-        # Initialize hierarchical cost estimate
         estimate = HierarchicalCostEstimate(
             base_model_cost=base_cost, estimated_tokens=estimated_tokens
         )
 
-        # Calculate supervisor costs
         supervisor_instantiation = (
             self.supervisor_calculator.calculate_supervisor_instantiation_cost(
                 supervisor_type, worker_count, complexity_analysis.level
@@ -578,7 +556,6 @@ class HierarchicalCostOptimizer:
             "runtime": supervisor_runtime,
         }
 
-        # Calculate worker costs
         worker_instantiation = (
             self.worker_calculator.calculate_worker_instantiation_costs(
                 worker_count, worker_types, complexity_analysis.level
@@ -601,7 +578,6 @@ class HierarchicalCostOptimizer:
         }
         estimate.coordination_costs = {"overhead": coordination_overhead}
 
-        # Calculate communication costs
         tokens_per_round = max(int(estimated_tokens / 2), 500)  # Conservative estimate
         communication_costs = (
             self.communication_calculator.calculate_communication_costs(
@@ -613,9 +589,7 @@ class HierarchicalCostOptimizer:
         )
         estimate.communication_costs = communication_costs
 
-        # Calculate efficiency savings if optimizations enabled
         if enable_optimizations:
-            # Calculate gross cost first
             estimate.calculate_totals()
             efficiency_savings = (
                 self.efficiency_calculator.calculate_efficiency_savings(
@@ -629,10 +603,8 @@ class HierarchicalCostOptimizer:
             )
             estimate.efficiency_savings = efficiency_savings
 
-        # Calculate final totals
         estimate.calculate_totals()
 
-        # Set performance predictions
         estimate.predicted_execution_time_seconds = estimated_runtime
         estimate.predicted_quality_score = self._predict_quality_score(
             complexity_analysis, routing_strategy, refinement_rounds
@@ -668,14 +640,11 @@ class HierarchicalCostOptimizer:
         worker_efficiency = 1.0 / (1.0 + math.log(worker_count))
         worker_adjusted_runtime = base_runtime * worker_efficiency
 
-        # Add refinement round time
         refinement_time = (
             refinement_rounds - 1
         ) * 60.0  # 1 minute per additional round
 
-        total_runtime = worker_adjusted_runtime + refinement_time
-
-        return total_runtime
+        return worker_adjusted_runtime + refinement_time
 
     def _predict_quality_score(
         self,
@@ -745,9 +714,7 @@ class HierarchicalCostOptimizer:
         }.get(complexity_analysis.level, 0.10)
 
         total_variance_pct = base_variance_pct + complexity_variance
-        variance = net_cost * total_variance_pct
-
-        return variance
+        return net_cost * total_variance_pct
 
     def record_actual_cost(
         self, prediction_id: str, actual_cost: float, actual_quality: float

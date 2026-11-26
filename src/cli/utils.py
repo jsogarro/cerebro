@@ -130,7 +130,6 @@ def load_projects_from_file(file_path: Path) -> list[dict[str, Any]]:
             "File must contain a list of projects or a single project"
         )
 
-    # Validate each project
     for i, project in enumerate(data):
         if "title" not in project:
             raise click.BadParameter(f"Project {i + 1}: Missing 'title'")
@@ -139,7 +138,6 @@ def load_projects_from_file(file_path: Path) -> list[dict[str, Any]]:
         if "domains" not in project:
             raise click.BadParameter(f"Project {i + 1}: Missing 'domains'")
 
-        # Set defaults
         project.setdefault("depth_level", "comprehensive")
 
     return data
@@ -150,7 +148,6 @@ def save_results_to_file(
     output_path: Path,
     format_type: str = "json",
 ) -> None:
-    """Save results to file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w") as f:
@@ -178,7 +175,6 @@ def parse_key_value_pairs(pairs: list[str]) -> dict[str, Any]:
         key = key.strip()
         value_str = value_str.strip()
 
-        # Try to parse value as different types
         value: Any
         if value_str.lower() in ["true", "false"]:
             value = value_str.lower() == "true"
@@ -187,7 +183,6 @@ def parse_key_value_pairs(pairs: list[str]) -> dict[str, Any]:
         elif value_str.replace(".", "", 1).isdigit():
             value = float(value_str)
         elif value_str.startswith("[") and value_str.endswith("]"):
-            # Parse as list
             value = [v.strip() for v in value_str[1:-1].split(",")]
         else:
             value = value_str

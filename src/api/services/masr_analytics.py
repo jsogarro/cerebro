@@ -48,7 +48,6 @@ class PerformanceMetric:
             self.max_value = max(self.window)
             self.std_deviation = statistics.stdev(self.window)
 
-            # Calculate trend
             recent = list(self.window)[-10:]
             if len(recent) >= 2:
                 if recent[-1] > recent[0] * 1.1:
@@ -193,11 +192,9 @@ class MASRAnalyticsService:
             estimated_latency_ms: Estimated latency
             supervisor_count: Number of supervisors allocated
         """
-        # Update strategy performance
         perf = self.strategy_performance[strategy]
         perf.total_requests += 1
 
-        # Update metrics
         self.metrics["routing_latency_ms"].update(estimated_latency_ms)
         self.metrics["cost_per_query"].update(estimated_cost)
         self.metrics["supervisor_utilization"].update(
@@ -233,7 +230,6 @@ class MASRAnalyticsService:
             quality_score: Quality score (0-1)
             error_occurred: Whether an error occurred
         """
-        # Update strategy performance
         perf = self.strategy_performance[strategy]
 
         if error_occurred:
@@ -249,7 +245,6 @@ class MASRAnalyticsService:
             perf.total_latency_ms += actual_latency_ms
             perf.quality_scores.append(quality_score)
 
-            # Update metrics
             self.metrics["quality_score"].update(quality_score)
 
             # Keep only last 100 quality scores
@@ -263,7 +258,6 @@ class MASRAnalyticsService:
         Returns:
             Performance summary with metrics and recommendations
         """
-        # Calculate overall statistics
         total_requests = sum(
             p.total_requests for p in self.strategy_performance.values()
         )
@@ -349,7 +343,6 @@ class MASRAnalyticsService:
         Returns:
             Cost analysis with breakdown and recommendations
         """
-        # Calculate cost breakdown by strategy
         strategy_costs = {}
         for strategy, perf in self.strategy_performance.items():
             if perf.total_requests > 0:
@@ -362,7 +355,6 @@ class MASRAnalyticsService:
                     else 0,
                 }
 
-        # Calculate potential savings
         if strategy_costs:
             highest_cost = max(s["average_cost"] for s in strategy_costs.values())
             lowest_cost = min(s["average_cost"] for s in strategy_costs.values())
@@ -382,7 +374,6 @@ class MASRAnalyticsService:
         # Identify cost optimization opportunities
         opportunities = []
 
-        # Check if quality-focused is overused for simple queries
         quality_perf = self.strategy_performance[RoutingStrategy.QUALITY_FOCUSED]
         if quality_perf.total_requests > 0 and quality_perf.average_cost > 0.5:
             opportunities.append(
@@ -394,7 +385,6 @@ class MASRAnalyticsService:
                 }
             )
 
-        # Check for cost-efficient underutilization
         cost_perf = self.strategy_performance[RoutingStrategy.COST_EFFICIENT]
         total_requests = sum(
             p.total_requests for p in self.strategy_performance.values()
@@ -537,35 +527,30 @@ class MASRAnalyticsService:
         """Generate performance recommendations"""
         recommendations = []
 
-        # Check error rate
         error_metric = self.metrics["error_rate"]
         if error_metric.current_value > 0.05:
             recommendations.append(
                 f"High error rate ({error_metric.current_value:.1%}). Consider enabling fallback mechanisms."
             )
 
-        # Check latency trend
         latency_metric = self.metrics["routing_latency_ms"]
         if latency_metric.trend == "increasing":
             recommendations.append(
                 "Latency is increasing. Consider scaling supervisor pool or using speed-optimized strategy."
             )
 
-        # Check cost efficiency
         cost_metric = self.metrics["cost_per_query"]
         if cost_metric.average > 0.5:
             recommendations.append(
                 f"Average cost (${cost_metric.average:.2f}) is high. Increase use of cost-efficient strategy."
             )
 
-        # Check quality scores
         quality_metric = self.metrics["quality_score"]
         if quality_metric.average < 0.8:
             recommendations.append(
                 f"Quality scores averaging {quality_metric.average:.2f}. Consider using quality-focused strategy for critical queries."
             )
 
-        # Check cache utilization
         cache_metric = self.metrics["cache_hit_rate"]
         if cache_metric.average < 0.3:
             recommendations.append(
@@ -582,7 +567,6 @@ class MASRAnalyticsService:
             if metric_name in self.metrics:
                 metric = self.metrics[metric_name]
 
-                # Check if current value exceeds threshold
                 if metric_name == "quality_score":
                     # For quality, alert if below threshold
                     if metric.current_value < threshold:
@@ -621,14 +605,12 @@ class MASRAnalyticsService:
         # Analyze each metric's trend
         for metric_name, metric in self.metrics.items():
             if len(metric.window) >= 10:
-                # Calculate trend strength
                 values = list(metric.window)
                 if len(values) >= 2:
                     # Simple linear regression
                     x = np.arange(len(values))
                     y = np.array(values)
 
-                    # Calculate slope
                     if np.std(x) > 0 and np.std(y) > 0:
                         correlation = np.corrcoef(x, y)[0, 1]
                         slope = correlation * (np.std(y) / np.std(x))
@@ -647,7 +629,6 @@ class MASRAnalyticsService:
         """Get hourly cost breakdown"""
         hourly_costs = []
 
-        # Get last 24 hours
         now = datetime.now(UTC)
         for i in range(24):
             hour = now - timedelta(hours=i)
@@ -784,14 +765,12 @@ class MASRAnalyticsService:
         if not model_stats:
             return ["No model performance data available yet"]
 
-        # Check for underperforming models
         for model in model_stats:
             if model["error_rate"] > 0.1:
                 recommendations.append(
                     f"Model {model['model_id']} has high error rate ({model['error_rate']:.1%}). Consider fallback options."
                 )
 
-        # Check for cost optimization
         if len(model_stats) > 1:
             cheapest = min(model_stats, key=lambda x: x["cost_per_request"])
             most_used = max(model_stats, key=lambda x: x["requests"])

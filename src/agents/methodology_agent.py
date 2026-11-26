@@ -39,12 +39,10 @@ class MethodologyAgent(LLMWorkerAgentBase):
             AgentResult containing methodology recommendations
         """
         try:
-            # Validate input
             research_question = task.input_data.get("research_question", "").strip()
             if not research_question:
                 return self.handle_error(task, ValueError("Research question required"))
 
-            # Check cache first
             cache_key = self._generate_cache_key(task)
             cached_result = await self.get_cached_result(cache_key)
             if cached_result:
@@ -59,7 +57,6 @@ class MethodologyAgent(LLMWorkerAgentBase):
                 schema_result = await self._generate_structured_with_routing(
                     prompt, MethodologySchema, task=task
                 )
-                # Convert Pydantic model to dict for compatibility
                 analysis = schema_result.model_dump()
             except Exception as e:
                 # Fallback for testing without configured LLM
@@ -68,10 +65,8 @@ class MethodologyAgent(LLMWorkerAgentBase):
                 )
                 analysis = self._generate_mock_analysis(task)
 
-            # Calculate confidence score
             confidence = self._calculate_confidence(analysis)
 
-            # Build output
             output = {
                 "research_design": analysis.get("research_design", ""),
                 "data_collection_methods": analysis.get("data_collection_methods", []),
@@ -136,7 +131,6 @@ class MethodologyAgent(LLMWorkerAgentBase):
         """Calculate confidence score based on methodology completeness."""
         confidence = 0.5
 
-        # Check key components
         if analysis.get("research_design"):
             confidence += 0.1
         if len(analysis.get("data_collection_methods", [])) > 0:

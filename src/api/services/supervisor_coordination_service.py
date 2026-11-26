@@ -171,7 +171,6 @@ class SupervisorCoordinationService:
     def _get_worker_types_for_supervisor(
         self, supervisor_type: SupervisorType
     ) -> list[str]:
-        """Get worker types for a supervisor"""
         return self.registry.get_worker_types_for_supervisor(supervisor_type)
 
     def _get_worker_capabilities(self, worker_type: str) -> list[str]:
@@ -185,12 +184,10 @@ class SupervisorCoordinationService:
         start_time = time.time()
         execution_id = str(uuid.uuid4())
 
-        # Get supervisor info
         supervisor = self.supervisors.get(supervisor_type)
         if not supervisor:
             raise ValueError(f"Supervisor type '{supervisor_type}' not found")
 
-        # Update supervisor status
         supervisor.active_tasks += 1
 
         # Select and assign workers based on strategy
@@ -223,13 +220,11 @@ class SupervisorCoordinationService:
         if failed:
             result = None
 
-        # Calculate execution metrics
         execution_time_ms = int((time.time() - start_time) * 1000)
         quality_score = self._calculate_quality_score(
             result, request.quality_threshold or 0.8
         )
 
-        # Update metrics
         self._update_supervisor_metrics(
             supervisor_type,
             execution_time_ms,
@@ -237,7 +232,6 @@ class SupervisorCoordinationService:
             success=not failed,
         )
 
-        # Update supervisor status
         supervisor.active_tasks -= 1
 
         # Determine refinement rounds based on quality
@@ -340,7 +334,6 @@ class SupervisorCoordinationService:
         metrics.total_quality_score += quality_score or 0.0
         metrics.last_execution_time = datetime.now(UTC)
 
-        # Update worker utilization
         active_workers = sum(
             1 for w in self.workers[supervisor_type] if w.status != WorkerStatus.IDLE
         )
@@ -381,7 +374,6 @@ class SupervisorCoordinationService:
             supervisor_type, request.worker_types, request.coordination_mode
         )
 
-        # Create coordination plan
         coordination_plan = self._create_coordination_plan(
             request.task,
             assigned_workers,
@@ -543,7 +535,6 @@ class SupervisorCoordinationService:
         else:
             time_estimate = base_time * (num_workers // 2 + 1)
 
-        # Add time for refinement rounds
         time_estimate += (refinement_rounds - 1) * 5
 
         return int(time_estimate)
@@ -555,7 +546,6 @@ class SupervisorCoordinationService:
         orchestration_id = str(uuid.uuid4())
         start_time = time.time()
 
-        # Get involved supervisors
         supervisors_involved = []
         for sup_type in request.supervisor_types:
             if sup_type.value in self.supervisors:
@@ -564,7 +554,6 @@ class SupervisorCoordinationService:
         # Execute with each supervisor
         individual_results = {}
         for sup_type in request.supervisor_types:
-            # Create supervisor-specific request
             sup_request = SupervisorExecuteRequest(
                 query=request.query,
                 supervision_strategy=SupervisionStrategy.COLLABORATIVE,
@@ -593,7 +582,6 @@ class SupervisorCoordinationService:
                 individual_results, request.priority_weights or {}
             )
 
-        # Calculate quality metrics
         quality_scores = [
             float(r["quality_score"])
             for r in individual_results.values()
@@ -678,7 +666,6 @@ class SupervisorCoordinationService:
 
         metrics = self.metrics[supervisor_type]
 
-        # Calculate statistics
         success_rate = (
             metrics.successful_executions / metrics.total_executions
             if metrics.total_executions > 0
@@ -704,7 +691,6 @@ class SupervisorCoordinationService:
             else 0.0
         )
 
-        # Get top worker types
         worker_usage: dict[str, int] = {}
         for worker in self.workers[supervisor_type]:
             worker_usage[worker.worker_type] = (
@@ -758,12 +744,10 @@ class SupervisorCoordinationService:
             1 for w in self.workers[supervisor_type] if w.status != WorkerStatus.IDLE
         )
 
-        # Calculate health score
         health_factors = []
         issues = []
         recommendations = []
 
-        # Check success rate
         if metrics.total_executions > 0:
             success_rate = metrics.successful_executions / metrics.total_executions
             health_factors.append(success_rate)
@@ -771,7 +755,6 @@ class SupervisorCoordinationService:
                 issues.append(f"Low success rate: {success_rate:.2%}")
                 recommendations.append("Review error logs and improve error handling")
 
-        # Check worker availability
         idle_workers = sum(
             1 for w in self.workers[supervisor_type] if w.status == WorkerStatus.IDLE
         )
@@ -781,7 +764,6 @@ class SupervisorCoordinationService:
             issues.append(f"Low worker availability: {worker_availability:.2%}")
             recommendations.append("Consider scaling up worker pool")
 
-        # Check recent activity
         if metrics.last_execution_time:
             time_since_last = datetime.now(UTC) - metrics.last_execution_time
             if time_since_last > timedelta(hours=1):
@@ -789,7 +771,6 @@ class SupervisorCoordinationService:
                     f"No recent activity for {time_since_last.total_seconds() / 3600:.1f} hours"
                 )
 
-        # Calculate overall health score
         if health_factors:
             health_score = sum(health_factors) / len(health_factors)
         else:
@@ -842,7 +823,6 @@ class SupervisorCoordinationService:
                 request.available_workers, complexity, quality_target
             )
 
-        # Calculate expected performance
         expected_performance = {
             "quality": min(1.0, quality_target + 0.1),
             "speed": 1.0
@@ -964,7 +944,6 @@ class SupervisorCoordinationService:
                     "worker_utilization": stats.worker_utilization,
                 }
 
-        # Create rankings
         rankings = {}
         for metric in [
             "success_rate",

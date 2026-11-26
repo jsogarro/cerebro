@@ -88,7 +88,6 @@ class AgentTool(ABC, Generic[TParams]):
         structured ToolResult. Never raises — errors become error results.
         """
         try:
-            # Validate inputs
             params = self.params_model.model_validate(params_dict)
         except ValidationError as exc:
             # Input validation failed

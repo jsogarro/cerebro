@@ -155,7 +155,6 @@ class TestLiteratureReviewAgent:
 
     @pytest.mark.asyncio
     async def test_research_gap_identification(self):
-        """Test identification of research gaps."""
         from src.agents.literature_review_agent import LiteratureReviewAgent
 
         mock_gemini = _mock_gemini_two_call(

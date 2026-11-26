@@ -64,7 +64,6 @@ class AgentFactory:
         gemini_service = config.get("gemini_service")
         cache_client = config.get("cache_client")
 
-        # Initialize MCP integration if configured
         mcp_config = config.get("mcp", {})
         if mcp_config and mcp_config.get("enabled", False):
             from src.agents.integrations.mcp_integration import MCPIntegration
@@ -76,7 +75,6 @@ class AgentFactory:
             config["mcp_integration"] = mcp_integration
             logger.info("agent_mcp_integration_enabled", agent_type=agent_type)
 
-        # Create agent instance
         agent = agent_class(
             gemini_service=gemini_service, cache_client=cache_client, config=config
         )

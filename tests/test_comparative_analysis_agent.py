@@ -31,7 +31,6 @@ class TestComparativeAnalysisAgent:
     @pytest.mark.asyncio
     async def test_execute_comparative_analysis(self) -> None:
         """Test successful comparative analysis execution."""
-        # Create mock Gemini service
         mock_gemini = AsyncMock()
         mock_gemini.generate_content = AsyncMock(
             return_value=json.dumps(
@@ -116,7 +115,6 @@ class TestComparativeAnalysisAgent:
 
     @pytest.mark.asyncio
     async def test_comparison_matrix_generation(self) -> None:
-        """Test generation of comparison matrix."""
         mock_gemini = AsyncMock()
         mock_gemini.generate_content = AsyncMock(
             return_value=json.dumps(

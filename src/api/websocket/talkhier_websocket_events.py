@@ -213,7 +213,6 @@ class TalkHierWebSocketHandler:
     async def register_interactive_session(
         self, session_id: str, connection_id: str, websocket: WebSocket
     ) -> None:
-        """Register an interactive session"""
         if session_id not in self.interactive_sessions:
             self.interactive_sessions[session_id] = set()
 
@@ -248,7 +247,6 @@ class TalkHierWebSocketHandler:
     async def leave_interactive_session(
         self, session_id: str, connection_id: str
     ) -> None:
-        """Leave an interactive session"""
         if session_id in self.interactive_sessions:
             self.interactive_sessions[session_id].discard(connection_id)
 
@@ -271,7 +269,6 @@ class TalkHierWebSocketHandler:
     async def handle_interactive_message(
         self, session_id: str, connection_id: str, message: InteractiveMessage
     ) -> None:
-        """Handle an interactive message"""
         # Broadcast message to all participants
         await self._broadcast_to_interactive(
             session_id,
@@ -300,7 +297,6 @@ class TalkHierWebSocketHandler:
     async def handle_interactive_command(
         self, session_id: str, connection_id: str, command: InteractiveCommand
     ) -> None:
-        """Handle an interactive command"""
         # Process command
         command_result = await self._process_interactive_command(session_id, command)
 
@@ -336,7 +332,6 @@ class TalkHierWebSocketHandler:
     async def register_coordination_monitor(
         self, coordination_id: str, connection_id: str, websocket: WebSocket
     ) -> None:
-        """Register a coordination monitor"""
         if coordination_id not in self.coordination_monitors:
             self.coordination_monitors[coordination_id] = set()
 
@@ -348,7 +343,6 @@ class TalkHierWebSocketHandler:
     async def unregister_coordination_monitor(
         self, coordination_id: str, connection_id: str
     ) -> None:
-        """Unregister a coordination monitor"""
         if coordination_id in self.coordination_monitors:
             self.coordination_monitors[coordination_id].discard(connection_id)
 
@@ -361,7 +355,6 @@ class TalkHierWebSocketHandler:
     async def broadcast_coordination_update(
         self, coordination_id: str, update_data: dict[str, Any]
     ) -> None:
-        """Broadcast coordination update"""
         if coordination_id in self.coordination_monitors:
             for connection_id in self.coordination_monitors[coordination_id]:
                 if connection_id in self.connections:
@@ -419,7 +412,6 @@ class TalkHierWebSocketHandler:
     async def _process_interactive_command(
         self, session_id: str, command: InteractiveCommand
     ) -> dict[str, Any]:
-        """Process an interactive command"""
         result = {"success": False, "effect": ""}
 
         if command.command == "pause":
@@ -461,7 +453,6 @@ class TalkHierWebSocketHandler:
         return list(self.session_connections.keys())
 
     def get_connection_sessions(self, connection_id: str) -> list[str]:
-        """Get all sessions for a connection"""
         sessions = []
         for session_id, connections in self.session_connections.items():
             if connection_id in connections:

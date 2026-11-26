@@ -15,10 +15,8 @@ from typing import Any
 import numpy as np
 from structlog import get_logger
 
-# Import Agent Framework components
 from src.ai_brain.learning.supervision_feedback import SupervisionFeedbackLearner
 
-# Import A/B Testing components
 from ..integration.agent_framework_integration import (
     AgentExperimentType,
     AgentFrameworkExperimentor,
@@ -155,23 +153,19 @@ class FeedbackLoopOptimizer:
             exp_id = experiment["id"]
             exp_type = experiment["type"]
 
-            # Get experiment results
             results = await self.experimentor.get_experiment_results(
                 exp_id, include_statistical_analysis=True
             )
 
-            # Check if experiment is ready for evaluation
             if await self._is_experiment_ready(results):
                 await self._process_experiment_results(exp_id, exp_type, results)
 
     async def _is_experiment_ready(self, results: dict[str, Any]) -> bool:
         """Check if experiment has enough data for reliable conclusions."""
-        # Check sample sizes
         for variant_data in results.get("variants", {}).values():
             if variant_data.get("sample_size", 0) < 100:
                 return False
 
-        # Check statistical significance
         stats = results.get("statistical_analysis", {})
         p_value = stats.get("p_value")
 
@@ -187,7 +181,6 @@ class FeedbackLoopOptimizer:
         if not winning_variant:
             return
 
-        # Get winning configuration
         winning_config = await self._get_variant_config(experiment_id, winning_variant)
 
         # Store learnings based on experiment type
@@ -250,7 +243,6 @@ class FeedbackLoopOptimizer:
         max_rounds = winning_config.get("max_rounds", 3)
         consensus_threshold = winning_config.get("consensus_threshold", 0.8)
 
-        # Update TalkHier parameters
         self.baseline_performance["talkhier"] = {
             "max_rounds": max_rounds,
             "consensus_threshold": consensus_threshold,
@@ -267,17 +259,14 @@ class FeedbackLoopOptimizer:
         """Generate optimization decisions based on accumulated learnings."""
         decisions = []
 
-        # Check routing optimizations
         routing_decision = await self._generate_routing_optimization()
         if routing_decision:
             decisions.append(routing_decision)
 
-        # Check supervisor optimizations
         supervisor_decision = await self._generate_supervisor_optimization()
         if supervisor_decision:
             decisions.append(supervisor_decision)
 
-        # Check quality threshold optimizations
         quality_decision = await self._generate_quality_optimization()
         if quality_decision:
             decisions.append(quality_decision)
@@ -286,10 +275,8 @@ class FeedbackLoopOptimizer:
 
     async def _generate_routing_optimization(self) -> OptimizationDecision | None:
         """Generate routing strategy optimization decision."""
-        # Get current and recommended strategies from feedback system
         current_weights = await self._get_current_routing_weights()
 
-        # Get routing recommendations from feedback system
         context = {"domain": "research", "complexity": "moderate"}
         recommendations = self.feedback_system.get_routing_recommendations(context)
 
@@ -302,14 +289,12 @@ class FeedbackLoopOptimizer:
         if not recommended_weights:
             return None
 
-        # Calculate expected improvement
         current_performance = await self._estimate_performance(current_weights)
         expected_performance = await self._estimate_performance(recommended_weights)
         improvement = (
             (expected_performance - current_performance) / current_performance
         ) * 100
 
-        # Check if improvement is significant
         if abs(improvement) < self.config.min_effect_size * 100:
             return None
 
@@ -350,7 +335,6 @@ class FeedbackLoopOptimizer:
             # supervisor_data is a float, not a dict with config
             return None
 
-        # Check if changes are significant
         if current_config == optimized_config:
             return None
 
@@ -394,7 +378,6 @@ class FeedbackLoopOptimizer:
 
     async def _apply_optimization(self, decision: OptimizationDecision) -> None:
         """Apply an optimization decision to the system."""
-        # Check confidence threshold
         if decision.confidence < self.config.min_confidence_for_recommendation:
             logger.info(f"Skipping optimization {decision.target} - confidence too low")
             return
@@ -448,7 +431,6 @@ class FeedbackLoopOptimizer:
             # Monitor for issues
             await asyncio.sleep(3600)  # Wait 1 hour
 
-            # Check performance
             degradation = await self._check_rollout_performance(decision)
             if degradation:
                 logger.warning("Degradation detected during rollout, rolling back")
@@ -536,7 +518,6 @@ class FeedbackLoopOptimizer:
         }
 
     async def _get_current_quality_threshold(self) -> float:
-        """Get current quality threshold."""
         return 0.85
 
     async def _estimate_performance(self, config: dict[str, Any]) -> float:

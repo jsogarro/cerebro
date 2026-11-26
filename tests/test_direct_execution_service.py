@@ -306,7 +306,6 @@ class TestDirectExecutionService:
         # Plan-backed execution dispatches through the topology executor seam.
         execution_service.supervisor_bridge.execute_execution_plan.assert_called_once()
 
-        # Check execution status
         execution_status = execution_service.active_executions[execution_id]
 
         # The execution should be completed (or completing)
@@ -672,7 +671,6 @@ class TestDirectExecutionService:
     async def test_max_concurrent_executions(self, execution_service, sample_project):
         """Test maximum concurrent executions limit."""
 
-        # Set low limit for testing
         execution_service.max_concurrent_executions = 2
 
         # Start maximum executions
@@ -859,7 +857,6 @@ class TestExecutionStatus:
     """Test suite for ExecutionStatus data class."""
 
     def test_execution_status_initialization(self):
-        """Test ExecutionStatus initialization."""
 
         status = ExecutionStatus(
             execution_id="test-123", project_id="project-456", status="pending"
@@ -935,8 +932,6 @@ class TestDirectExecutionIntegration:
 
 # Performance benchmarks
 class TestDirectExecutionPerformance:
-    """Performance tests for direct execution."""
-
     @pytest.mark.asyncio
     @pytest.mark.benchmark
     async def test_execution_startup_time(self, execution_service, sample_project):

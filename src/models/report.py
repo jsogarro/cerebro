@@ -396,7 +396,6 @@ class Report(BaseModel):
         for appendix in self.appendices:
             word_count += count_section_words(appendix)
 
-        # Update metadata
         self.metadata.word_count = word_count
         return word_count
 

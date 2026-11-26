@@ -49,7 +49,6 @@ class TestAgentFrameworkExperimentor:
         self, experimentor: AgentFrameworkExperimentor
     ) -> None:
         """Test creating a routing strategy experiment."""
-        # Create experiment
         exp_id = await experimentor.create_routing_experiment(
             name="Test Routing Experiment",
             strategies=["cost_efficient", "quality_focused", "balanced"],
@@ -61,7 +60,6 @@ class TestAgentFrameworkExperimentor:
         assert exp_id.startswith("routing_")
         assert exp_id in experimentor.active_experiments
 
-        # Check configuration
         config = experimentor.active_experiments[exp_id]
         assert config.experiment_type == AgentExperimentType.ROUTING_STRATEGY
         assert len(config.variants) == 3
@@ -104,7 +102,6 @@ class TestAgentFrameworkExperimentor:
         self, experimentor: AgentFrameworkExperimentor
     ) -> None:
         """Test executing a query with active experiments."""
-        # Create a routing experiment
         exp_id = await experimentor.create_routing_experiment(
             name="Test Execution", strategies=["balanced", "cost_efficient"]
         )
@@ -139,7 +136,6 @@ class TestAgentFrameworkExperimentor:
         assert result["experiments"]["request_id"] is not None
         assert exp_id in result["experiments"]["assignments"]
 
-        # Check that result was buffered
         assert len(experimentor.results_buffer) > 0
         buffered_result = experimentor.results_buffer[0]
         assert buffered_result.experiment_id == exp_id
@@ -150,7 +146,6 @@ class TestAgentFrameworkExperimentor:
         self, experimentor: AgentFrameworkExperimentor
     ) -> None:
         """Test variant assignment using allocation strategies."""
-        # Create experiment with thompson sampling
         exp_id = await experimentor.create_routing_experiment(
             name="Test Assignment", strategies=["strategy_a", "strategy_b"]
         )
@@ -173,12 +168,10 @@ class TestAgentFrameworkExperimentor:
         self, experimentor: AgentFrameworkExperimentor
     ) -> None:
         """Test getting experiment results with statistical analysis."""
-        # Create experiment and add mock performance data
         exp_id = await experimentor.create_routing_experiment(
             name="Test Results", strategies=["control", "treatment"]
         )
 
-        # Add mock performance data
         experimentor.variant_performance[exp_id] = {
             "control": {
                 "successes": 80,
@@ -208,7 +201,6 @@ class TestAgentFrameworkExperimentor:
             }
         )
 
-        # Get results
         results: dict[str, Any] = await experimentor.get_experiment_results(
             exp_id, include_statistical_analysis=True
         )

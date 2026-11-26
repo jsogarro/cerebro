@@ -71,7 +71,6 @@ class TemplateRenderer:
         self.settings = settings or ReportSettings()
         self.template_config = template_config or ReportTemplateConfig(self.settings)
 
-        # Initialize Jinja2 environment
         self.env = self._create_jinja_environment()
 
         # Template cache
@@ -85,7 +84,6 @@ class TemplateRenderer:
             os.makedirs(template_dir, exist_ok=True)
             logger.warning(f"Created template directory: {template_dir}")
 
-        # Create environment
         env = Environment(
             loader=FileSystemLoader(template_dir),
             autoescape=select_autoescape(["html", "xml"]),
@@ -94,10 +92,8 @@ class TemplateRenderer:
             enable_async=False,  # For simplicity, using sync templates
         )
 
-        # Add custom filters
         env.filters.update(self._get_custom_filters())
 
-        # Add custom functions
         env.globals.update(self._get_custom_functions())
 
         return env
@@ -146,7 +142,6 @@ class TemplateRenderer:
                     report.configuration.type
                 )
 
-            # Get or load template
             template = self._get_template(template_file)
 
             # Prepare template context
@@ -177,7 +172,6 @@ class TemplateRenderer:
             report_type, "comprehensive_report.html.j2"
         )
 
-        # Check if template exists, fall back to base template
         template_path = os.path.join(self.settings.template_path, template_file)
         if not os.path.exists(template_path):
             logger.warning(f"Template {template_file} not found, using base.html.j2")
@@ -203,7 +197,6 @@ class TemplateRenderer:
 
         except jinja2.TemplateNotFound:
             logger.error(f"Template not found: {template_name}")
-            # Try to fall back to base template
             try:
                 template = self.env.get_template("base.html.j2")
                 logger.info("Using base template as fallback")
@@ -261,7 +254,6 @@ class TemplateRenderer:
 
         except Exception as e:
             logger.warning(f"Markdown conversion failed: {e}")
-            # Return plain text with line breaks converted
             return self._sanitize_rendered_html(text.replace("\n", "<br>"))
 
     def _basic_markdown_filter(self, text: str) -> str:
@@ -395,7 +387,6 @@ class TemplateRenderer:
 
     def _generate_toc_id(self, title: str) -> str:
         """Generate a clean ID for table of contents linking."""
-        # Convert to lowercase and replace spaces/special chars with hyphens
         clean_id = re.sub(r"[^\w\s-]", "", title.lower())
         clean_id = re.sub(r"[-\s]+", "-", clean_id)
         return clean_id.strip("-")

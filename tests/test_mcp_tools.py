@@ -229,7 +229,6 @@ class TestAcademicSearchTool:
 
     @pytest.mark.asyncio
     async def test_tool_metadata(self):
-        """Test tool metadata."""
         from src.mcp.tools.academic_search_tool import AcademicSearchTool
 
         tool = AcademicSearchTool()
@@ -297,7 +296,6 @@ class TestCitationTool:
 
     @pytest.mark.asyncio
     async def test_doi_resolution(self):
-        """Test DOI resolution."""
         from src.mcp.tools.citation_tool import CitationTool
 
         tool = CitationTool()
@@ -393,7 +391,6 @@ class TestStatisticsTool:
 
     @pytest.mark.asyncio
     async def test_correlation_analysis(self):
-        """Test correlation analysis."""
         from src.mcp.tools.statistics_tool import StatisticsTool
 
         tool = StatisticsTool()
@@ -473,7 +470,6 @@ class TestKnowledgeGraphTool:
 
         tool = KnowledgeGraphTool()
 
-        # Build a graph first
         await tool.execute(
             operation="build_graph",
             entities=[
@@ -502,7 +498,6 @@ class TestKnowledgeGraphTool:
 
         tool = KnowledgeGraphTool()
 
-        # Build a simple graph
         await tool.execute(
             operation="build_graph",
             entities=[

@@ -84,9 +84,7 @@ def remove_personal_info(text: str) -> str:
     )
 
     # IP addresses
-    text = re.sub(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", "[IP REDACTED]", text)
-
-    return text
+    return re.sub(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", "[IP REDACTED]", text)
 
 
 def validate_length(
@@ -124,27 +122,21 @@ def detect_language(text: str) -> str:
     # Count language indicators
     languages_detected = []
 
-    # Check for Chinese characters
     if re.search(r"[\u4e00-\u9fff]", text):
         languages_detected.append("zh")
 
-    # Check for Japanese characters
     if re.search(r"[\u3040-\u309f\u30a0-\u30ff]", text):
         languages_detected.append("ja")
 
-    # Check for Korean characters
     if re.search(r"[\uac00-\ud7af]", text):
         languages_detected.append("ko")
 
-    # Check for Arabic characters
     if re.search(r"[\u0600-\u06ff]", text):
         languages_detected.append("ar")
 
-    # Check for Cyrillic characters
     if re.search(r"[\u0400-\u04ff]", text):
         languages_detected.append("ru")
 
-    # Check for French indicators
     french_words = [
         " et ",
         " le ",
@@ -163,7 +155,6 @@ def detect_language(text: str) -> str:
     ) and french_count >= 2:
         languages_detected.append("fr")
 
-    # Check for Spanish indicators
     spanish_words = [
         " y ",
         " el ",
@@ -179,7 +170,6 @@ def detect_language(text: str) -> str:
     if spanish_count >= 2 and "fr" not in languages_detected:
         languages_detected.append("es")
 
-    # Check for German indicators
     german_words = [
         " und ",
         " der ",
@@ -246,7 +236,6 @@ def truncate_text(text: str, max_length: int, suffix: str = "...") -> str:
     # Account for suffix length
     truncate_at = max_length - len(suffix)
 
-    # Try to truncate at word boundary
     if " " in text[:truncate_at]:
         # Find last space before limit
         last_space = text[:truncate_at].rfind(" ")
@@ -270,7 +259,6 @@ def is_valid_json_key(key: str) -> bool:
     if not key or not isinstance(key, str):
         return False
 
-    # Check for control characters
     return not any(ord(char) < 32 for char in key)
 
 
@@ -292,6 +280,4 @@ def normalize_quotes(text: str) -> str:
     text = text.replace("«", '"').replace("»", '"')
 
     # Normalize dashes
-    text = text.replace("–", "-").replace("—", "-")  # noqa: RUF001
-
-    return text
+    return text.replace("–", "-").replace("—", "-")  # noqa: RUF001

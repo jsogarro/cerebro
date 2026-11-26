@@ -34,7 +34,6 @@ def parse_json_response(response: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    # Try to extract JSON from markdown code block
     json_pattern = r"```(?:json)?\s*([\s\S]*?)\s*```"
     matches = re.findall(json_pattern, response)
 
@@ -57,7 +56,6 @@ def parse_json_response(response: str) -> dict[str, Any]:
         except json.JSONDecodeError:
             continue
 
-    # Try to find JSON array
     array_pattern = r"\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]"
     array_matches = re.findall(array_pattern, response)
 
@@ -100,19 +98,16 @@ def validate_schema(data: dict[str, Any], schema: dict[str, type]) -> bool:
             type_args = getattr(expected_type, "__args__", ())
             if not any(isinstance(value, t) for t in type_args):
                 return False
-        # Handle List types
         elif expected_type is list or (
             hasattr(expected_type, "__origin__") and expected_type.__origin__ is list
         ):
             if not isinstance(value, list):
                 return False
-        # Handle Dict types
         elif expected_type is dict or (
             hasattr(expected_type, "__origin__") and expected_type.__origin__ is dict
         ):
             if not isinstance(value, dict):
                 return False
-        # Handle regular types
         elif not isinstance(value, expected_type):
             return False
 
@@ -146,7 +141,6 @@ def extract_nested(
         if isinstance(current, dict) and key in current:
             current = current[key]
         elif isinstance(current, list):
-            # Try to parse as index
             try:
                 index = int(key)
                 if 0 <= index < len(current):
@@ -190,9 +184,7 @@ def clean_json_string(json_str: str) -> str:
     json_str = re.sub(r"(?<!\\)'", '"', json_str)
 
     # Add quotes to unquoted keys (simplified - may not handle all cases)
-    json_str = re.sub(r"(\w+):", r'"\1":', json_str)
-
-    return json_str
+    return re.sub(r"(\w+):", r'"\1":', json_str)
 
 
 def merge_json_objects(obj1: dict[str, Any], obj2: dict[str, Any]) -> dict[str, Any]:

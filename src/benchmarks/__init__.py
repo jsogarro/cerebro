@@ -53,7 +53,6 @@ class ResearchReplicationToolkit:
     """Toolkit for replicating research."""
 
     async def create_replication_package(self, project_id: str) -> ReplicationPackage:
-        """Create replication package."""
         return ReplicationPackage(project_id=project_id, query="", scope={}, agents=[])
 
     async def replicate(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -65,7 +64,6 @@ class BenchmarkEvaluator:
     """Evaluate agents against benchmarks."""
 
     async def run_evaluation(self, agent_id: str, dataset_id: str) -> dict[str, Any]:
-        """Run evaluation."""
         return {"agent_id": agent_id, "overall_score": 0.7}
 
 
@@ -75,11 +73,9 @@ class PeerReviewSystem:
     async def initiate_review(
         self, project_id: str, num_reviewers: int = 2
     ) -> dict[str, Any]:
-        """Initiate review."""
         return {"project_id": project_id, "reviewers": []}
 
     async def submit_review(
         self, assignment_id: str, review_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Submit review."""
         return {"status": "submitted"}

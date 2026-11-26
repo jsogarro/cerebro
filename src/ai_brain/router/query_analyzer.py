@@ -181,7 +181,6 @@ class QueryComplexityAnalyzer:
         # Analyze individual complexity factors
         factors = await self._analyze_factors(cleaned_query, context)
 
-        # Calculate overall complexity score
         score = self._calculate_complexity_score(factors)
 
         # Determine complexity level
@@ -205,7 +204,6 @@ class QueryComplexityAnalyzer:
         # Determine priority
         priority_level = self._determine_priority(cleaned_query, context)
 
-        # Calculate uncertainty
         uncertainty = self._calculate_uncertainty(factors, domains)
 
         # Decompose multi-domain queries
@@ -236,13 +234,10 @@ class QueryComplexityAnalyzer:
 
     def _clean_query(self, query: str) -> str:
         """Clean and normalize query text."""
-        # Convert to lowercase for pattern matching
         cleaned = query.lower().strip()
 
         # Remove extra whitespace
-        cleaned = re.sub(r"\s+", " ", cleaned)
-
-        return cleaned
+        return re.sub(r"\s+", " ", cleaned)
 
     async def _analyze_factors(
         self, query: str, context: dict[str, Any] | None = None
@@ -508,10 +503,8 @@ class QueryComplexityAnalyzer:
         # Base subtasks
         subtask_count = 1
 
-        # Add for multiple domains
         subtask_count += max(0, len(domains) - 1)
 
-        # Add for complexity indicators
         if re.search(r"\b(?:first|then|next|step|phase)\b", query):
             subtask_count += 2
 
@@ -544,7 +537,6 @@ class QueryComplexityAnalyzer:
             agents["validator"] = 2
             agents["synthesizer"] = 1
 
-        # Add domain-specific agents
         for domain in domains:
             if domain == QueryDomain.RESEARCH:
                 agents["literature_agent"] = agents.get("literature_agent", 0) + 1
@@ -570,11 +562,7 @@ class QueryComplexityAnalyzer:
             ComplexityLevel.COMPLEX: 500,
         }
 
-        estimated_tokens = int(
-            base_tokens + (complexity_multiplier[level] * subtask_count)
-        )
-
-        return estimated_tokens
+        return int(base_tokens + (complexity_multiplier[level] * subtask_count))
 
     def _determine_priority(
         self, query: str, context: dict[str, Any] | None = None
@@ -584,7 +572,6 @@ class QueryComplexityAnalyzer:
             if re.search(pattern, query):
                 return priority
 
-        # Check context for priority
         if context and context.get("priority"):
             return str(context["priority"])
 

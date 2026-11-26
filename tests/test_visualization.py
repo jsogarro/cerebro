@@ -91,7 +91,6 @@ class TestVisualizationGenerator:
     def test_bar_chart_generation(
         self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator
     ) -> None:
-        """Test bar chart generation."""
         # Mock Plotly components
         mock_figure = MagicMock()
         mock_go.Figure.return_value = mock_figure
@@ -124,7 +123,6 @@ class TestVisualizationGenerator:
     def test_pie_chart_generation(
         self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator
     ) -> None:
-        """Test pie chart generation."""
         mock_figure = MagicMock()
         mock_go.Figure.return_value = mock_figure
         mock_go.Pie = MagicMock()
@@ -154,7 +152,6 @@ class TestVisualizationGenerator:
     def test_line_chart_generation(
         self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator
     ) -> None:
-        """Test line chart generation."""
         mock_figure = MagicMock()
         mock_go.Figure.return_value = mock_figure
         mock_go.Scatter = MagicMock()
@@ -185,7 +182,6 @@ class TestVisualizationGenerator:
     def test_radar_chart_generation(
         self, mock_pio: MagicMock, mock_go: MagicMock, generator: VisualizationGenerator
     ) -> None:
-        """Test radar chart generation."""
         mock_figure = MagicMock()
         mock_go.Figure.return_value = mock_figure
         mock_go.Scatterpolar = MagicMock()
@@ -221,7 +217,6 @@ class TestVisualizationGenerator:
         mock_nx: MagicMock,
         generator: VisualizationGenerator,
     ) -> None:
-        """Test network graph generation."""
         # Mock NetworkX
         mock_graph = MagicMock()
         mock_nx.Graph.return_value = mock_graph
@@ -277,7 +272,6 @@ class TestVisualizationGenerator:
         mock_wordcloud_class: MagicMock,
         generator: VisualizationGenerator,
     ) -> None:
-        """Test word cloud generation."""
         # Mock WordCloud
         mock_wordcloud = MagicMock()
         mock_wordcloud_class.return_value = mock_wordcloud

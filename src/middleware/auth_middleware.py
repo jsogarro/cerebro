@@ -256,7 +256,6 @@ async def get_current_token(
     token = credentials.credentials
 
     try:
-        # Validate token using injected JWT service
         token_payload = await jwt_service.validate_token(token)
 
     except JWTError as e:
@@ -461,10 +460,8 @@ def optional_user() -> Callable[..., Any]:
             return None
 
         try:
-            # Validate token using injected JWT service
             token_payload = await jwt_service.validate_token(credentials.credentials)
 
-            # Get user
             user_repo = UserRepository(db)
             user = await user_repo.get(token_payload.sub)
 
@@ -513,7 +510,6 @@ class RateLimitMiddleware:
         Raises:
             HTTPException: If rate limit exceeded
         """
-        # Get identifier (user ID or IP)
         if current_user:
             identifier = f"user:{current_user.id}"
             # Use user-specific limits if configured

@@ -23,7 +23,6 @@ class TestSecurityHeaders:
             csp_enabled=True, hsts_enabled=True, frame_options="DENY"
         )
 
-        # Create mock request and response
         request = Mock(spec=Request)
         request.state = Mock()
 
@@ -35,7 +34,6 @@ class TestSecurityHeaders:
 
         result = await middleware(request, call_next)
 
-        # Check headers are set
         assert "Content-Security-Policy" in result.headers
         assert "Strict-Transport-Security" in result.headers
         assert result.headers["X-Frame-Options"] == "DENY"
@@ -44,7 +42,6 @@ class TestSecurityHeaders:
 
     @pytest.mark.asyncio
     async def test_csp_nonce_generation(self) -> None:
-        """Test CSP nonce generation."""
         middleware = SecurityHeadersMiddleware(csp_enabled=True, nonce_enabled=True)
 
         request = Mock(spec=Request)
@@ -53,14 +50,12 @@ class TestSecurityHeaders:
         response.headers = {}
 
         async def call_next(req: Request) -> Mock:
-            # Check nonce was added to request state
             assert hasattr(req.state, "csp_nonce")
             assert len(req.state.csp_nonce) > 0
             return response
 
         result = await middleware(request, call_next)
 
-        # Check CSP header contains nonce
         csp_header = result.headers.get("Content-Security-Policy", "")
         assert "nonce-" in csp_header
 

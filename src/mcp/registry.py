@@ -35,7 +35,6 @@ class ToolRegistry:
         name = metadata.name
         version = metadata.version
 
-        # Check if tool already exists
         if name in self._tools:
             logger.warning(f"Tool {name} already registered, replacing")
 

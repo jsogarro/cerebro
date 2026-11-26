@@ -46,7 +46,6 @@ class TestResearchFlowIntegration:
         self, authenticated_client: AsyncClient
     ) -> None:
         """Test retrieving a created project by ID."""
-        # Create first
         payload = {
             "title": "Test Project",
             "query": {"text": "Test query for retrieval", "domains": ["CS"]},
@@ -58,7 +57,6 @@ class TestResearchFlowIntegration:
         assert create_r.status_code == 201
         pid = create_r.json()["id"]
 
-        # Get
         r = await authenticated_client.get(f"/api/v1/research/projects/{pid}")
         assert r.status_code == 200
         data = r.json()
@@ -70,7 +68,6 @@ class TestResearchFlowIntegration:
         self, authenticated_client: AsyncClient
     ) -> None:
         """Test listing projects returns created ones."""
-        # Create a project
         payload = {
             "title": "Listed Project",
             "query": {"text": "Test query for listing", "domains": ["Math"]},
@@ -91,7 +88,6 @@ class TestResearchFlowIntegration:
         self, authenticated_client: AsyncClient
     ) -> None:
         """Test progress endpoint returns valid structure."""
-        # Create
         payload = {
             "title": "Progress Project",
             "query": {"text": "Test query for progress", "domains": ["Physics"]},

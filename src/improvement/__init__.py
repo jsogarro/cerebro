@@ -14,8 +14,6 @@ class FeedbackType(Enum):
 
 @dataclass
 class FeedbackRecord:
-    """A feedback record."""
-
     id: str
     project_id: str
     agent_id: str

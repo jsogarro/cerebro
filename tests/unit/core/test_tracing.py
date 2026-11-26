@@ -528,8 +528,7 @@ class TestProviderTracingIntegration:
     def _make_provider(self):
         from src.ai_brain.providers.openrouter_provider import OpenRouterProvider
 
-        provider = OpenRouterProvider(config={"api_key": "test-key"})
-        return provider
+        return OpenRouterProvider(config={"api_key": "test-key"})
 
     @pytest.mark.asyncio
     async def test_generation_created_updated_and_ended_on_success(self, monkeypatch):

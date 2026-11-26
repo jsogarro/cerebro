@@ -55,7 +55,6 @@ class EventPublisher:
         self.redis_client = None
         self.redis_subscriber = None
         try:
-            # Initialize Redis clients
             self.redis_client = redis.from_url(settings.REDIS_URL)
             self.redis_subscriber = redis.from_url(settings.REDIS_URL)
 
@@ -575,7 +574,6 @@ class EventPublisher:
 
             while not self._shutdown:
                 try:
-                    # Get message with timeout
                     message = await pubsub.get_message(timeout=1.0)
 
                     if message and message["type"] == "message":

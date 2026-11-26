@@ -256,7 +256,6 @@ class AdminUser(HttpUser):
 
     @task(1)
     def review_audit_logs(self):
-        """Review audit logs."""
         self.client.get(
             "/api/v1/admin/audit-logs",
             headers={"Authorization": f"Bearer {self.access_token}"},
@@ -316,7 +315,6 @@ def on_request(
         print(f"Server error: {name} - Status {response.status_code}")
 
 
-# Load test scenarios
 class QuickLoadTest(ResearchPlatformUser):
     """Quick load test with faster operations."""
 

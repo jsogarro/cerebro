@@ -133,7 +133,6 @@ class ComplexityToWorkerMapper:
             Worker allocation configuration
         """
 
-        # Get base allocation for complexity level
         base_allocation = self.complexity_worker_map.get(
             complexity_level, self.complexity_worker_map[ComplexityLevel.MODERATE]
         )
@@ -144,7 +143,6 @@ class ComplexityToWorkerMapper:
         )
         worker_multiplier = float(domain_adj.get("worker_multiplier", 1.0))
 
-        # Calculate worker counts - explicitly handle mixed dict types
         base_min_val = base_allocation.get("min_workers", 1)
         base_optimal_val = base_allocation.get("optimal_workers", 3)
         base_max_val = base_allocation.get("max_workers", 5)
@@ -246,7 +244,6 @@ class QualityThresholdCalculator:
             Quality threshold configuration
         """
 
-        # Get base thresholds for strategy
         base_config = self.strategy_quality_map.get(
             routing_strategy, self.strategy_quality_map[RoutingStrategy.BALANCED]
         )
@@ -339,7 +336,6 @@ class RefinementRoundCalculator:
             Refinement rounds configuration
         """
 
-        # Get base rounds for quality focus
         focus_config = self.quality_focus_rounds.get(
             quality_focus, self.quality_focus_rounds[QualityFocusLevel.STANDARD]
         )
@@ -374,7 +370,6 @@ class RefinementRoundCalculator:
         base_rounds = max(1, min(base_rounds, 4))
         max_rounds = max(base_rounds, min(max_rounds, 6))
 
-        # Calculate early stopping threshold
         early_stopping_threshold = 0.95 if enable_early_stopping else 1.0
 
         return {
@@ -472,7 +467,6 @@ class SupervisorConfigurationManager:
         """Initialize supervisor configuration manager."""
         self.config = config or {}
 
-        # Initialize component calculators
         self.worker_mapper = ComplexityToWorkerMapper(
             self.config.get("worker_mapper", {})
         )
@@ -516,17 +510,14 @@ class SupervisorConfigurationManager:
 
         primary_domain = domains[0] if domains else "research"
 
-        # Calculate worker allocation
         worker_config = self.worker_mapper.calculate_worker_allocation(
             complexity_level, primary_domain, subtask_count, uncertainty
         )
 
-        # Calculate quality thresholds
         quality_config = self.quality_calculator.calculate_quality_thresholds(
             routing_strategy, complexity_level, uncertainty, priority_level
         )
 
-        # Calculate refinement rounds
         refinement_config = self.refinement_calculator.calculate_refinement_rounds(
             quality_config["quality_focus"],
             uncertainty,
@@ -539,7 +530,6 @@ class SupervisorConfigurationManager:
             collaboration_mode
         )
 
-        # Calculate timeout based on complexity and worker count
         base_timeout = {
             ComplexityLevel.SIMPLE: 120,
             ComplexityLevel.MODERATE: 300,
@@ -553,8 +543,7 @@ class SupervisorConfigurationManager:
         )
         timeout_seconds = int(base_timeout * (1 + timeout_scaling))
 
-        # Create configuration profile
-        profile = SupervisorConfigurationProfile(
+        return SupervisorConfigurationProfile(
             # Worker allocation
             worker_allocation_strategy=worker_config["allocation_strategy"],
             min_workers=worker_config["min_workers"],
@@ -584,8 +573,6 @@ class SupervisorConfigurationManager:
             enable_detailed_logging=quality_config["quality_focus"]
             in [QualityFocusLevel.HIGH, QualityFocusLevel.MAXIMUM],
         )
-
-        return profile
 
     async def get_configuration_stats(self) -> dict[str, Any]:
         """Get configuration manager statistics."""

@@ -73,9 +73,7 @@ def remove_personal_info(text: str) -> str:
     text = re.sub(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b", "[CARD]", text)
 
     # IP addresses
-    text = re.sub(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", "[IP]", text)
-
-    return text
+    return re.sub(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", "[IP]", text)
 
 
 def validate_response_length(text: str, max_length: int = 10000) -> str:
@@ -109,27 +107,21 @@ def detect_language(text: str) -> str:
     # Very simplified language detection based on character patterns
     # In production, use a proper library like langdetect
 
-    # Check for Chinese characters
     if re.search(r"[\u4e00-\u9fff]", text):
         return "zh"
 
-    # Check for Japanese characters
     if re.search(r"[\u3040-\u309f\u30a0-\u30ff]", text):
         return "ja"
 
-    # Check for Korean characters
     if re.search(r"[\uac00-\ud7af]", text):
         return "ko"
 
-    # Check for Arabic characters
     if re.search(r"[\u0600-\u06ff]", text):
         return "ar"
 
-    # Check for Cyrillic characters
     if re.search(r"[\u0400-\u04ff]", text):
         return "ru"
 
-    # Check for common non-English European language patterns
     if re.search(r"[àâäáåãæçèéêëíîïñóôöøùúûüý]", text, re.IGNORECASE):
         # Could be French, Spanish, German, etc.
         if " et " in text.lower() or " le " in text.lower() or " la " in text.lower():
@@ -164,7 +156,6 @@ def validate_citation(citation_data: dict[str, str]) -> bool:
         if field not in citation_data or not citation_data[field]:
             return False
 
-    # Validate year format
     if "year" in citation_data:
         year = citation_data["year"]
         if not re.match(r"^\d{4}$", str(year)):

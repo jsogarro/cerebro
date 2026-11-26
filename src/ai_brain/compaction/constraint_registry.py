@@ -383,7 +383,6 @@ class ConstraintRegistry:
         if not self.enabled or not self._constraints:
             return context
 
-        # Build constraint block with sanitized content.
         constraint_lines = [_BLOCK_START]
         for constraint in self._constraints:
             # Layer 1: strip embedded newlines.

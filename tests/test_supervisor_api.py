@@ -80,7 +80,6 @@ class TestSupervisorExecution:
             return_value=Mock(**mock_response)
         )
 
-        # Make request
         request_data = {
             "query": "Analyze AI impact on employment",
             "supervision_strategy": "collaborative",
@@ -304,7 +303,6 @@ class TestErrorHandling:
     def test_invalid_supervisor_type_404(
         self, client: TestClient, mock_supervisor_service: Mock
     ) -> None:
-        """Test 404 for invalid supervisor type"""
         mock_supervisor_service.get_supervisor_info = AsyncMock(
             side_effect=ValueError("Supervisor type 'invalid' not found")
         )
