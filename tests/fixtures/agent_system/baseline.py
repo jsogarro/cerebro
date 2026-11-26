@@ -56,11 +56,11 @@ PUBLIC_ROUTE_CHARACTERIZATION_MANIFEST = {
     (
         "GET",
         "/api/v1/query/routing/strategies",
-    ): "test_query_api_baseline.py::test_routing_recommendation_is_local_heuristic_and_invalid_context_is_500",
+    ): "test_query_api_baseline.py::test_routing_recommendation_comes_from_router_and_invalid_context_is_500",
     (
         "GET",
         "/api/v1/query/routing/recommend",
-    ): "test_query_api_baseline.py::test_routing_recommendation_is_local_heuristic_and_invalid_context_is_500",
+    ): "test_query_api_baseline.py::test_routing_recommendation_comes_from_router_and_invalid_context_is_500",
     (
         "GET",
         "/api/v1/agents",

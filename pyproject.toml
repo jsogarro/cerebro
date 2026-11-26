@@ -92,7 +92,6 @@ dev = [
 ]
 
 [project.scripts]
-research-platform = "research_platform:main"
 research-cli = "src.cli.main:cli"
 
 [build-system]

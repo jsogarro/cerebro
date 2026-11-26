@@ -125,10 +125,20 @@ class TestIntelligentQueryAPI:
 
     def test_routing_recommendation(self, client: TestClient) -> None:
         """Test routing recommendation endpoint."""
-        response = client.get(
-            "/api/v1/query/routing/recommend",
-            params={"query": "Complex multi-domain analysis of AI impact"},
+        from src.api.main import app
+        from src.api.routes.masr_api import get_masr_routing_service
+        from tests.test_issue_260_placeholder_values import _FakeRouter
+
+        app.dependency_overrides[get_masr_routing_service] = lambda: Mock(
+            router=_FakeRouter()
         )
+        try:
+            response = client.get(
+                "/api/v1/query/routing/recommend",
+                params={"query": "Complex multi-domain analysis of AI impact"},
+            )
+        finally:
+            app.dependency_overrides.pop(get_masr_routing_service, None)
 
         assert response.status_code == 200
         data = response.json()

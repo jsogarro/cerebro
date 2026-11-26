@@ -406,9 +406,8 @@ The failed-login lockout is a separate counter described in [authentication and 
 
 These routes return values that do not come from live computation.
 
-- `GET /api/v1/query/routing/recommend` chooses one of three constant recommendations by query length (under 100 characters `simple`, under 500 `moderate`, otherwise `complex`) and returns a constant `confidence` of 0.85. Costs, times and agent lists are literals in the handler.
 - `GET /api/v1/query/routing/strategies` returns a literal description of five strategies (`speed_first`, `cost_efficient`, `quality_focused`, `balanced`, `adaptive`) and `default_strategy` `balanced`.
-- `GET /ws/health` returns `websocket_manager.get_stats()` plus a fixed `timestamp` (see [durable runs and events](08-durable-runs-and-events.md#project-progress-websockets)).
+- `GET /ws/health` returns `websocket_manager.get_stats()` plus the current UTC `timestamp` (see [durable runs and events](08-durable-runs-and-events.md#project-progress-websockets)).
 - `POST /api/v1/research/projects/{project_id}/refine` always returns `501`.
 - `POST /api/v1/masr/feedback` acknowledges a known routing id with `status: accepted`, `learning_updated: false`, `recorded: false` and `eligible: false`; the feedback values are discarded. An unknown routing id returns `400` `INVALID_FEEDBACK`.
 

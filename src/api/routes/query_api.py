@@ -29,6 +29,7 @@ from ...middleware.tenant_context import TenantContext, get_tenant_context
 from ...models.execution_authority import ExecutionAuthorityReference
 from ...models.research_project import ResearchDepth, ResearchQuery
 from ..services.execution_authority_resolver import ExecutionAuthorityError
+from ..services.masr_routing_service import MASRRoutingService
 from ..services.research_kernel import (
     ApplicationResearchKernel,
     ResearchExecutionBackend,
@@ -39,6 +40,7 @@ from ..services.research_kernel import (
     get_legacy_research_kernel,
     resume_kernel_execution,
 )
+from .masr_api import get_masr_routing_service
 
 logger = get_logger()
 router = APIRouter(prefix="/api/v1/query", dependencies=[Depends(get_current_token)])
@@ -755,6 +757,7 @@ async def get_available_routing_strategies() -> dict[str, Any]:
 async def get_routing_recommendation(
     query: str = Query(..., min_length=1),
     context: str = Query("", description="Optional JSON context string"),
+    service: MASRRoutingService = Depends(get_masr_routing_service),
 ) -> dict[str, Any]:
     """
     Get MASR routing recommendation without executing query.
@@ -766,60 +769,44 @@ async def get_routing_recommendation(
 
         parsed_context: dict[str, Any] = _json.loads(context) if context else {}
 
-        query_length = len(query)
-        complexity = (
-            "simple"
-            if query_length < 100
-            else "moderate"
-            if query_length < 500
-            else "complex"
-        )
+        async def recommend(
+            strategy: RoutingStrategy | None,
+        ) -> tuple[Any, dict[str, Any]]:
+            decision = await service.router.route(
+                query, context=parsed_context, strategy=strategy
+            )
+            return decision, {
+                "suggested_strategy": decision.routing_strategy.value,
+                "expected_agents": list(
+                    decision.complexity_analysis.recommended_agents
+                ),
+                "estimated_cost": decision.estimated_cost,
+                "estimated_time_seconds": decision.estimated_latency_ms / 1000,
+                "estimated_quality": decision.estimated_quality,
+            }
 
-        recommendations = {
-            "simple": {
-                "suggested_strategy": "cost_efficient",
-                "expected_agents": ["literature-review"],
-                "estimated_cost": 0.005,
-                "estimated_time_seconds": 60,
-                "estimated_quality": 0.80,
-            },
-            "moderate": {
-                "suggested_strategy": "balanced",
-                "expected_agents": ["literature-review", "methodology", "synthesis"],
-                "estimated_cost": 0.015,
-                "estimated_time_seconds": 180,
-                "estimated_quality": 0.85,
-            },
-            "complex": {
-                "suggested_strategy": "quality_focused",
-                "expected_agents": [
-                    "literature-review",
-                    "methodology",
-                    "comparative-analysis",
-                    "synthesis",
-                    "citation",
-                ],
-                "estimated_cost": 0.035,
-                "estimated_time_seconds": 300,
-                "estimated_quality": 0.92,
-            },
-        }
-
-        recommendation = recommendations[complexity]
+        decision, primary = await recommend(None)
+        alternatives = {}
+        for strategy in RoutingStrategy:
+            if strategy is decision.routing_strategy:
+                continue
+            alternatives[strategy.value] = (await recommend(strategy))[1]
 
         return {
             "query_analysis": {
-                "complexity": complexity,
-                "estimated_domains": parsed_context.get("domains", []),
-                "confidence": 0.85,
+                "complexity": decision.complexity_analysis.level.value,
+                "estimated_domains": [
+                    getattr(domain, "value", domain)
+                    for domain in decision.complexity_analysis.domains
+                ],
+                "confidence": decision.confidence_score,
             },
-            "routing_recommendation": recommendation,
-            "alternative_strategies": {
-                strategy: data
-                for strategy, data in recommendations.items()
-                if strategy != complexity
-            },
-            "explanation": f"Query classified as {complexity} - routing through {recommendation['suggested_strategy']} strategy for optimal results",
+            "routing_recommendation": primary,
+            "alternative_strategies": alternatives,
+            "explanation": (
+                f"Router selected the {primary['suggested_strategy']} strategy "
+                f"for a {decision.complexity_analysis.level.value} query"
+            ),
         }
 
     except Exception as e:
