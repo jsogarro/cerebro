@@ -116,7 +116,7 @@ Tests that exercise them live in `tests/unit/core/claims/` and `tests/unit/core/
 
 ## Settings with no effect
 
-102 of the 163 `Settings` fields are declared and read by no code that acts on them, apart from `get_ai_brain_config`. The full list, split from the settings that code does read, is in [configuration](02-configuration.md).
+95 of the 168 `Settings` fields are declared and read by no code that acts on them, apart from `get_ai_brain_config`. The full list, split from the settings that code does read, is in [configuration](02-configuration.md).
 
 ## Unbacked web pages
 

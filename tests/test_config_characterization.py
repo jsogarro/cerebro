@@ -74,8 +74,6 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[No
     )
     keys_to_clear = [
         "ENVIRONMENT",
-        "MCP_SERVER_HOST",
-        "MCP_SERVER_PORT",
         "DB_HOST",
         "DB_PORT",
         "DB_NAME",

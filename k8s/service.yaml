@@ -14,20 +14,3 @@ spec:
     targetPort: 8000
     protocol: TCP
     name: http
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: mcp-service
-  namespace: research-platform
-  labels:
-    app: mcp-server
-spec:
-  type: ClusterIP
-  selector:
-    app: mcp-server
-  ports:
-  - port: 9000
-    targetPort: 9000
-    protocol: TCP
-    name: mcp

@@ -69,7 +69,6 @@ class Settings(BaseSettings):
     MAX_PARALLEL_WORKERS: int = 5
 
     # MCP Configuration
-    MCP_PORT: int = 9000
     MCP_TOOLS_ENABLED: bool = True
     MCP_TOOL_PATH_ENABLED: bool = True
     # Evaluation runs write only here, never to DATABASE_URL.
@@ -588,7 +587,6 @@ class Settings(BaseSettings):
             "gemini_api_key": self.GEMINI_API_KEY,
             "temporal_host": self.TEMPORAL_HOST,
             "temporal_namespace": self.TEMPORAL_NAMESPACE,
-            "mcp_port": self.MCP_PORT,
             "mcp_tools_enabled": self.MCP_TOOLS_ENABLED,
             "enable_cache": self.ENABLE_CACHE,
             "enable_rate_limiting": self.ENABLE_RATE_LIMITING,
