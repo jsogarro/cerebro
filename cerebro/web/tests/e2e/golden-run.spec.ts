@@ -36,10 +36,26 @@ test.describe('real-backend Golden Run', () => {
     'Set PLAYWRIGHT_REAL_BACKEND=1 only after the backend startup and OpenAPI handoff is ready.',
   );
 
+  test('backend is reachable', async ({ playwright }) => {
+    const backend = await playwright.request.newContext({ baseURL: backendUrl });
+    try {
+      const response = await backend.get('/health', { timeout: 10_000 });
+      expect(response.status(), `health at ${backendUrl}/health`).toBe(200);
+    } finally {
+      await backend.dispose();
+    }
+  });
+
   test('starts and inspects the fixture-backed Golden Run without intercepted workbench APIs', async ({
     page,
     playwright,
   }) => {
+    // Strict defect record. Today the first failing assertion is the OpenAPI
+    // readiness check (/openapi.json answers 401 to an unauthenticated
+    // request, observed), then the missing workbench operations (P08 runs API,
+    // P02 catalogue). The test above proves the backend is reachable. When P08
+    // lands this turns red: delete the next line.
+    test.fail(true, 'P08: the backend does not hand off the workbench OpenAPI and run operations');
     test.setTimeout(150_000);
     const runtime = observeRuntime(page);
     const backend = await playwright.request.newContext({ baseURL: backendUrl });
