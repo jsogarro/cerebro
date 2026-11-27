@@ -119,6 +119,7 @@ async def test_methodology_and_comparison_wrappers_pin_exact_context():
         query="Design a reproducible mixed-methods study.",
         research_type="mixed",
         domains=["education"],
+        authority_reference=None,
         execution_service=service,
         tenant_context=TENANT,
     )
@@ -126,6 +127,7 @@ async def test_methodology_and_comparison_wrappers_pin_exact_context():
         query="Compare the documented outcomes across cohorts.",
         comparison_focus="findings",
         domains=["healthcare"],
+        authority_reference=None,
         execution_service=service,
         tenant_context=TENANT,
     )

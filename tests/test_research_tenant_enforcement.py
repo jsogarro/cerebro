@@ -11,6 +11,7 @@ from src.api.routes import research
 from src.api.routes.research import CreateResearchProjectRequest
 from src.middleware.tenant_context import TenantContext
 from src.models.db.research_project import ProjectStatus
+from src.models.execution_authority import ExecutionAuthorityReference
 from src.models.research_project import ResearchQuery
 
 
@@ -143,6 +144,40 @@ async def test_create_research_project_sets_tenant_boundaries(
     assert repo.created["user_id"] == "user-123"
     assert repo.created["organization_id"] == "org-123"
     assert repo.updated[0]["organization_id"] == "org-123"
+
+
+@pytest.mark.asyncio
+async def test_create_research_project_starts_execution_as_caller_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class _Service:
+        active_executions: dict[str, object] = {}
+
+        async def start_research_execution(
+            self, _project: object, **kwargs: object
+        ) -> str:
+            calls.append(kwargs)
+            return "execution-123"
+
+    monkeypatch.setattr(research, "get_direct_execution_service", lambda: _Service())
+    request = _create_request()
+    request = request.model_copy(
+        update={
+            "authority_reference": ExecutionAuthorityReference(
+                authority_id="auth-1", authority_version="1"
+            )
+        }
+    )
+
+    await research.create_research_project(
+        request=request,
+        repo=_Repo(),  # type: ignore[arg-type]
+        tenant_context=_tenant_context(),
+    )
+
+    assert calls[0]["organization_id"] == "org-123"
 
 
 @pytest.mark.asyncio

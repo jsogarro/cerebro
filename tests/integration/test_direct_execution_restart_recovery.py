@@ -105,7 +105,9 @@ class _RoutingDecisionStub:
     )
 
 
-def _make_binding(run_id: str) -> ExecutionAuthorityBinding:
+def _make_binding(
+    run_id: str, *, deadline: datetime | None = None
+) -> ExecutionAuthorityBinding:
     raw = ExecutionAuthorityBinding.create_for_test(
         authority_id="restart-authority",
         authority_version="1",
@@ -145,7 +147,7 @@ def _make_binding(run_id: str) -> ExecutionAuthorityBinding:
         ),
         stop_conditions=("complete",),
         evaluator_requirements=(),
-        deadline=NOW + timedelta(minutes=5),
+        deadline=deadline or datetime.now(UTC) + timedelta(hours=1),
         compiled_at=NOW,
     )
     return dataclasses.replace(

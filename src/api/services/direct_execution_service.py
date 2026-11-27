@@ -111,6 +111,7 @@ from .execution_authority_resolver import (
     ExecutionAuthorityRequiredError,
     ExecutionAuthorityResolver,
     ExecutionAuthorityUnavailableError,
+    PersistedExecutionAuthorityResolver,
     serialize_execution_authority_binding,
     tenant_owns_authority,
 )
@@ -142,6 +143,8 @@ _RUN_STATUS_TO_EXECUTION_STATUS: dict[str, str] = {
 # the run's outcome. Declared once because two things depend on agreeing
 # about it: the ``@retry`` decorator, and the failure path's decision about
 # whether a terminal FAILED may be persisted yet.
+INTERRUPTED_BY_RESTART = "interrupted by restart"
+RESTORE_DEADLINE_MARGIN = timedelta(minutes=5)
 _WORKFLOW_MAX_ATTEMPTS = 3
 
 
@@ -325,6 +328,9 @@ class ExecutionStatus:
     status: str  # pending, running, completed, failed
     progress_percentage: float = 0.0
     current_phase: str = "initialization"
+
+    # Rehydrated from the database; this process runs no task for it.
+    restored: bool = False
 
     # The tenant that owns this execution, so a reader can be scoped to it.
     # ``active_executions`` is one process-wide dictionary holding every
@@ -515,6 +521,7 @@ class DirectExecutionService:
 
         # Store background task references to prevent GC
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._workflow_tasks: dict[str, asyncio.Task[None]] = {}
         self._fast_path_provider: OpenRouterProvider | None = None
         self.closed = False
         # Performance metrics
@@ -1659,15 +1666,9 @@ class DirectExecutionService:
     ) -> DurableWriteOutcome:
         """Persist a cancellation request onto the run/task/attempt.
 
-        This can only ever record ``CANCELLING`` (via
-        :meth:`Run.request_cancellation`, which picks ``CANCELLING`` over
-        ``CANCELLED`` for a running record) — it does not, and cannot today,
-        record ``CANCELLED``. Nothing in this codebase propagates an actual
-        cancellation signal into the running ``asyncio.Task``
-        (``cancel_execution`` only flips ``execution_status.status`` and
-        returns); persisting a fabricated ``CANCELLED`` would misrepresent
-        work that is still in flight. Closing that gap is a real limitation
-        beyond this packet's scope, not a hidden one.
+        This records ``CANCELLING`` for a running record (via
+        :meth:`Run.request_cancellation`); ``CANCELLED`` is recorded only by
+        the workflow once its task has actually stopped.
 
         Returns:
             What the durable layer did with the request, so
@@ -1748,7 +1749,10 @@ class DirectExecutionService:
         before any authenticated request context exists. Only non-terminal
         runs are restored; a run that reached a terminal status before the
         restart already has its outcome durably recorded and does not need
-        an in-memory placeholder.
+        an in-memory placeholder. A restored run past its own deadline (plus
+        a margin) is recorded as failed with reason "interrupted by restart";
+        one still within it may be running on another replica and is left
+        alone, without counting against this process's concurrency cap.
 
         Returns:
             The number of executions rehydrated.
@@ -1769,12 +1773,46 @@ class DirectExecutionService:
                     execution_id = execution_status.execution_id
                     if execution_id in self.active_executions:
                         continue
+                    # Another replica may still be running this work, and
+                    # nothing here resumes it (issue #296), so only a run that
+                    # is past its own deadline is known to be dead.
+                    if await self._is_past_deadline(session, run_row):
+                        outcome = await self._persist_transition(
+                            execution_status,
+                            run_target=RunStatus.FAILED,
+                            task_target=TaskStatus.FAILED,
+                            attempt_target=AttemptStatus.FAILED,
+                            event_type="run.interrupted",
+                            payload={"reason": INTERRUPTED_BY_RESTART},
+                            reason=INTERRUPTED_BY_RESTART,
+                        )
+                        self._settle_terminal_state(
+                            execution_status,
+                            outcome=outcome,
+                            status="failed",
+                            phase="failed",
+                        )
+                    else:
+                        execution_status.restored = True
                     self.active_executions[execution_id] = execution_status
                     self._execution_ids_by_run_id[run_row.run_id] = execution_id
                     restored += 1
         except (SQLAlchemyError, OSError) as exc:
             logger.warning("active_execution_restore_failed", error=str(exc))
         return restored
+
+    async def _is_past_deadline(self, session: Any, run_row: Any) -> bool:
+        """Whether the run's own snapshot deadline, plus a margin, has passed.
+
+        A run with no readable snapshot cannot be proven dead, so it is not.
+        """
+        snapshot = await RunConfigSnapshotRepository(session).get_by_run(
+            run_row.run_id, organization_id=run_row.organization_id
+        )
+        if snapshot is None:
+            return False
+        deadline = datetime.fromisoformat(snapshot.configuration["deadline"])
+        return datetime.now(UTC) > deadline + RESTORE_DEADLINE_MARGIN
 
     async def _rehydrate_execution(
         self, lifecycle_repo: RunLifecycleRepository, run_row: Any
@@ -2004,6 +2042,12 @@ class DirectExecutionService:
         if self.closed:
             raise RuntimeError("Direct execution service is closed")
 
+        if authority_reference is not None and isinstance(
+            self.execution_authority_resolver, PersistedExecutionAuthorityResolver
+        ):
+            await self.execution_authority_resolver.load_authority(
+                authority_reference, organization_id=organization_id
+            )
         binding = self._resolve_execution_authority(
             authority_reference, organization_id=organization_id
         )
@@ -2175,7 +2219,7 @@ class DirectExecutionService:
         in_flight = sum(
             1
             for execution in self.active_executions.values()
-            if execution.status in ("pending", "running")
+            if execution.status in ("pending", "running") and not execution.restored
         )
         if in_flight >= self.max_concurrent_executions:
             raise RuntimeError(
@@ -2225,6 +2269,8 @@ class DirectExecutionService:
         )
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
+        self._workflow_tasks[execution_id] = task
+        task.add_done_callback(lambda _t: self._workflow_tasks.pop(execution_id, None))
 
         logger.info(f"Started direct execution {execution_id} for project {project.id}")
 
@@ -2295,8 +2341,11 @@ class DirectExecutionService:
     @retry(
         stop=stop_after_attempt(_WORKFLOW_MAX_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        # An exhausted budget stays exhausted: retrying cannot succeed.
-        retry=retry_if_not_exception_type(BudgetExceededError),
+        # An exhausted budget stays exhausted, and a cancelled run must not be
+        # restarted by the retry wrapper.
+        retry=retry_if_not_exception_type(
+            (BudgetExceededError, asyncio.CancelledError)
+        ),
     )
     async def _execute_research_workflow(
         self,
@@ -2455,6 +2504,9 @@ class DirectExecutionService:
             )
             await self._checkpoint(execution_status, "completed")
             return
+        except asyncio.CancelledError:
+            await self._record_requested_cancellation(execution_status)
+            raise
         except Exception as e:
             logger.error(
                 f"Direct execution {execution_status.execution_id} failed with exception: {e}"
@@ -2562,6 +2614,38 @@ class DirectExecutionService:
         )
         self._settle_terminal_state(
             execution_status, outcome=outcome, status="failed", phase="failed"
+        )
+
+    async def _record_requested_cancellation(
+        self, execution_status: ExecutionStatus
+    ) -> None:
+        """Finish a cancellation the caller asked for once the work has stopped.
+
+        Only a cancellation requested through :meth:`cancel_execution` is
+        recorded; a task cancelled by shutdown leaves the run as it was, so
+        the next process sees it still in flight.
+        """
+        run = execution_status._run
+        if execution_status.status != "cancelled" or run is None:
+            return
+        if run.status is not RunStatus.CANCELLING:
+            return
+        outcome = await asyncio.shield(
+            self._persist_transition(
+                execution_status,
+                run_target=RunStatus.CANCELLED,
+                task_target=TaskStatus.CANCELLED,
+                attempt_target=AttemptStatus.CANCELLED,
+                event_type="run.cancelled",
+                payload={},
+                reason="Execution cancelled by request",
+            )
+        )
+        self._settle_terminal_state(
+            execution_status,
+            outcome=outcome,
+            status="cancelled",
+            phase="cancelled",
         )
 
     def _visible_execution(
@@ -2715,10 +2799,9 @@ class DirectExecutionService:
         rather than being told a run was cancelled that the durable record
         (and any other process reading it) still considers live.
 
-        What a successful cancellation records is the *request*: the durable
-        run moves to CANCELLING, never to CANCELLED, because nothing here
-        propagates cancellation into the running task. See
-        :meth:`_persist_cancellation`.
+        The durable run moves to CANCELLING here and the running workflow task
+        is cancelled; the workflow records CANCELLED once it has actually
+        stopped. See :meth:`_record_requested_cancellation`.
 
         Returns:
             True if the cancellation was accepted and durably requested.
@@ -2740,6 +2823,9 @@ class DirectExecutionService:
                 return False
             execution.status = "cancelled"
             execution.current_phase = "cancelled"
+            workflow_task = self._workflow_tasks.get(execution_id)
+            if workflow_task is not None:
+                workflow_task.cancel()
 
             await self._publish_progress_update(execution)
 

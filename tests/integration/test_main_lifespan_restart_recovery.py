@@ -95,7 +95,7 @@ def _seeded_binding(run_id: str, *, now: datetime) -> ExecutionAuthorityBinding:
         ),
         stop_conditions=("complete",),
         evaluator_requirements=(),
-        deadline=now + timedelta(minutes=5),
+        deadline=datetime.now(UTC) + timedelta(hours=1),
         compiled_at=now,
     )
     return dataclasses.replace(

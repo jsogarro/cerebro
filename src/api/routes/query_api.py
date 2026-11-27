@@ -15,7 +15,15 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Depends,
+    HTTPException,
+    Query,
+    status,
+)
 from pydantic import BaseModel, Field
 from structlog import get_logger
 
@@ -343,6 +351,8 @@ async def intelligent_analysis_query(
             intelligent_request, background_tasks, execution_service, tenant_context
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Intelligent analysis query failed: {e}")
         raise HTTPException(
@@ -395,6 +405,8 @@ async def intelligent_synthesis_query(
             intelligent_request, background_tasks, execution_service, tenant_context
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Intelligent synthesis query failed: {e}")
         raise HTTPException(
@@ -601,6 +613,9 @@ async def intelligent_literature_query(
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
         _RESEARCH_KERNEL_DEPENDENCY
     ),
+    authority_reference: ExecutionAuthorityReference | None = Body(
+        default=None, embed=True
+    ),
     tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> IntelligentQueryResponse:
     """
@@ -621,6 +636,7 @@ async def intelligent_literature_query(
         cost_preference=None,
         user_id=None,
         session_id=None,
+        authority_reference=authority_reference,
     )
 
     return await intelligent_research_query(
@@ -635,6 +651,9 @@ async def intelligent_methodology_query(
     domains: list[str] = Query(default=[]),
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
         _RESEARCH_KERNEL_DEPENDENCY
+    ),
+    authority_reference: ExecutionAuthorityReference | None = Body(
+        default=None, embed=True
     ),
     tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> IntelligentQueryResponse:
@@ -655,6 +674,7 @@ async def intelligent_methodology_query(
         cost_preference=None,
         user_id=None,
         session_id=None,
+        authority_reference=authority_reference,
     )
 
     return await intelligent_research_query(
@@ -671,6 +691,9 @@ async def intelligent_comparison_query(
     domains: list[str] = Query(default=[]),
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
         _RESEARCH_KERNEL_DEPENDENCY
+    ),
+    authority_reference: ExecutionAuthorityReference | None = Body(
+        default=None, embed=True
     ),
     tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> IntelligentQueryResponse:
@@ -691,6 +714,7 @@ async def intelligent_comparison_query(
         cost_preference=None,
         user_id=None,
         session_id=None,
+        authority_reference=authority_reference,
     )
 
     return await intelligent_research_query(

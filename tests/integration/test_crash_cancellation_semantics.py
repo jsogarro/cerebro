@@ -1,12 +1,10 @@
 """Crash matrix: is cancellation truthful, including across a restart?
 
-Packet 3C's own docstring on ``DirectExecutionService._persist_cancellation``
-states cancellation "can only ever record CANCELLING... it does not, and
-cannot today, record CANCELLED" for a running record. These tests verify
-that claim precisely (it is accurate, but only for a run that has already
-reached RUNNING — a run cancelled before it started legitimately reaches a
-real CANCELLED), and then probe the consequence 3C flagged as out of scope:
-what a restart does with a run stuck at CANCELLING.
+``cancel_execution`` records only the cancellation *request* (CANCELLING) for
+a run that has reached RUNNING; CANCELLED is recorded by the workflow once its
+task has actually stopped (``_record_requested_cancellation``). A run
+cancelled before it started legitimately reaches CANCELLED immediately. The
+tests also probe what a restart does with a run stuck at CANCELLING.
 """
 
 from unittest.mock import AsyncMock, Mock
@@ -209,3 +207,49 @@ async def test_restart_resurrects_a_cancelling_run_as_running(
 
     await service_a.close()
     await service_b.close()
+
+
+@pytest.mark.asyncio
+async def test_workflow_records_cancelled_once_its_task_has_stopped(
+    test_engine: AsyncEngine,
+) -> None:
+    session_factory = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    run_id = "cancel-semantics-stopped"
+    binding = make_binding(run_id, authority_id="cancel-semantics-stopped-authority")
+    resolver = MappingExecutionAuthorityResolver(
+        {("cancel-semantics-stopped-authority", "1"): binding}
+    )
+    service = _service(session_factory, resolver)
+    project = make_project()
+    execution_status = ExecutionStatus(
+        execution_id="exec-cancel-stopped",
+        project_id=str(project.id),
+        status="running",
+        current_phase="supervisor_execution",
+    )
+    await service._admit_run(execution_status, binding, project)
+    await service._persist_transition(
+        execution_status,
+        run_target=RunStatus.RUNNING,
+        task_target=TaskStatus.RUNNING,
+        attempt_target=AttemptStatus.RUNNING,
+        event_type="run.started",
+        payload={},
+    )
+    service.active_executions[execution_status.execution_id] = execution_status
+    assert await service.cancel_execution(execution_status.execution_id) is True
+
+    await service._record_requested_cancellation(execution_status)
+
+    async with session_factory() as session:
+        row = await RunLifecycleRepository(session).get_run(
+            run_id, organization_id=ORG_ID
+        )
+        assert row is not None
+        assert row.status == RunStatus.CANCELLED.value
+        assert row.completed_at is not None
+    assert execution_status.status == "cancelled"
+
+    await service.close()

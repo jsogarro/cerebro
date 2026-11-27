@@ -87,7 +87,11 @@ class _RoutingDecisionStub:
 
 
 def make_binding(
-    run_id: str, *, authority_id: str = "crash-authority", org_id: str = ORG_ID
+    run_id: str,
+    *,
+    authority_id: str = "crash-authority",
+    org_id: str = ORG_ID,
+    deadline: datetime | None = None,
 ) -> ExecutionAuthorityBinding:
     """Build an admittable authority binding for one run_id/authority_id pair."""
 
@@ -130,7 +134,7 @@ def make_binding(
         ),
         stop_conditions=("complete",),
         evaluator_requirements=(),
-        deadline=NOW + timedelta(minutes=5),
+        deadline=deadline or datetime.now(UTC) + timedelta(hours=1),
         compiled_at=NOW,
     )
     return dataclasses.replace(

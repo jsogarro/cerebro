@@ -321,7 +321,8 @@ async def test_downgrade_removes_tables_and_policies_and_upgrade_restores_them(
     url: str,
 ) -> None:
     _alembic(url, "upgrade", "head")
-    _alembic(url, "downgrade", "-1")
+    # Below this revision, not "-1": later revisions sit on top of it.
+    _alembic(url, "downgrade", "e4b7c1a9d6f2")
     engine = create_async_engine(url.replace("postgresql://", "postgresql+asyncpg://"))
     try:
         async with engine.connect() as connection:

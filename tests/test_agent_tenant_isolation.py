@@ -249,3 +249,37 @@ async def test_stats_routes_require_token(env: Any, path: str) -> None:
     del client.headers["Authorization"]
     response = await client.get(path)
     assert response.status_code == 401, response.text
+
+
+@pytest.mark.asyncio
+async def test_agent_precheck_lets_the_durable_resolver_load_a_new_authority() -> None:
+    from types import SimpleNamespace
+
+    from src.api.routes import agent_api
+    from src.api.services.execution_authority_resolver import (
+        PersistedExecutionAuthorityResolver,
+    )
+    from src.core.kernel import ResearchKernel
+    from src.models.execution_authority import ExecutionAuthorityReference
+
+    loaded: list[str] = []
+    resolver = PersistedExecutionAuthorityResolver()
+
+    async def load_authority(reference, *, organization_id=None) -> None:
+        loaded.append(reference.authority_id)
+
+    resolver.load_authority = load_authority  # type: ignore[method-assign]
+    kernel = ResearchKernel(
+        executor=SimpleNamespace(
+            backend=SimpleNamespace(execution_authority_resolver=resolver)
+        ),  # type: ignore[arg-type]
+        registry=None,  # type: ignore[arg-type]
+    )
+
+    await agent_api._load_agent_execution_authority(
+        kernel,  # type: ignore[arg-type]
+        ExecutionAuthorityReference(authority_id="a", authority_version="1"),
+        "org-1",
+    )
+
+    assert loaded == ["a"]

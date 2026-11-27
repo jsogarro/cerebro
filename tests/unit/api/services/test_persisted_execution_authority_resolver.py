@@ -199,3 +199,54 @@ def test_default_clock_and_plan_id_factory_are_usable() -> None:
 
     assert isinstance(resolver._clock(), datetime)
     assert isinstance(resolver._plan_id_factory(), str)
+
+
+class _FakeSession:
+    async def __aenter__(self) -> "_FakeSession":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_load_authority_reads_through_to_the_database_on_a_miss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from src.repositories.run_config_snapshot_repository import (
+        RunConfigSnapshotRepository,
+    )
+
+    binding = _make_binding()
+    snapshot = SimpleNamespace(
+        configuration=serialize_execution_authority_binding(binding),
+        authority_id=binding.authority_id,
+        authority_version=binding.authority_version,
+    )
+    lookups: list[tuple[str, str]] = []
+
+    async def find_by_authority(self, *, authority_id, authority_version, limit=1):
+        lookups.append((authority_id, authority_version))
+        return [snapshot]
+
+    monkeypatch.setattr(
+        RunConfigSnapshotRepository, "find_by_authority", find_by_authority
+    )
+    resolver = PersistedExecutionAuthorityResolver(session_factory=_FakeSession)
+    reference = ExecutionAuthorityReference(
+        authority_id="authority-1", authority_version="1"
+    )
+
+    with pytest.raises(ExecutionAuthorityUnavailableError):
+        resolver.resolve(reference, organization_id=binding.run.tenant_id)
+
+    await resolver.load_authority(reference)
+    await resolver.load_authority(reference)
+
+    assert (
+        resolver.resolve(reference, organization_id=binding.run.tenant_id).run.run_id
+        == "run-1"
+    )
+    assert lookups == [("authority-1", "1")]
