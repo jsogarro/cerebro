@@ -325,6 +325,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 outbox_relay.stop,
             )
 
+            if event_publisher.redis_subscriber is not None:
+                from src.api.services.run_event_wakeup import RunEventWakeupSubscriber
+
+                wakeups = RunEventWakeupSubscriber(
+                    redis_client=event_publisher.redis_subscriber,
+                    session_factory=durable_session_factory,
+                )
+                wakeups.start()
+                resources.push_async_callback(
+                    _close_lifespan_resource,
+                    "run_event_wakeups",
+                    wakeups.stop,
+                )
+
         _start_document_purge(resources, app, durable_session_factory)
 
         app.state.document_jobs = set()
