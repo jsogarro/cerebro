@@ -364,7 +364,7 @@ See [CLI and web clients](13-cli-and-web-clients.md) for the commands.
 
 ### Document encryption
 
-`DOCUMENT_ENCRYPTION_KEY` (default empty, no fallback to another variable) is a Fernet key; a comma-separated list rotates keys (the first encrypts, all decrypt). `document_cipher()` builds a `MemoryEncryption` from it and raises `DocumentEncryptionUnavailable` when it is blank, so a missing key never stores plaintext. The `*_enc` columns of `uploaded_documents`, `critique_findings`, `similarity_matches` and the document critique and similarity repositories use it. At startup `require_document_key` (called from the API lifespan) refuses to start when `DOCUMENT_UPLOADS_ENABLED`, `DOCUMENT_CRITIQUE_ENABLED` or `SIMILARITY_CHECKS_ENABLED` is true and the key is blank or not a valid Fernet key.
+`DOCUMENT_ENCRYPTION_KEY` (default empty, no fallback to another variable) is a Fernet key; a comma-separated list rotates keys (the first encrypts, all decrypt). `document_cipher()` builds a `MemoryEncryption` from it and raises `DocumentEncryptionUnavailable` when it is blank, so a missing key never stores plaintext. The TOTP secret (`users.totp_secret_enc`) uses the same cipher, so an enrolled account cannot sign in once its key is no longer in the list. The `*_enc` columns of `uploaded_documents`, `critique_findings`, `similarity_matches` and the document critique and similarity repositories use it. At startup `require_document_key` (called from the API lifespan) refuses to start when `DOCUMENT_UPLOADS_ENABLED`, `DOCUMENT_CRITIQUE_ENABLED` or `SIMILARITY_CHECKS_ENABLED` is true and the key is blank or not a valid Fernet key.
 
 ### Memory encryption
 
