@@ -2,22 +2,44 @@
 Checkpoint repository for workflow state management.
 
 Provides operations for workflow checkpoint storage and recovery.
+
+A checkpoint's tenant is its project's organization, so every read and the
+cleanup take an organization and join through the project to enforce it. A run
+named on a checkpoint must belong to that same organization.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any, TypeVar
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import Delete, Select, and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.models.db.research_project import ResearchProject
+from src.models.db.run_lifecycle import AgentRun
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 from src.repositories.base import BaseRepository
+from src.repositories.tenant_scope import normalize_organization_id
 
-if TYPE_CHECKING:
-    pass
+_QueryT = TypeVar("_QueryT", bound="Select[Any] | Delete")
+
+
+class CheckpointIdentityError(ValueError):
+    """The project, run and organization offered for a checkpoint disagree."""
+
+
+def _scoped(query: _QueryT, organization_id: UUID | str) -> _QueryT:
+    """Restrict a checkpoint query to the projects of one organization."""
+    return query.where(
+        WorkflowCheckpoint.project_id.in_(
+            select(ResearchProject.id).where(
+                ResearchProject.organization_id
+                == normalize_organization_id(organization_id)
+            )
+        )
+    )  # type: ignore[return-value]
 
 
 class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
@@ -31,7 +53,9 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         """Initialize checkpoint repository."""
         super().__init__(WorkflowCheckpoint, session)
 
-    async def get_latest(self, workflow_id: str) -> WorkflowCheckpoint | None:
+    async def get_latest(
+        self, workflow_id: str, *, organization_id: UUID | str
+    ) -> WorkflowCheckpoint | None:
         """
         Get the most recent checkpoint for a workflow.
 
@@ -41,18 +65,17 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         Returns:
             Latest checkpoint or None
         """
-        query = (
-            self.build_query()
-            .where(WorkflowCheckpoint.workflow_id == workflow_id)
-            .order_by(WorkflowCheckpoint.created_at.desc())
-            .limit(1)
+        query = _scoped(
+            self.build_query().where(WorkflowCheckpoint.workflow_id == workflow_id),
+            organization_id,
         )
+        query = query.order_by(WorkflowCheckpoint.created_at.desc()).limit(1)
 
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
     async def get_by_phase(
-        self, workflow_id: str, phase: str
+        self, workflow_id: str, phase: str, *, organization_id: UUID | str
     ) -> WorkflowCheckpoint | None:
         """
         Get checkpoint for a specific workflow phase.
@@ -64,22 +87,23 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         Returns:
             Checkpoint for phase or None
         """
-        query = (
-            self.build_query()
-            .where(
+        query = _scoped(
+            self.build_query().where(
                 and_(
                     WorkflowCheckpoint.workflow_id == workflow_id,
                     WorkflowCheckpoint.phase == phase,
                 )
-            )
-            .order_by(WorkflowCheckpoint.created_at.desc())
-            .limit(1)
+            ),
+            organization_id,
         )
+        query = query.order_by(WorkflowCheckpoint.created_at.desc()).limit(1)
 
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def cleanup_old(self, workflow_id: str, keep_count: int = 5) -> int:
+    async def cleanup_old(
+        self, workflow_id: str, keep_count: int = 5, *, organization_id: UUID | str
+    ) -> int:
         """
         Remove old checkpoints, keeping only the most recent ones.
 
@@ -91,12 +115,14 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             Number of checkpoints deleted
         """
         keep_query = (
-            select(WorkflowCheckpoint.id)
-            .where(
-                and_(
-                    WorkflowCheckpoint.workflow_id == workflow_id,
-                    WorkflowCheckpoint.deleted_at.is_(None),
-                )
+            _scoped(
+                select(WorkflowCheckpoint.id).where(
+                    and_(
+                        WorkflowCheckpoint.workflow_id == workflow_id,
+                        WorkflowCheckpoint.deleted_at.is_(None),
+                    )
+                ),
+                organization_id,
             )
             .order_by(WorkflowCheckpoint.created_at.desc())
             .limit(keep_count)
@@ -106,12 +132,15 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         keep_ids = list(result.scalars().all())
 
         # Delete older checkpoints
-        delete_stmt = delete(WorkflowCheckpoint).where(
-            and_(
-                WorkflowCheckpoint.workflow_id == workflow_id,
-                WorkflowCheckpoint.id.notin_(keep_ids),
-                WorkflowCheckpoint.deleted_at.is_(None),
-            )
+        delete_stmt = _scoped(
+            delete(WorkflowCheckpoint).where(
+                and_(
+                    WorkflowCheckpoint.workflow_id == workflow_id,
+                    WorkflowCheckpoint.id.notin_(keep_ids),
+                    WorkflowCheckpoint.deleted_at.is_(None),
+                )
+            ),
+            organization_id,
         )
 
         result = await self.session.execute(delete_stmt)
@@ -122,27 +151,37 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             raise RuntimeError("SQLAlchemy Result missing rowcount attribute")
         return int(rowcount)
 
-    async def get_recovery_point(self, project_id: UUID) -> WorkflowCheckpoint | None:
+    async def get_recovery_point(
+        self,
+        project_id: UUID,
+        *,
+        organization_id: UUID | str,
+        run_id: str | None = None,
+    ) -> WorkflowCheckpoint | None:
         """
         Find the best recovery checkpoint for a project.
 
         Args:
             project_id: Project ID
+            organization_id: Tenant the caller acts for
+            run_id: Restrict to this run's checkpoints; ``None`` also admits
+                checkpoints written before runs were linked
 
         Returns:
             Best recovery checkpoint or None
         """
-        query = (
-            self.build_query()
-            .where(
+        query = _scoped(
+            self.build_query().where(
                 and_(
                     WorkflowCheckpoint.project_id == project_id,
                     WorkflowCheckpoint.is_recoverable,
                 )
-            )
-            .order_by(WorkflowCheckpoint.created_at.desc())
-            .limit(1)
+            ),
+            organization_id,
         )
+        if run_id is not None:
+            query = query.where(WorkflowCheckpoint.run_id == run_id)
+        query = query.order_by(WorkflowCheckpoint.created_at.desc()).limit(1)
 
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
@@ -156,6 +195,8 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         checkpoint_type: str = "automatic",
         execution_metrics: dict[str, Any] | None = None,
         run_id: str | None = None,
+        *,
+        organization_id: UUID | str,
     ) -> WorkflowCheckpoint:
         """
         Create a new checkpoint.
@@ -168,10 +209,45 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             checkpoint_type: Type of checkpoint
             execution_metrics: Performance metrics
             run_id: Durable run the checkpoint belongs to, if any
+            organization_id: Tenant the caller acts for
 
         Returns:
             Created checkpoint
+
+        Raises:
+            CheckpointIdentityError: the project or run is not the caller's
+                organization's, or the run does not exist
         """
+        org = normalize_organization_id(organization_id)
+        project_org = await self.session.scalar(
+            select(ResearchProject.organization_id).where(
+                ResearchProject.id == project_id
+            )
+        )
+        if project_org != org:
+            raise CheckpointIdentityError(
+                "project is not in the checkpointing organization"
+            )
+        recovery_metadata: dict[str, Any] | None = None
+        if run_id is not None:
+            run = await self.session.scalar(
+                select(AgentRun).where(AgentRun.run_id == run_id)
+            )
+            if run is None or run.organization_id != org:
+                raise CheckpointIdentityError(
+                    "run is not in the checkpointing organization"
+                )
+            # Pins come from the durable run so a caller cannot assert them.
+            recovery_metadata = {
+                "identity": {
+                    "organization_id": str(org),
+                    "run_id": run_id,
+                    "workflow_definition_id": run.workflow_definition_id,
+                    "workflow_definition_version": run.workflow_definition_version,
+                    "routing_policy_id": run.routing_policy_id,
+                    "routing_policy_version": run.routing_policy_version,
+                }
+            }
         return await self.create(
             workflow_id=workflow_id,
             project_id=project_id,
@@ -180,11 +256,17 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             checkpoint_type=checkpoint_type,
             execution_metrics=execution_metrics,
             run_id=run_id,
+            recovery_metadata=recovery_metadata,
             is_recoverable=True,
         )
 
     async def list_checkpoints(
-        self, workflow_id: str, limit: int = 10, phase: str | None = None
+        self,
+        workflow_id: str,
+        limit: int = 10,
+        phase: str | None = None,
+        *,
+        organization_id: UUID | str,
     ) -> list[WorkflowCheckpoint]:
         """
         List recent checkpoints for a workflow.
@@ -197,7 +279,10 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         Returns:
             List of checkpoints
         """
-        query = self.build_query().where(WorkflowCheckpoint.workflow_id == workflow_id)
+        query = _scoped(
+            self.build_query().where(WorkflowCheckpoint.workflow_id == workflow_id),
+            organization_id,
+        )
 
         if phase:
             query = query.where(WorkflowCheckpoint.phase == phase)
@@ -208,7 +293,7 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         return list(result.scalars().all())
 
     async def restore_from_checkpoint(
-        self, checkpoint_id: UUID
+        self, checkpoint_id: UUID, *, organization_id: UUID | str
     ) -> dict[str, Any] | None:
         """
         Restore workflow state from checkpoint.
@@ -219,7 +304,13 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         Returns:
             Checkpoint data for restoration
         """
-        checkpoint = await self.get(checkpoint_id)
+        result = await self.session.execute(
+            _scoped(
+                self.build_query().where(WorkflowCheckpoint.id == checkpoint_id),
+                organization_id,
+            )
+        )
+        checkpoint = result.scalar_one_or_none()
 
         if not checkpoint or not checkpoint.is_recoverable:
             return None
@@ -241,6 +332,9 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         checkpoint_data: dict[str, Any],
         phase: str,
         error_info: dict[str, Any],
+        *,
+        organization_id: UUID | str,
+        run_id: str | None = None,
     ) -> WorkflowCheckpoint:
         """
         Create an error checkpoint for recovery.
@@ -261,6 +355,8 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             checkpoint_data=checkpoint_data,
             phase=phase,
             checkpoint_type="error",
+            run_id=run_id,
+            organization_id=organization_id,
         )
 
         checkpoint.mark_as_error_checkpoint(error_info)
@@ -270,7 +366,11 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         return checkpoint
 
     async def get_checkpoint_statistics(
-        self, workflow_id: str | None = None, project_id: UUID | None = None
+        self,
+        workflow_id: str | None = None,
+        project_id: UUID | None = None,
+        *,
+        organization_id: UUID | str,
     ) -> dict[str, Any]:
         """
         Get checkpoint statistics.
@@ -282,8 +382,9 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         Returns:
             Statistics dictionary
         """
-        base_query = select(WorkflowCheckpoint).where(
-            WorkflowCheckpoint.deleted_at.is_(None)
+        base_query = _scoped(
+            select(WorkflowCheckpoint).where(WorkflowCheckpoint.deleted_at.is_(None)),
+            organization_id,
         )
 
         if workflow_id:
@@ -299,10 +400,13 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         total = result.scalar() or 0
 
         # Checkpoints by type
-        type_query = select(
-            WorkflowCheckpoint.checkpoint_type,
-            func.count(WorkflowCheckpoint.id).label("count"),
-        ).where(WorkflowCheckpoint.deleted_at.is_(None))
+        type_query = _scoped(
+            select(
+                WorkflowCheckpoint.checkpoint_type,
+                func.count(WorkflowCheckpoint.id).label("count"),
+            ).where(WorkflowCheckpoint.deleted_at.is_(None)),
+            organization_id,
+        )
 
         if workflow_id:
             type_query = type_query.where(WorkflowCheckpoint.workflow_id == workflow_id)
@@ -315,9 +419,13 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         type_distribution = {row.checkpoint_type: row.count for row in result}
 
         # Checkpoints by phase
-        phase_query = select(
-            WorkflowCheckpoint.phase, func.count(WorkflowCheckpoint.id).label("count")
-        ).where(WorkflowCheckpoint.deleted_at.is_(None))
+        phase_query = _scoped(
+            select(
+                WorkflowCheckpoint.phase,
+                func.count(WorkflowCheckpoint.id).label("count"),
+            ).where(WorkflowCheckpoint.deleted_at.is_(None)),
+            organization_id,
+        )
 
         if workflow_id:
             phase_query = phase_query.where(
@@ -332,11 +440,14 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         phase_distribution = {row.phase: row.count for row in result}
 
         # Recoverable checkpoints
-        recoverable_query = select(func.count(WorkflowCheckpoint.id)).where(
-            and_(
-                WorkflowCheckpoint.deleted_at.is_(None),
-                WorkflowCheckpoint.is_recoverable,
-            )
+        recoverable_query = _scoped(
+            select(func.count(WorkflowCheckpoint.id)).where(
+                and_(
+                    WorkflowCheckpoint.deleted_at.is_(None),
+                    WorkflowCheckpoint.is_recoverable,
+                )
+            ),
+            organization_id,
         )
 
         if workflow_id:

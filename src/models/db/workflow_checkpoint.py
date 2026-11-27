@@ -164,9 +164,11 @@ class WorkflowCheckpoint(BaseModel):
         self.checkpoint_type = "error"
         self.is_recoverable = True
 
-        if self.recovery_metadata is None:
-            self.recovery_metadata = {}
-        self.recovery_metadata["error_info"] = error_info
+        # Reassign: the JSON column does not track in-place mutation.
+        self.recovery_metadata = {
+            **(self.recovery_metadata or {}),
+            "error_info": error_info,
+        }
 
     @property
     def is_automatic(self) -> bool:

@@ -734,6 +734,7 @@ async def _seed_checkpoint(session: AsyncSession, project_id: uuid.UUID) -> None
             "final_output": {"secret": "org A resumed output"},
         },
         phase="done",
+        organization_id=ORG_A,
     )
     await session.commit()
 

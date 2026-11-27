@@ -581,6 +581,14 @@ class DirectExecutionService:
         """
         if not self.session_factory:
             return
+        if execution_status.organization_id is None:
+            # A checkpoint's tenant is its project's; with no owner recorded
+            # there is nothing to check it against.
+            logger.warning(
+                "Skipping checkpoint for an execution with no organization",
+                execution_id=execution_status.execution_id,
+            )
+            return
 
         try:
             async with self.session_factory() as session:
@@ -615,6 +623,7 @@ class DirectExecutionService:
                     checkpoint_type="automatic",
                     execution_metrics=execution_metrics,
                     run_id=execution_status.run_id,
+                    organization_id=execution_status.organization_id,
                 )
                 await session.commit()
 
@@ -624,7 +633,7 @@ class DirectExecutionService:
                     phase=phase,
                 )
 
-        except (SQLAlchemyError, OSError) as e:
+        except (SQLAlchemyError, OSError, ValueError) as e:
             logger.warning(
                 "Failed to create checkpoint (degrading gracefully)",
                 execution_id=execution_status.execution_id,
@@ -2755,7 +2764,9 @@ class DirectExecutionService:
                 return None
 
             repository = CheckpointRepository(session)
-            checkpoint = await repository.get_recovery_point(project_id)
+            checkpoint = await repository.get_recovery_point(
+                project_id, organization_id=organization_id
+            )
 
             if not checkpoint:
                 logger.info(
@@ -2765,7 +2776,9 @@ class DirectExecutionService:
                 return None
 
             # Restore checkpoint data
-            restored_data = await repository.restore_from_checkpoint(checkpoint.id)
+            restored_data = await repository.restore_from_checkpoint(
+                checkpoint.id, organization_id=organization_id
+            )
 
             if not restored_data:
                 logger.warning(
