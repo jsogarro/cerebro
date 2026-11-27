@@ -24,6 +24,10 @@ from src.services.prompts.agent_prompts import generate_comparative_agent_prompt
 
 logger = get_logger()
 
+# A coefficient on a handful of points looks authoritative and is not; the
+# owner-set floor stays until tabular ingestion lands.
+MIN_CORRELATION_N = 10
+
 
 class ComparativeAnalysisAgent(LLMWorkerAgentBase):
     """
@@ -524,10 +528,10 @@ class ComparativeAnalysisAgent(LLMWorkerAgentBase):
         if missing:
             raise ValueError(f"comparison_data has no series for criteria {missing}")
         x, y = (comparison_data[c] for c in criteria[:2])
-        if len(x) != len(y) or len(x) < 2:
+        if len(x) != len(y) or len(x) < MIN_CORRELATION_N:
             raise ValueError(
-                "comparison_data series for correlation must have equal length >= 2, "
-                f"got {len(x)} and {len(y)}"
+                "comparison_data series for correlation must have equal length and "
+                f"at least {MIN_CORRELATION_N} points, got {len(x)} and {len(y)}"
             )
         return x, y
 
