@@ -19,7 +19,7 @@ Callers authenticate with RS256-signed JWTs issued by the `/api/v1/auth` routes 
 | Postgres row-level security policies | Active | `tenant_isolation_<table>` policies, created on Postgres only | `alembic/versions/` (see [Tenancy](#tenancy)) |
 | User data erasure | Active | `DELETE /api/v1/users/{user_id}/gdpr` | `src/api/routes/users.py` (`delete_user_gdpr`) |
 | Memory-tier purge during erasure | Not wired | `app.state.memory_system` | `src/api/routes/users.py` (`get_memory_system`) |
-| Role, permission and superuser dependencies | Not wired | `require_roles`, `require_permissions`, `require_superuser` | `src/middleware/auth_middleware.py` |
+| Superuser dependency | Active | `require_superuser()` on the `/admin` router | `src/middleware/auth_middleware.py`, `src/api/routes/admin_security.py` |
 | MFA, OAuth, session limits, breach-check setting | Not wired | settings only | `src/core/config.py` (`Settings`) |
 
 ## Request authentication
@@ -97,7 +97,7 @@ All routes are in `src/api/auth/auth_router.py`, mounted at `/api/v1/auth`.
 
 ## Roles and permissions
 
-> **Not wired.** `require_roles`, `require_permissions` and `require_superuser` are defined in `src/middleware/auth_middleware.py`; `src/middleware/__init__.py` re-exports `require_roles` and `require_permissions` but not `require_superuser`. No route depends on them. The module also defines `optional_user` and a second class named `RateLimitMiddleware` that nothing imports; the rate limiter that runs is the one in `src/api/middleware/rate_limiter.py`.
+`require_superuser()` in `src/middleware/auth_middleware.py` guards the `/admin` router in `src/api/routes/admin_security.py`; it returns `403` unless the user record has `is_superuser`. No other route checks roles or permissions.
 
 Tokens carry `roles` and `permissions` lists (see [Auth endpoints](#auth-endpoints) for what login and register put in them). Most routes require authentication only. The checks that read the user record are:
 
