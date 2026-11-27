@@ -96,7 +96,7 @@ Request defaults on the router routes are `max_tokens=2000` and `temperature=0.7
 
 - **Redaction.** `redact_pii` (`src/core/pii_redactor.py`) replaces e-mail addresses, phone numbers, US social security numbers and card-like digit runs with placeholders. Among providers, only `OpenRouterProvider` uses it, on the error text sent to a Langfuse span. Prompts and responses are not redacted on any provider call.
 - **Metrics.** Every provider's `_postprocess_response` calls `record_llm_call`, which updates the Prometheus metrics `llm_call_duration_seconds`, `llm_tokens_total` and `llm_cost_usd_total` and logs `llm_call_completed`. Calls made directly through `GeminiService` are not recorded by it. Per-request cost drift (`llm_request_cost_drift_ratio`, `llm_cost_drift_events_total`) is computed from the same call records.
-- **Langfuse.** `OpenRouterProvider.generate` opens a generation span only when `request.metadata["_langfuse_trace"]` holds a parent observation. No code in `src` sets that key.
+- **Langfuse.** `invoke_model` opens one `model_call` generation per real attempt when its context carries a `trace_parent` (metadata and usage only; see [model invocation contract](16-model-invocation-contract.md)); no production owner sets one yet. `OpenRouterProvider.generate` opens a generation span only when `request.metadata["_langfuse_trace"]` holds a parent observation. No code in `src` sets that key.
 
 > **Not wired.** Provider-call Langfuse spans exist in `OpenRouterProvider.generate` through `trace_provider_call`. Nothing populates the `_langfuse_trace` metadata key they require, so no provider-call spans are produced even with `LANGFUSE_ENABLED=true`.
 
