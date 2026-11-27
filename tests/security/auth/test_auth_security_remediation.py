@@ -201,7 +201,7 @@ def test_refresh_is_public_and_works_without_access_bearer() -> None:
         expires_in=900,
     )
     service = SimpleNamespace(
-        validate_token=AsyncMock(return_value=SimpleNamespace(sub="user-1")),
+        validate_token=AsyncMock(return_value=SimpleNamespace(sub="user-1", mfa=False)),
         refresh_tokens=AsyncMock(return_value=expected),
     )
     # Refresh re-reads the token's user and refuses missing or inactive ones.
@@ -209,6 +209,7 @@ def test_refresh_is_public_and_works_without_access_bearer() -> None:
         id="user-1",
         email="u@example.com",
         is_active=True,
+        totp_enabled=False,
         organization_id="org-1",
         role=None,
         is_superuser=False,

@@ -30,6 +30,7 @@ class TokenPayload(BaseModel):
     iat: datetime = Field(..., description="Issued at timestamp")
     exp: datetime = Field(..., description="Expiration timestamp")
     device_id: str | None = Field(None, description="Device fingerprint")
+    mfa: bool = Field(False, description="Session passed a second factor")
 
     def has_role(self, role: str) -> bool:
         """Check if user has specific role."""
@@ -144,6 +145,9 @@ class LoginRequest(BaseModel):
     email: EmailStr = Field(..., description="User email address")
     password: str = Field(..., min_length=12, description="User password")
     device_id: str | None = Field(None, description="Device fingerprint")
+    totp_code: str | None = Field(
+        None, description="TOTP code or recovery code; required once MFA is enrolled"
+    )
     remember_me: bool = Field(
         default=False,
         description="Deprecated: extended sessions are not supported; true is rejected",
@@ -185,6 +189,25 @@ class LoginRequest(BaseModel):
             }
         }
     )
+
+
+class MfaCodeRequest(BaseModel):
+    """A TOTP code, or a recovery code where the route accepts one."""
+
+    code: str = Field(..., min_length=6, max_length=32)
+
+
+class MfaEnrollResponse(BaseModel):
+    """The pending secret and the URI an authenticator app scans."""
+
+    secret: str
+    provisioning_uri: str
+
+
+class MfaActivateResponse(BaseModel):
+    """Recovery codes, shown once; only their hashes are kept."""
+
+    recovery_codes: list[str]
 
 
 class RegisterRequest(BaseModel):

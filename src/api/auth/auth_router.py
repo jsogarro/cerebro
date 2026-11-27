@@ -20,6 +20,7 @@ from src.api.middleware.rate_limiter import (
     RedisRateLimitStore,
     ResilientRateLimitStore,
 )
+from src.auth import mfa
 from src.auth.jwt_service import (
     JWTService,
     JWTServiceUnavailableError,
@@ -29,6 +30,9 @@ from src.auth.models import (
     AuthResponse,
     ChangePasswordRequest,
     LoginRequest,
+    MfaActivateResponse,
+    MfaCodeRequest,
+    MfaEnrollResponse,
     PasswordResetConfirm,
     PasswordResetRequest,
     RefreshRequest,
@@ -43,6 +47,7 @@ from src.auth.password_service import (
 )
 from src.auth.pat_service import user_claims
 from src.core.config import settings
+from src.core.memory_encryption import DocumentEncryptionUnavailable
 from src.middleware.auth_middleware import (
     get_current_token,
     get_current_user,
@@ -134,18 +139,25 @@ def _claims_for(user: User) -> tuple[list[str], list[str]]:
     return user_claims(user)
 
 
-async def _current_identity(db: AsyncSession, user_id: str) -> RefreshIdentity:
+async def _current_identity(
+    db: AsyncSession, user_id: str, mfa_verified: bool
+) -> RefreshIdentity:
     """Resolve the claims a refresh may mint, from storage.
 
     A storage failure is unavailability, never a reason to mint from what the
     old token said. Refresh does not provision an organization: an account
-    without one has lost its tenant and must sign in again.
+    without one has lost its tenant and must sign in again. A session that
+    never passed a second factor cannot outlive the account enrolling one.
     """
     try:
         user = await UserRepository(db).get(user_id)
     except Exception as exc:
         raise JWTServiceUnavailableError("Account store unavailable") from exc
     if user is None or not user.is_active or user.organization_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        )
+    if user.totp_enabled and not mfa_verified:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
         )
@@ -324,6 +336,17 @@ async def login(
             status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled"
         )
 
+    if user.totp_enabled and not (
+        request.totp_code
+        and await mfa.verify_second_factor(db, user, request.totp_code)
+    ):
+        req.state.audit_subject_id = user.id
+        logger.warning("Failed MFA code at login", ip=client_ip(req))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="A valid MFA code is required",
+        )
+
     # Update login info. Accounts created before the tenant boundary
     # existed have no organization; give them one here so the token they
     # are about to receive can carry the claim every scoped surface needs.
@@ -346,6 +369,7 @@ async def login(
         permissions=permissions,
         device_id=device_id,
         organization_id=str(organization_id),
+        mfa_verified=user.totp_enabled,
     )
 
     logger.info(
@@ -356,6 +380,105 @@ async def login(
     )
 
     return AuthResponse(user=UserResponse.from_orm(user), tokens=tokens)
+
+
+async def _checked_mfa_code(
+    db: AsyncSession,
+    user: User,
+    code: str,
+    req: Request,
+    throttle: LoginThrottle,
+    *,
+    totp_only: bool = False,
+) -> None:
+    """Throttle and check a code on an MFA management route, or raise."""
+    key = f"mfa:{user.id}"
+    retry_after = await throttle.begin(key)
+    if retry_after:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed MFA attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    valid = (
+        await mfa.consume_totp(db, user, code.strip())
+        if totp_only
+        else await mfa.verify_second_factor(db, user, code)
+    )
+    if not valid:
+        req.state.audit_subject_id = user.id
+        logger.warning("Failed MFA code", ip=client_ip(req))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid MFA code"
+        )
+    await throttle.clear(key)
+
+
+@router.post("/mfa/enroll", response_model=MfaEnrollResponse)
+async def mfa_enroll(
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> MfaEnrollResponse:
+    """Generate a pending TOTP secret; it takes effect once a code verifies it."""
+    if user.totp_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="MFA is already enabled"
+        )
+    try:
+        secret = mfa.new_secret()
+        user.totp_secret_enc = mfa.encrypt_secret(secret)
+    except DocumentEncryptionUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MFA secret storage unavailable",
+        ) from exc
+    user.totp_last_step = None
+    await db.commit()
+    return MfaEnrollResponse(
+        secret=secret, provisioning_uri=mfa.provisioning_uri(secret, user.email)
+    )
+
+
+@router.post("/mfa/verify", response_model=MfaActivateResponse)
+async def mfa_verify(
+    request: MfaCodeRequest,
+    req: Request,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    throttle: LoginThrottle = Depends(get_login_throttle),
+) -> MfaActivateResponse:
+    """Activate MFA with a code from the pending secret and issue recovery codes."""
+    if user.totp_enabled or user.totp_secret_enc is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="No MFA enrolment is pending"
+        )
+    await _checked_mfa_code(db, user, request.code, req, throttle, totp_only=True)
+    codes = mfa.new_recovery_codes()
+    await mfa.store_recovery_codes(db, user, codes)
+    user.totp_enabled = True
+    await db.commit()
+    return MfaActivateResponse(recovery_codes=codes)
+
+
+@router.post("/mfa/disable", status_code=status.HTTP_204_NO_CONTENT)
+async def mfa_disable(
+    request: MfaCodeRequest,
+    req: Request,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    throttle: LoginThrottle = Depends(get_login_throttle),
+) -> None:
+    """Turn MFA off; a valid TOTP or recovery code is required."""
+    if not user.totp_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="MFA is not enabled"
+        )
+    await _checked_mfa_code(db, user, request.code, req, throttle)
+    await mfa.store_recovery_codes(db, user, [])
+    user.totp_enabled = False
+    user.totp_secret_enc = None
+    user.totp_last_step = None
+    await db.commit()
 
 
 @router.post("/refresh", response_model=TokenPair)
@@ -374,7 +497,7 @@ async def refresh_tokens(
         refresh_payload = await jwt_service.validate_token(
             request.refresh_token, token_type="refresh"
         )
-        identity = await _current_identity(db, refresh_payload.sub)
+        identity = await _current_identity(db, refresh_payload.sub, refresh_payload.mfa)
         new_tokens = await jwt_service.refresh_tokens(
             request.refresh_token, identity=identity, device_id=request.device_id
         )
