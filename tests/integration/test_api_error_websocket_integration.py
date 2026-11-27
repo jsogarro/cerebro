@@ -172,32 +172,25 @@ class TestWebSocketConnections:
         self, authenticated_client: AsyncClient
     ) -> None:
         """Test WebSocket authentication."""
-        from httpx_ws import aconnect_ws
+        from httpx_ws import WebSocketDisconnect, WebSocketUpgradeError, aconnect_ws
+
+        rejected = (WebSocketUpgradeError, WebSocketDisconnect)
 
         # Test 1: Missing JWT should fail
-        try:
+        with pytest.raises(rejected):
             async with aconnect_ws(
                 "ws://test/ws",
                 authenticated_client,
             ) as ws:
-                # Should not reach here
                 await ws.send_json({"type": "heartbeat_response"})
-                raise AssertionError("Expected auth failure but connection succeeded")
-        except Exception:
-            # Expected — no JWT provided
-            pass
 
         # Test 2: Invalid JWT should fail
-        try:
+        with pytest.raises(rejected):
             async with aconnect_ws(
                 "ws://test/ws?token=invalid-jwt-token",
                 authenticated_client,
             ) as ws:
                 await ws.send_json({"type": "heartbeat_response"})
-                raise AssertionError("Expected auth failure but connection succeeded")
-        except Exception:
-            # Expected — invalid JWT
-            pass
 
         # Test 3: Valid JWT should succeed
         auth_header = authenticated_client.headers.get("Authorization")

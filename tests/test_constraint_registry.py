@@ -704,7 +704,7 @@ class TestBaseSupervisorConstraintBlock:
                         context="routing strategy: quality_focused",
                         source_type="USER_INPUT",
                     )
-                except Exception:
+                except ValueError:
                     pass
 
             mock_reg_cls.assert_called_once_with(
@@ -734,7 +734,7 @@ class TestBaseSupervisorConstraintBlock:
             if config.ENABLE_CONSTRAINT_PINNING:
                 try:
                     raise RuntimeError("simulated registry failure")
-                except Exception:
+                except RuntimeError:
                     pass  # swallowed — task continues
         except Exception:
             task_failed = True

@@ -284,6 +284,41 @@ class TestProjectCommands:
         assert "Creating 1 project(s)" in result.output
         assert "Summary: 1 created, 0 failed" in result.output
 
+    @patch("src.cli.commands.projects.ResearchAPIClient")
+    def test_create_from_file_counts_api_failures(
+        self, mock_client_class, runner, tmp_path
+    ):
+        test_file = tmp_path / "projects.yaml"
+        test_file.write_text(
+            yaml.dump([{"title": "T", "query_text": "q", "domains": ["AI"]}])
+        )
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.create_project.side_effect = APIError(500, "boom")
+        mock_client_class.return_value = mock_client
+
+        result = runner.invoke(cli, ["projects", "create", "--file", str(test_file)])
+
+        assert "Summary: 0 created, 1 failed" in result.output
+
+    @patch("src.cli.commands.projects.ResearchAPIClient")
+    def test_create_from_file_unexpected_error_aborts_batch(
+        self, mock_client_class, runner, tmp_path
+    ):
+        test_file = tmp_path / "projects.yaml"
+        test_file.write_text(
+            yaml.dump([{"title": "T", "query_text": "q", "domains": ["AI"]}])
+        )
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.create_project.side_effect = RuntimeError("bug")
+        mock_client_class.return_value = mock_client
+
+        result = runner.invoke(cli, ["projects", "create", "--file", str(test_file)])
+
+        assert "Summary" not in result.output
+        assert result.exit_code != 0
+
 
 class TestCLIConfig:
     """Test CLI configuration."""

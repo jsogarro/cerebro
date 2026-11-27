@@ -197,20 +197,15 @@ class MigrationManager:
         Returns:
             True if migrations are valid
         """
-        try:
-            status = self.check_migration_status()
+        status = self.check_migration_status()
 
-            if status["pending_migrations"]:
-                logger.info(
-                    "pending_migrations_found",
-                    count=len(status["pending_migrations"]),
-                )
+        if status["pending_migrations"]:
+            logger.info(
+                "pending_migrations_found",
+                count=len(status["pending_migrations"]),
+            )
 
-            return True
-
-        except Exception as e:
-            logger.error("migration_verification_failed", error=str(e))
-            return False
+        return True
 
 
 # Convenience functions

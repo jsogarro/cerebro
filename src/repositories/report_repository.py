@@ -584,7 +584,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
                 try:
                     shutil.rmtree(storage_path)
                     logger.info(f"Deleted files for report {report_id}")
-                except Exception as e:
+                except OSError as e:
                     logger.error(f"Failed to delete files for report {report_id}: {e}")
 
         return deleted_count, deleted_ids
@@ -825,7 +825,7 @@ class ReportFormatRepository(BaseRepository[ReportFormat]):
                 if format_obj.file_path and os.path.exists(format_obj.file_path):
                     try:
                         os.unlink(format_obj.file_path)
-                    except Exception as e:
+                    except OSError as e:
                         logger.error(
                             f"Failed to delete format file {format_obj.file_path}: {e}"
                         )

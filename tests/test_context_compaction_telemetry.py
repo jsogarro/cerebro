@@ -90,13 +90,13 @@ class TestTelemetryModule:
         assert result is True
 
     def test_telemetry_enabled_exception_returns_false(self):
-        """Any exception in settings access must return False safely."""
+        """A settings-access failure (bad config, circular import) returns False."""
 
         with patch("src.core.telemetry.telemetry_enabled", side_effect=RuntimeError):
             pass  # Just verify no import-time error
 
         # Patch get_settings to raise
-        with patch("src.core.config.get_settings", side_effect=RuntimeError("boom")):
+        with patch("src.core.config.get_settings", side_effect=ValueError("boom")):
             import src.core.telemetry as tel_mod
 
             result = tel_mod.telemetry_enabled()

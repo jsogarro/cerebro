@@ -43,7 +43,7 @@ async def redis_store():
     probe = redis.from_url(url, socket_connect_timeout=0.5)
     try:
         await probe.ping()
-    except Exception:
+    except (redis.RedisError, OSError):
         pytest.skip(f"no Redis at {url}")
     finally:
         await probe.aclose()

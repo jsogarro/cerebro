@@ -1,5 +1,6 @@
 """cleanup_old_reports must not delete files for rows that were not committed."""
 
+import shutil
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 from uuid import uuid4
@@ -84,4 +85,30 @@ async def test_commit_failure_keeps_all_files(tmp_path):
     with patch.object(session, "commit", boom), pytest.raises(RuntimeError):
         await repo.cleanup_old_reports(dry_run=False, organization_id=org)
     assert all(d.exists() for d in dirs)
+    await session.close()
+
+
+async def test_unremovable_directory_does_not_stop_cleanup(tmp_path):
+    session, repo, org, dirs = await _setup(tmp_path)
+    real = shutil.rmtree
+
+    def deny_first(path, *a, **kw):
+        if str(path) == str(dirs[0]):
+            raise PermissionError("locked")
+        return real(path, *a, **kw)
+
+    with patch("shutil.rmtree", deny_first):
+        count, _ = await repo.cleanup_old_reports(dry_run=False, organization_id=org)
+    assert count == 3
+    assert dirs[0].exists() and not dirs[1].exists() and not dirs[2].exists()
+    await session.close()
+
+
+async def test_unexpected_file_removal_error_propagates(tmp_path):
+    session, repo, org, _ = await _setup(tmp_path)
+    with (
+        patch("shutil.rmtree", side_effect=RuntimeError("bug")),
+        pytest.raises(RuntimeError, match="bug"),
+    ):
+        await repo.cleanup_old_reports(dry_run=False, organization_id=org)
     await session.close()

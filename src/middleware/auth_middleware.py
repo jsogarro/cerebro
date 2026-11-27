@@ -473,7 +473,7 @@ def optional_user() -> Callable[..., Any]:
 
             return user if user and user.is_active else None
 
-        except Exception:
+        except (JWTError, JWTServiceUnavailableError):
             return None
 
     return optional_user_getter

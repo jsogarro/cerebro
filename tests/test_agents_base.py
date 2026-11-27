@@ -202,7 +202,7 @@ class TestBaseAgent:
             async def execute(self, task: AgentTask) -> AgentResult:
                 try:
                     raise ValueError("Simulated error")
-                except Exception as e:
+                except ValueError as e:
                     return self.handle_error(task, e)
 
             async def validate_result(self, result: AgentResult) -> bool:

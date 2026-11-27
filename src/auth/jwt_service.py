@@ -541,7 +541,7 @@ class JWTService:
             logger.info("Token revoked", jti=jti)
             return True
 
-        except Exception as e:
+        except (JWTError, redis.RedisError) as e:
             logger.error("Failed to revoke token", error=str(e))
             return False
 

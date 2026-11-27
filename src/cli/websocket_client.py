@@ -20,7 +20,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.progress import Progress, TaskID
 from structlog import get_logger
-from websockets.exceptions import ConnectionClosed, InvalidStatus
+from websockets.exceptions import ConnectionClosed, InvalidStatus, WebSocketException
 from websockets.legacy.client import WebSocketClientProtocol
 
 from src.cli.config import config
@@ -123,7 +123,7 @@ class CLIWebSocketClient:
                 print_error(f"Connection failed with status {status_code}")
             return False
 
-        except Exception as e:
+        except (OSError, WebSocketException) as e:
             if self.verbose:
                 print_error(f"WebSocket connection failed: {e}")
             else:
@@ -139,7 +139,7 @@ class CLIWebSocketClient:
             try:
                 await self.websocket.close()
                 self._log("WebSocket connection closed")
-            except Exception as e:
+            except (OSError, WebSocketException) as e:
                 self._log(f"Error closing WebSocket: {e}")
             finally:
                 self.websocket = None
@@ -153,7 +153,7 @@ class CLIWebSocketClient:
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
                 await self.websocket.send(serialize_to_str(heartbeat_msg))
-            except Exception as e:
+            except (OSError, WebSocketException) as e:
                 self._log(f"Failed to send heartbeat: {e}")
 
     async def stream_progress(
@@ -306,7 +306,7 @@ class CLIWebSocketClient:
                     except json.JSONDecodeError as e:
                         self._log(f"Invalid JSON received: {e}")
 
-                    except Exception as e:
+                    except (ValueError, KeyError, TypeError) as e:
                         self._log(f"Error processing message: {e}")
 
         except ConnectionClosed:
@@ -324,7 +324,7 @@ class CLIWebSocketClient:
         except KeyboardInterrupt:
             print_info("Stopped streaming")
 
-        except Exception as e:
+        except (OSError, WebSocketException) as e:
             if self.verbose:
                 print_error(f"Streaming error: {e}")
             else:
@@ -385,7 +385,7 @@ class CLIWebSocketClient:
 
                 except json.JSONDecodeError:
                     continue
-                except Exception as e:
+                except (ValueError, KeyError, TypeError) as e:
                     if self.verbose:
                         self._log(f"Error processing log message: {e}")
 

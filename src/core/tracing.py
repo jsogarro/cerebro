@@ -90,7 +90,7 @@ def _tracing_enabled() -> bool:
         from src.core.config import get_settings
 
         return bool(get_settings().LANGFUSE_ENABLED)
-    except Exception:
+    except (ImportError, ValueError, AttributeError):
         return False
 
 
