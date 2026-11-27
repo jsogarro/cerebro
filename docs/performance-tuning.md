@@ -40,7 +40,7 @@ Both service counters are per process and live in memory. Each container admits 
 | `max_overflow` | 10 | Extra connections allowed beyond `pool_size` |
 | `pool_timeout` | 30 | Seconds a request waits for a free connection |
 
-The engine also sets `pool_pre_ping=True` and `pool_recycle=3600` and uses `AsyncAdaptedQueuePool` (SQLite URLs use `NullPool`). Because each Uvicorn worker builds its own engine, one container can hold up to 30 connections; Postgres `max_connections` has to cover that total across all replicas. To change the pool, pass arguments to `init_db(...)` in `lifespan`; there is no setting for them. `DatabaseManager.get_pool_status` in the same module reports pool size and checked-in connections.
+The engine also sets `pool_pre_ping=True` and `pool_recycle=3600` and uses `AsyncAdaptedQueuePool` (SQLite URLs use `NullPool`). Because each Uvicorn worker builds its own engine, one container can hold up to 30 connections; Postgres `max_connections` has to cover that total across all replicas. To change the pool, pass arguments to `init_db(...)` in `lifespan`; there is no setting for them.
 
 ## Model calls
 

@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 import redis.asyncio as redis
-from sqlalchemy.exc import OperationalError
 from websockets.exceptions import ConnectionClosedError
 
 from src.auth.jwt_service import JWTService
@@ -22,7 +21,6 @@ from src.cli.websocket_client import CLIWebSocketClient
 from src.core import telemetry, tracing
 from src.mcp.academic_filters import AcademicSearchFilters
 from src.mcp.tools.academic_search_tool import AcademicSearchTool
-from src.models.db.session import DatabaseManager
 from src.prompts.manager import PromptManager
 
 
@@ -163,24 +161,6 @@ class TestAcademicSearchBackends:
     ) -> None:
         tool.client.get.return_value = SimpleNamespace(status_code=200, text="<oops")
         assert await tool._search_arxiv("q", 5, AcademicSearchFilters()) == []
-
-
-class TestDatabase:
-    async def test_connection_failure_reports_false(self) -> None:
-        engine = MagicMock()
-        engine.begin.side_effect = OSError("refused")
-        assert await DatabaseManager(engine).check_connection() is False
-
-    async def test_unexpected_connection_check_error_propagates(self) -> None:
-        engine = MagicMock()
-        engine.begin.side_effect = RuntimeError("bug")
-        with pytest.raises(RuntimeError, match="bug"):
-            await DatabaseManager(engine).check_connection()
-
-    async def test_slow_query_diagnostics_absent_extension_is_empty(self) -> None:
-        engine = MagicMock()
-        engine.begin.side_effect = OperationalError("select", {}, Exception("nope"))
-        assert await DatabaseManager(engine).get_slow_queries() == []
 
 
 class TestPromptManager:

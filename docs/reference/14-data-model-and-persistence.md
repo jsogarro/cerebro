@@ -8,7 +8,6 @@ The persistence layer is SQLAlchemy 2.1 over an async engine (`asyncpg` on Postg
 |---|---|---|---|
 | Async engine and session factory | Active | `init_db()` in the API lifespan | `src/models/db/session.py` (`init_db`, `get_session_factory`) |
 | Request-scoped session | Active | `Depends(get_session)` | `src/models/db/session.py` (`get_session`) |
-| `DatabaseManager` | Not wired | none | `src/models/db/session.py` (`DatabaseManager`) |
 | Soft-delete base model | Active | every `BaseModel` table | `src/models/db/base.py` (`BaseModel`) |
 | Append-only guard (ORM and PostgreSQL trigger) | Active | four durable tables | `src/models/db/append_only.py` (`register_append_only`) |
 | Tenant filter in repositories | Active | every repository read and write | `src/repositories/base.py` (`BaseRepository.apply_organization_scope`), `src/repositories/tenant_scope.py` (`scope_to_organization`) |
@@ -26,8 +25,6 @@ The persistence layer is SQLAlchemy 2.1 over an async engine (`asyncpg` on Postg
 - `get_session_factory()` returns the factory and raises `RuntimeError("Database not initialized. Call init_db() first.")` before `init_db()` has run. The durable execution service, the outbox relay and the run event streams obtain sessions through this factory.
 - `get_session()` is the FastAPI dependency. It yields a session, commits when the request handler returns without raising, rolls back and re-raises on an exception and closes the session.
 - `close_db()` disposes the engine and clears both module-level references.
-
-`DatabaseManager` and `get_db_manager()` are defined in the same module and have no caller elsewhere under `src/`. `DatabaseManager` offers connection checks, pool status, table sizes (`pg_tables`), slow queries (`pg_stat_statements`), index analysis and `VACUUM ANALYZE`.
 
 ## Model base classes
 
