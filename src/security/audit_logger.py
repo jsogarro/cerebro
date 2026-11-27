@@ -612,7 +612,6 @@ class AuditLogger:
             user_id=log_entry.get("user_id"),
             ip_address=log_entry.get("ip_address"),
             evidence={"audit_log": _json_safe_value(log_entry)},
-            auto_remediate=severity == AlertSeverity.CRITICAL,
         )
 
         if self.session_factory is not None:

@@ -327,7 +327,6 @@ class SecurityAlert(BaseModel):
         user_id: str | None = None,
         ip_address: str | None = None,
         evidence: dict[str, Any] | None = None,
-        auto_remediate: bool = False,
         **kwargs: Any,
     ) -> "SecurityAlert":
         """
@@ -341,7 +340,6 @@ class SecurityAlert(BaseModel):
             user_id: Affected user ID
             ip_address: Source IP address
             evidence: Supporting evidence
-            auto_remediate: Whether to auto-remediate
             **kwargs: Additional fields
 
         Returns:
@@ -372,10 +370,6 @@ class SecurityAlert(BaseModel):
             **kwargs,
         )
 
-        # Auto-remediate if requested
-        if auto_remediate:
-            alert._auto_remediate()
-
         return alert
 
     @staticmethod
@@ -402,24 +396,6 @@ class SecurityAlert(BaseModel):
         multiplier = type_multipliers.get(alert_type, 1.0)
 
         return min(int(base_score * multiplier), 100)
-
-    def _auto_remediate(self) -> None:
-        """Perform automatic remediation based on alert type."""
-        actions = []
-
-        if self.alert_type == AlertType.FAILED_LOGIN_ATTEMPTS:
-            actions.append("Account temporarily locked")
-            self.auto_remediated = True
-        elif self.alert_type == AlertType.SUSPICIOUS_LOGIN:
-            actions.append("Session terminated")
-            actions.append("Password reset email sent")
-            self.auto_remediated = True
-        elif self.alert_type == AlertType.API_RATE_LIMIT:
-            actions.append("API access temporarily blocked")
-            self.auto_remediated = True
-
-        if actions:
-            self.actions_taken = actions
 
     def acknowledge(self, acknowledged_by: str) -> None:
         """
