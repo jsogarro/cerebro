@@ -621,6 +621,12 @@ class MASRouter:
                             error=str(trace_err),
                             query_id=query_id,
                         )
+                if shape is not None:
+                    # The fallback decision ignores the shape, so a constrained
+                    # launch would run outside its catalogue entry.
+                    raise WorkflowShapeUnsupportedError(
+                        f"no route satisfies the workflow shape: {type(e).__name__}"
+                    ) from e
                 return self._create_fallback_decision(query_id, query, e)
 
     def _select_routing_strategy(
