@@ -26,7 +26,9 @@ from src.core.contracts.redaction import snapshot_digest
 from src.core.memory_encryption import DocumentEncryptionUnavailable
 from src.models.db.base import Base
 from src.models.db.uploaded_document import UploadedDocument, UsageLedger
-from src.models.db.user import User  # noqa: F401 - the FK target must be in the metadata
+from src.models.db.user import (
+    User,  # noqa: F401 - the FK target must be in the metadata
+)
 from src.repositories.uploaded_document_repository import UploadedDocumentRepository
 from src.services import document_ingestion as di
 from src.services.document_ingestion import (

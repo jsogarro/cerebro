@@ -238,20 +238,26 @@ class BaseRepository(Generic[ModelType]):
 
         return True
 
-    async def hard_delete(self, id: str | UUID) -> bool:
+    async def hard_delete(
+        self, id: str | UUID, organization_id: str | UUID | None = None
+    ) -> bool:
         """
         Permanently delete entity.
 
         Args:
             id: Entity ID
+            organization_id: Tenant organization boundary
 
         Returns:
             True if deleted, False if not found
         """
-        return await self.delete(id, soft=False)
+        return await self.delete(id, soft=False, organization_id=organization_id)
 
     async def restore(
-        self, id: str | UUID, restored_by: str | None = None
+        self,
+        id: str | UUID,
+        restored_by: str | None = None,
+        organization_id: str | UUID | None = None,
     ) -> ModelType | None:
         """
         Restore soft-deleted entity.
@@ -259,11 +265,14 @@ class BaseRepository(Generic[ModelType]):
         Args:
             id: Entity ID
             restored_by: User performing the restore
+            organization_id: Tenant organization boundary
 
         Returns:
             Restored entity or None if not found
         """
-        entity = await self.get(id, include_deleted=True)
+        entity = await self.get(
+            id, include_deleted=True, organization_id=organization_id
+        )
 
         if not entity or not entity.deleted_at:
             return None

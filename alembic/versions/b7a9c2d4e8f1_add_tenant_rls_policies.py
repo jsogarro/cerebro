@@ -4,6 +4,12 @@ Revision ID: b7a9c2d4e8f1
 Revises: 9d8c7b6a5e4f
 Create Date: 2026-05-02 18:30:00.000000
 
+These policies use ENABLE without FORCE ROW LEVEL SECURITY, so they do not
+bind the table owner, which is the role the application connects as. The
+repository ``organization_id`` filter is the tenant enforcement; the policies
+are defence in depth for non-owner roles. The same applies to every later
+migration that enables row-level security.
+
 """
 
 from collections.abc import Sequence

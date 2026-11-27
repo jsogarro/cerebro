@@ -93,14 +93,17 @@ async def delete_user_gdpr(
     )
     user_result = await db.execute(delete(User).where(User.id == user_id))
 
+    # With no memory system attached nothing was purged, so say that rather
+    # than report zero deletions as a completed erase.
     memory_deleted = (
         await memory_system.purge_user_data(user_id_text)
         if memory_system is not None
-        else {"working_memory": 0, "episodic_memory": 0}
+        else None
     )
 
     return {
         "user_id": user_id_text,
+        "memory_purged": memory_system is not None,
         "deleted": {
             # SQLAlchemy 2.x: Result.rowcount is valid for DELETE/UPDATE; mypy stub gap.
             "users": user_result.rowcount or 0,  # type: ignore[attr-defined]

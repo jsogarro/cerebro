@@ -495,6 +495,7 @@ async def get_agent_health(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_identity),
 ) -> AgentHealthStatus:
     """
     Get health status for specific agent.
@@ -504,7 +505,9 @@ async def get_agent_health(
     """
     try:
         service = _resolved_agent_operations(execution_service)
-        health = await service.get_agent_health(agent_type)
+        health = await service.get_agent_health(
+            agent_type, organization_id=tenant_context.organization_id
+        )
 
         logger.debug(f"Retrieved health for {agent_type.value}: {health.status}")
 
@@ -838,6 +841,7 @@ async def get_agents_health_summary(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend = (
         _AGENT_KERNEL_DEPENDENCY
     ),
+    tenant_context: TenantContext = Depends(get_tenant_identity),
 ) -> dict[str, Any]:
     """Get health summary for all agents."""
 
@@ -848,7 +852,9 @@ async def get_agents_health_summary(
         overall_health_scores = []
 
         for agent_type in AgentType:
-            health = await service.get_agent_health(agent_type)
+            health = await service.get_agent_health(
+                agent_type, organization_id=tenant_context.organization_id
+            )
             health_statuses[agent_type.value] = {
                 "status": health.status,
                 "success_rate": health.success_rate_24h,
