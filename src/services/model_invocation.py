@@ -24,6 +24,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Protocol
 
+from sqlalchemy.exc import SQLAlchemyError
 from structlog import get_logger
 
 from src.core.budget import (
@@ -361,7 +362,7 @@ async def _best_effort(write: Awaitable[Any]) -> None:
     # conservatively as unknown.
     try:
         await write
-    except Exception:
+    except (SQLAlchemyError, OSError):
         logger.exception("model_call_journal_write_failed")
 
 

@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 from pydantic import BaseModel
+from sqlalchemy.exc import OperationalError
 
 from src.core.budget import BudgetDimension, BudgetExceededError, BudgetLedger
 from src.core.contracts import ExecutionBudget
@@ -57,9 +58,12 @@ def _response(**overrides: Any) -> Any:
 
 
 class _Journal:
-    def __init__(self, *, fail_on: str | None = None) -> None:
+    def __init__(
+        self, *, fail_on: str | None = None, error: type[Exception] = OperationalError
+    ) -> None:
         self.events: list[tuple[str, Any]] = []
         self.fail_on = fail_on
+        self.error = error
 
     async def reserve(self, call_id: str, **kwargs: Any) -> None:
         self._record("reserve", call_id, kwargs)
@@ -81,7 +85,9 @@ class _Journal:
 
     def _record(self, name: str, call_id: str, kwargs: dict[str, Any]) -> None:
         if self.fail_on == name:
-            raise RuntimeError(f"{name} unavailable")
+            if self.error is OperationalError:
+                raise OperationalError(name, {}, Exception(f"{name} unavailable"))
+            raise self.error(f"{name} unavailable")
         self.events.append((name, call_id))
 
     @property
@@ -177,6 +183,14 @@ class TestOrderingAndSettlement:
         )
         assert result.succeeded
 
+    async def test_a_bug_in_the_journal_after_the_call_is_not_swallowed(self) -> None:
+        journal = _Journal(fail_on="settle_known", error=TypeError)
+        with pytest.raises(TypeError, match="settle_known"):
+            await _invoke(
+                ModelInvocationContext(ledger=_ledger(), journal=journal),
+                _Provider(_response()),
+            )
+
 
 class TestNothingSentWhenAdmissionFails:
     async def test_reservation_that_cannot_commit_sends_nothing_and_frees_the_hold(
@@ -185,7 +199,7 @@ class TestNothingSentWhenAdmissionFails:
         ledger = _ledger(tokens=600)
         provider = _Provider(_response())
         ctx = ModelInvocationContext(ledger=ledger, journal=_Journal(fail_on="reserve"))
-        with pytest.raises(RuntimeError, match="reserve"):
+        with pytest.raises(OperationalError, match="reserve"):
             await _invoke(ctx, provider)
         assert provider.calls == 0
         # 500 held would leave no room for this if the hold had leaked.
@@ -197,7 +211,7 @@ class TestNothingSentWhenAdmissionFails:
         journal = _Journal(fail_on="mark")
         provider = _Provider(_response())
         ctx = ModelInvocationContext(ledger=_ledger(), journal=journal)
-        with pytest.raises(RuntimeError, match="mark"):
+        with pytest.raises(OperationalError, match="mark"):
             await _invoke(ctx, provider)
         assert provider.calls == 0
         assert journal.names == ["reserve", "release_unsent"]
