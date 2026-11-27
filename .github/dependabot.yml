@@ -1,15 +1,13 @@
 version: 2
 updates:
-  # Python dependencies
-  - package-ecosystem: "pip"
+  # Python dependencies: pyproject.toml and uv.lock, one grouped PR a week
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
       time: "04:00"
     open-pull-requests-limit: 10
-    reviewers:
-      - "engineering-team"
     labels:
       - "dependencies"
       - "python"
@@ -17,21 +15,9 @@ updates:
       prefix: "chore"
       include: "scope"
     groups:
-      development-dependencies:
+      python:
         patterns:
-          - "pytest*"
-          - "black"
-          - "ruff"
-          - "mypy"
-          - "coverage"
-      production-dependencies:
-        patterns:
-          - "fastapi*"
-          - "pydantic*"
-          - "uvicorn*"
-          - "temporalio"
-          - "langchain*"
-          - "langgraph"
+          - "*"
     ignore:
       # Ignore major version updates for critical dependencies
       - dependency-name: "fastapi"
@@ -48,8 +34,6 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "04:00"
-    reviewers:
-      - "devops-team"
     labels:
       - "dependencies"
       - "docker"
@@ -61,8 +45,6 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "04:00"
-    reviewers:
-      - "devops-team"
     labels:
       - "dependencies"
       - "github-actions"
