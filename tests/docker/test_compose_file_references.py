@@ -70,5 +70,5 @@ def test_postgres_smoke_script_detects_the_api_service_by_compose_name() -> None
 
 @pytest.mark.parametrize("name", COMPOSE_FILES)
 def test_no_standalone_mcp_server_service(name: str) -> None:
-    # MCPClient builds its own in-process server; nothing calls a compose one.
+    # Research tools run in-process; nothing calls a standalone compose service.
     assert "mcp-server" not in _load(name)["services"]

@@ -83,16 +83,61 @@ bounded at all; it is not tight, and a deployment that wants it tighter sets
 """
 
 ClientProvider = Callable[[], Awaitable[Any]]
-"""Returns the MCP client, constructing it if needed.
+"""Returns the research tool bundle (or an injected test double), constructing it lazily.
 
-Called *inside* the handler, which is the point. 4-Char's most severe finding
-was that `initialize()` constructed the client before its own try/except, so a
-construction failure escaped past the circuit breaker, the fallback, and the
-sanitizer — the whole apparatus was unreachable for every caller that does not
-inject a client, which is every caller in production. Constructing inside the
-handler makes that failure an ordinary mediated tool error: recorded, counted
-by the breaker, and returned as a typed degraded state.
+Called *inside* the handler so a construction failure becomes an ordinary
+mediated tool error: recorded, counted by the breaker, and returned as a typed
+degraded state.
 """
+
+
+class ResearchToolSet:
+    """Direct in-process access to the four research tools, constructed lazily."""
+
+    def __init__(
+        self,
+        *,
+        academic_search: Any | None = None,
+        citation: Any | None = None,
+        statistics: Any | None = None,
+        knowledge_graph: Any | None = None,
+    ) -> None:
+        self._academic_search = academic_search
+        self._citation = citation
+        self._statistics = statistics
+        self._knowledge_graph = knowledge_graph
+
+    @property
+    def academic_search(self) -> Any:
+        if self._academic_search is None:
+            from src.mcp.tools.academic_search_tool import AcademicSearchTool
+
+            self._academic_search = AcademicSearchTool()
+        return self._academic_search
+
+    @property
+    def citation(self) -> Any:
+        if self._citation is None:
+            from src.mcp.tools.citation_tool import CitationTool
+
+            self._citation = CitationTool()
+        return self._citation
+
+    @property
+    def statistics(self) -> Any:
+        if self._statistics is None:
+            from src.mcp.tools.statistics_tool import StatisticsTool
+
+            self._statistics = StatisticsTool()
+        return self._statistics
+
+    @property
+    def knowledge_graph(self) -> Any:
+        if self._knowledge_graph is None:
+            from src.mcp.tools.knowledge_graph_tool import KnowledgeGraphTool
+
+            self._knowledge_graph = KnowledgeGraphTool()
+        return self._knowledge_graph
 
 
 class _PermissiveOutput(BaseModel):
@@ -227,22 +272,28 @@ def build_specs(
     sanitizer: ContentSanitizer,
     timeout_seconds: float = DEFAULT_MCP_TIMEOUT_SECONDS,
 ) -> tuple[ToolSpec, ...]:
-    """Return the four specifications, bound to one client and sanitizer."""
+    """Return the four specifications, bound to one tool provider and sanitizer."""
 
     async def academic_search(
         params: BaseModel, _context: ToolCallContext
     ) -> dict[str, JsonValue]:
         assert isinstance(params, AcademicSearchInput)
         connected = await client()
-        result = _require_success(
-            await connected.search_academic(
+        if isinstance(connected, ResearchToolSet):
+            raw = await connected.academic_search.execute(
                 query=params.query,
                 databases=params.databases,
                 max_results=params.max_results,
                 filters=params.filters,
-            ),
-            operation="academic search",
-        )
+            )
+        else:
+            raw = await connected.search_academic(
+                query=params.query,
+                databases=params.databases,
+                max_results=params.max_results,
+                filters=params.filters,
+            )
+        result = _require_success(raw, operation="academic search")
         sources = sanitize(sanitizer, result.get("results", []))
         databases = list(params.databases)
         return {
@@ -263,12 +314,15 @@ def build_specs(
     ) -> dict[str, JsonValue]:
         assert isinstance(params, FormatCitationsInput)
         connected = await client()
-        result = _require_success(
-            await connected.format_citations(
+        if isinstance(connected, ResearchToolSet):
+            raw = await connected.citation.execute(
                 sources=params.sources, style=params.style
-            ),
-            operation="citation formatting",
-        )
+            )
+        else:
+            raw = await connected.format_citations(
+                sources=params.sources, style=params.style
+            )
+        result = _require_success(raw, operation="citation formatting")
         return {
             "formatted_citations": sanitize(sanitizer, result.get("citations", [])),
             "style": params.style,
@@ -294,12 +348,15 @@ def build_specs(
             )
             if value is not None
         }
-        result = _require_success(
-            await connected.analyze_statistics(
+        if isinstance(connected, ResearchToolSet):
+            raw = await connected.statistics.execute(
                 operation=params.operation, data=params.data, **optional
-            ),
-            operation="statistical analysis",
-        )
+            )
+        else:
+            raw = await connected.analyze_statistics(
+                operation=params.operation, data=params.data, **optional
+            )
+        result = _require_success(raw, operation="statistical analysis")
         return {
             # The tool reports its figures at the top level, not under a
             # "result" key; reading that key made every real analysis empty.
@@ -315,14 +372,36 @@ def build_specs(
     ) -> dict[str, JsonValue]:
         assert isinstance(params, BuildKnowledgeGraphInput)
         connected = await client()
-        result = _require_success(
-            await connected.build_knowledge_graph(
+        if isinstance(connected, ResearchToolSet):
+            kg_tool = connected.knowledge_graph
+            entities = params.entities
+            if params.text:
+                extracted = await kg_tool.execute(
+                    operation="extract_entities", text=params.text
+                )
+                if extracted.get("success") and extracted.get("entities"):
+                    entities = [
+                        {"id": str(i), "text": e["text"], "type": e["type"]}
+                        for i, e in enumerate(extracted["entities"])
+                    ]
+            if not entities:
+                raw: dict[str, Any] = {
+                    "success": False,
+                    "error": "No entities provided or extracted",
+                }
+            else:
+                raw = await kg_tool.execute(
+                    operation="build_graph",
+                    entities=entities,
+                    relationships=params.relationships or [],
+                )
+        else:
+            raw = await connected.build_knowledge_graph(
                 text=params.text,
                 entities=params.entities,
                 relationships=params.relationships,
-            ),
-            operation="knowledge graph building",
-        )
+            )
+        result = _require_success(raw, operation="knowledge graph building")
         return {
             "graph": sanitize(sanitizer, result.get("graph", {})),
             "entities": sanitize(sanitizer, result.get("entities", [])),
@@ -387,6 +466,7 @@ __all__ = [
     "FormatCitationsInput",
     "FormatCitationsOutput",
     "MCPToolError",
+    "ResearchToolSet",
     "build_specs",
     "sanitize",
 ]

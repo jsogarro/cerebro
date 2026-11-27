@@ -496,7 +496,9 @@ class TestRealClientConstructionFailureBypassesTheFallbackEntirely:
         def _fail(*args: object, **kwargs: object) -> None:
             raise RuntimeError("MCP client construction failed")
 
-        monkeypatch.setattr("src.mcp.client.MCPClient", _fail)
+        monkeypatch.setattr(
+            "src.agents.integrations.mcp_integration.ResearchToolSet", _fail
+        )
 
     @pytest.mark.asyncio
     async def test_construction_failure_is_a_degraded_result_not_an_escape(
@@ -556,8 +558,8 @@ class TestRealClientConstructionFailureBypassesTheFallbackEntirely:
         handlers call, so the deadline, the breaker, the record, and the
         redaction all apply to it.
         """
-        assert "MCPClient(" not in inspect.getsource(MCPIntegration.initialize)
-        assert "MCPClient(" in inspect.getsource(MCPIntegration._connected_client)
+        assert "ResearchToolSet(" not in inspect.getsource(MCPIntegration.initialize)
+        assert "ResearchToolSet(" in inspect.getsource(MCPIntegration._connected_client)
 
 
 class TestNoTimeoutNoAuditAtThisLayer:

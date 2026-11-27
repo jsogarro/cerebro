@@ -241,7 +241,7 @@ src/
   cli/              research-cli (click commands, API client, formatters)
   core/             Settings, environment loading, kernel, contracts, capabilities, claims, tools
   evals/            Agent cost pilot: runner, trial setup, cost arithmetic (used by evals/live)
-  mcp/              MCP server, client, registry, and tools
+  mcp/              Research tools and academic search filters
   middleware/       Authentication middleware and tenant-context dependencies
   models/           API models; db/ holds the SQLAlchemy models
   prompts/          Prompt manager, versioning, YAML prompt templates

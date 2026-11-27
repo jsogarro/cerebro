@@ -1,20 +1,7 @@
-"""
-MCP Tools for research platform.
+"""Research tools for academic search, citations, statistics, and knowledge graphs.
 
-This module contains specialized tools for academic research,
-citation management, statistical analysis, and knowledge graphs.
-
-Exports are resolved lazily. Importing them eagerly coupled three
-network-calling tools to `scipy`, which only `StatisticsTool` uses: because
-Python executes a package's ``__init__.py`` before any of its submodules,
-``from src.mcp.tools.citation_tool import CitationTool`` required `scipy` even
-though `citation_tool.py` never imports it. The consequence was not a slow
-import — it was that the tests covering those three tools could not run in an
-environment without the optional `[stats]` extra, which is the environment the
-gate runs in.
-
-The same shape as `src/mcp/__init__.py`, which already defers `MCPServer` for
-its own optional `fastmcp` dependency.
+Exports are resolved lazily so importing the package or a network-calling tool
+submodule does not eagerly import ``scipy`` from ``statistics_tool``.
 """
 
 from typing import TYPE_CHECKING, Any

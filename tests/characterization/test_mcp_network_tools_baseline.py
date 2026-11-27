@@ -29,7 +29,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from src.mcp.registry import ToolRegistry as MCPToolRegistry
 from src.mcp.tools.academic_search_tool import AcademicSearchTool
 from src.mcp.tools.citation_tool import CitationTool
 from src.mcp.tools.knowledge_graph_tool import KnowledgeGraphTool
@@ -112,18 +111,3 @@ class TestNoTimeoutNoRetryAtThisLayer:
         tool = CitationTool()
 
         assert tool.client.timeout.connect == 30.0
-
-
-class TestMCPToolRegistryHasNoAuthorizationLayer:
-    def test_duplicate_registration_replaces_silently_with_only_a_log_warning(
-        self,
-    ) -> None:
-        registry = MCPToolRegistry()
-        first = AcademicSearchTool()
-        second = AcademicSearchTool()
-
-        registry.register(first)
-        registry.register(second)
-
-        assert registry.get_tool("search_academic") is second
-        assert len(registry.list_tools()) == 1

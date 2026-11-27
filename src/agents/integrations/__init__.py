@@ -7,9 +7,6 @@ external tools and services.
 
 from typing import Any
 
-# MCP integration requires fastmcp which is an optional dependency.
-# Use lazy imports to avoid crashing when fastmcp is not installed.
-
 
 def __getattr__(name: str) -> Any:
     if name in ("MCPIntegration", "create_mcp_integrated_agent"):

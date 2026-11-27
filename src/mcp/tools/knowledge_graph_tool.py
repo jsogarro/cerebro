@@ -10,87 +10,30 @@ import networkx as nx
 import plotly.graph_objects as go
 from structlog import get_logger
 
-from src.mcp.base import BaseMCPTool, ToolMetadata, ToolParameter
-
 logger = get_logger()
 
 
-class KnowledgeGraphTool(BaseMCPTool):
-    """
-    MCP tool for knowledge graph operations.
-
-    Supports entity extraction, graph building, analysis, and visualization.
-    """
+class KnowledgeGraphTool:
+    """Entity extraction, graph building, analysis, and visualization."""
 
     def __init__(self, config: dict[str, Any] | None = None):
-        """Initialize knowledge graph tool."""
-        super().__init__(config)
+        self.config = config or {}
         self.graph = nx.Graph()
 
-    def _build_metadata(self) -> ToolMetadata:
-        """Build tool metadata."""
-        return ToolMetadata(
-            name="knowledge_graph",
-            description="Build and analyze knowledge graphs",
-            version="1.0.0",
-            parameters=[
-                ToolParameter(
-                    name="operation",
-                    type="string",
-                    description="Operation (extract_entities, build_graph, analyze_graph, visualize)",
-                    required=True,
-                ),
-                ToolParameter(
-                    name="text",
-                    type="string",
-                    description="Text for entity extraction",
-                    required=False,
-                ),
-                ToolParameter(
-                    name="entities",
-                    type="array",
-                    description="List of entities",
-                    required=False,
-                ),
-                ToolParameter(
-                    name="relationships",
-                    type="array",
-                    description="List of relationships",
-                    required=False,
-                ),
-            ],
-            tags=["knowledge", "graph", "entity", "network", "visualization"],
-        )
-
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        """
-        Execute knowledge graph operation.
+        operation = kwargs.get("operation", "")
 
-        Args:
-            **kwargs: Operation parameters
-
-        Returns:
-            Operation results
-        """
-        try:
-            operation = kwargs.get("operation", "")
-
-            if operation == "extract_entities":
-                return self._extract_entities(kwargs.get("text", ""))
-            elif operation == "build_graph":
-                return self._build_graph(
-                    kwargs.get("entities", []), kwargs.get("relationships", [])
-                )
-            elif operation == "analyze_graph":
-                return self._analyze_graph()
-            elif operation == "visualize":
-                return self._visualize_graph()
-            else:
-                return {"success": False, "error": f"Unknown operation: {operation}"}
-
-        except Exception as e:
-            logger.error(f"Knowledge graph operation failed: {e!s}")
-            return {"success": False, "error": str(e)}
+        if operation == "extract_entities":
+            return self._extract_entities(kwargs.get("text", ""))
+        if operation == "build_graph":
+            return self._build_graph(
+                kwargs.get("entities", []), kwargs.get("relationships", [])
+            )
+        if operation == "analyze_graph":
+            return self._analyze_graph()
+        if operation == "visualize":
+            return self._visualize_graph()
+        return {"success": False, "error": f"Unknown operation: {operation}"}
 
     def _extract_entities(self, text: str) -> dict[str, Any]:
         """

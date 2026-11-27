@@ -46,7 +46,7 @@ def _importorskipped_modules() -> dict[str, list[str]]:
 
 def test_importorskip_scan_sees_the_known_optional_deps() -> None:
     """Guard the scan itself: an empty result would make the check vacuous."""
-    assert {"fastmcp", "scipy"} <= set(_importorskipped_modules())
+    assert {"scipy"} <= set(_importorskipped_modules())
 
 
 def test_dev_extra_covers_every_importorskipped_module() -> None:

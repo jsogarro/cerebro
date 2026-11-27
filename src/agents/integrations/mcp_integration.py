@@ -42,7 +42,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from structlog import get_logger
 
@@ -53,6 +53,7 @@ from src.agents.integrations.mcp_tool_specs import (
     TOOL_ANALYZE_STATISTICS,
     TOOL_BUILD_KNOWLEDGE_GRAPH,
     TOOL_FORMAT_CITATIONS,
+    ResearchToolSet,
     build_specs,
 )
 from src.agents.tools.mediation import (
@@ -74,9 +75,6 @@ from src.core.tools import (
     ToolOutcomeStatus,
 )
 from src.security.content_sanitizer import ContentSanitizer
-
-if TYPE_CHECKING:
-    from src.mcp.client import MCPClient
 
 logger = get_logger()
 
@@ -123,7 +121,7 @@ class MCPIntegration:
 
     def __init__(
         self,
-        mcp_client: MCPClient | None = None,
+        mcp_client: Any | None = None,
         config: dict[str, Any] | None = None,
         enable_fallback: bool = True,
         *,
@@ -205,23 +203,17 @@ class MCPIntegration:
             if not self.enable_fallback:
                 raise
 
-    async def _connected_client(self) -> MCPClient:
-        """Return the client, building and health-checking it on first use."""
+    async def _connected_client(self) -> Any:
+        """Return the tool provider, building it lazily on first use."""
 
         if self._client is None:
-            # Imported here, not at module scope: `MCPClient` reaches
-            # `MCPServer` and therefore the optional `fastmcp` extra, and a
-            # caller that injects its own client never needs either.
-            from src.mcp.client import MCPClient
-            from src.mcp.server import MCPServerConfig
+            self._client = ResearchToolSet()
+            self._initialized = True
+            return self._client
 
-            self._client = MCPClient(
-                MCPServerConfig(
-                    name=self.config.get("server_name", "research-mcp-server"),
-                    port=self.config.get("server_port", 9000),
-                    host=self.config.get("server_host", "localhost"),
-                )
-            )
+        if isinstance(self._client, ResearchToolSet):
+            self._initialized = True
+            return self._client
 
         if not self._initialized:
             health = await self._client.health_check()
@@ -407,8 +399,20 @@ class MCPIntegration:
 
         try:
             connected = await self._connected_client()
-            health = await connected.health_check()
-            available_tools = connected.get_available_tools()
+            if isinstance(connected, ResearchToolSet):
+                health: dict[str, Any] = {
+                    "status": "healthy",
+                    "tools_available": 4,
+                }
+                available_tools = [
+                    TOOL_ACADEMIC_SEARCH,
+                    TOOL_FORMAT_CITATIONS,
+                    TOOL_ANALYZE_STATISTICS,
+                    TOOL_BUILD_KNOWLEDGE_GRAPH,
+                ]
+            else:
+                health = await connected.health_check()
+                available_tools = connected.get_available_tools()
         except Exception as error:
             logger.error("mcp_tool_status_get_failed", error=str(error))
             return {

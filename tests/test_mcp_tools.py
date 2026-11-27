@@ -227,17 +227,16 @@ class TestAcademicSearchTool:
         assert not result["success"]
         assert "error" in result
 
-    @pytest.mark.asyncio
-    async def test_tool_metadata(self):
-        from src.mcp.tools.academic_search_tool import AcademicSearchTool
+    def test_tool_input_schema_contract(self):
+        from pydantic import ValidationError
 
-        tool = AcademicSearchTool()
-        metadata = tool.get_metadata()
+        from src.agents.integrations.mcp_tool_specs import AcademicSearchInput
 
-        assert metadata.name == "search_academic"
-        assert "academic" in metadata.description.lower()
-        assert len(metadata.parameters) > 0
-        assert any(p.name == "query" for p in metadata.parameters)
+        parsed = AcademicSearchInput(query="machine learning")
+        assert parsed.query == "machine learning"
+        assert "query" in AcademicSearchInput.model_fields
+        with pytest.raises(ValidationError):
+            AcademicSearchInput(query="q", undeclared_param="nope")  # type: ignore[call-arg]
 
 
 class TestCitationTool:
