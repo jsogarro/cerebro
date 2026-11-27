@@ -176,8 +176,7 @@ class _Client:
             transport=ASGITransport(app=self.app, raise_app_exceptions=False),
             base_url="http://test",
         ) as client:
-            r = await client.post(path, json=body, headers=headers)
-            return r
+            return await client.post(path, json=body, headers=headers)
 
     async def login(self, code: str | None = None, password: str = PASSWORD):
         body: dict[str, Any] = {"email": self.email, "password": password}
