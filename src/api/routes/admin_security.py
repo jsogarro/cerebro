@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.middleware.auth_middleware import get_current_active_user, require_superuser
 from src.models.db.audit_log import AuditEventType, AuditLog
 from src.models.db.security_alert import AlertStatus, AlertType, SecurityAlert
-from src.models.db.session import SessionDep, get_session
+from src.models.db.session import SessionDep
 from src.models.db.user import User
 
 router = APIRouter(
