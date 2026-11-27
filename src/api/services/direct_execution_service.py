@@ -860,15 +860,21 @@ class DirectExecutionService:
                         organization_id=binding.run.tenant_id,
                     )
                     # Owned from admission, in the same transaction, so there
-                    # is no instant at which the run is running unowned.
-                    fencing_token = await repo.acquire_lease(
-                        binding.run.run_id,
-                        owner=self.owner_instance_id,
-                        ttl_seconds=self.lease_ttl_seconds,
-                        organization_id=binding.run.tenant_id,
-                    )
-                    if fencing_token is None:
-                        raise RuntimeError("a run admitted just now was already owned")
+                    # is no instant at which the run is running unowned. Leases
+                    # use Postgres time; the SQLite development mode runs
+                    # unleased and unfenced.
+                    fencing_token = None
+                    if session.get_bind().dialect.name == "postgresql":
+                        fencing_token = await repo.acquire_lease(
+                            binding.run.run_id,
+                            owner=self.owner_instance_id,
+                            ttl_seconds=self.lease_ttl_seconds,
+                            organization_id=binding.run.tenant_id,
+                        )
+                        if fencing_token is None:
+                            raise RuntimeError(
+                                "a run admitted just now was already owned"
+                            )
                     capability_grants = self.capability_issuer.issue(
                         binding,
                         run_id=queued_run.run_id,
