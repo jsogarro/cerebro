@@ -1,7 +1,7 @@
 """Add the model-call journal.
 
 Revision ID: c4d7a2e9f1b6
-Revises: b8e3f1a5c7d9
+Revises: c5a9e2f7d1b4
 Create Date: 2026-11-27
 
 Additive. Rows record what a governed owner may have spent on external model
@@ -19,7 +19,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "c4d7a2e9f1b6"
-down_revision: str | Sequence[str] | None = "b8e3f1a5c7d9"
+down_revision: str | Sequence[str] | None = "c5a9e2f7d1b4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

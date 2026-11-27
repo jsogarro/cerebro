@@ -172,7 +172,7 @@ async def _reserve(
     )
 
 
-def test_one_head_chained_on_the_similarity_revision() -> None:
+def test_one_head_chained_on_the_evaluation_results_revision() -> None:
     heads = [
         line for line in _alembic("postgresql://x/y", "heads").splitlines() if line
     ]
@@ -181,7 +181,7 @@ def test_one_head_chained_on_the_similarity_revision() -> None:
         (REPO_ROOT / "alembic" / "versions").glob("*add_model_call_reservations.py")
     )
     assert (
-        'down_revision: str | Sequence[str] | None = "b8e3f1a5c7d9"'
+        'down_revision: str | Sequence[str] | None = "c5a9e2f7d1b4"'
         in migration.read_text()
     )
 
