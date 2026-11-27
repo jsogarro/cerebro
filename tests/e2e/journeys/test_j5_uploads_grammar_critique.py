@@ -38,11 +38,22 @@ async def test_grammar_findings_have_correct_slices(client, new_account):
     pytest.fail("grammar landed: assert each finding's slice equals the quoted text")
 
 
-@_missing("P12", "no critique route is served (P12B)")
+@_missing(
+    "P12",
+    "a critique needs an uploaded document; uploads are disabled in the default stack",
+)
 async def test_critique_runs_on_a_fixture_model(client, new_account):
-    await require_path_containing(client, await new_account("alice"), "critique")
+    alice = await new_account("alice")
+    await require_path_containing(client, alice, "critique")
+    response = await client.post(
+        "/api/v1/documents",
+        headers=alice.headers,
+        files={"file": ("manuscript.txt", MANUSCRIPT, "text/plain")},
+    )
+    assert response.status_code == 201, response.status_code
     pytest.fail(
-        "critique landed: assert findings quote located spans, with a fixture model"
+        "uploads landed: start a consented critique with a fixture model and "
+        "assert its findings quote located spans"
     )
 
 
