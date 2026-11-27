@@ -52,6 +52,8 @@ TENANT_TABLES = (
     "similarity_matches",
     "egress_events",
     "generated_reports",
+    "agent_evaluation_results",
+    "model_call_reservations",
 )
 # Created without any policy; this migration adds one.
 NEW_POLICY_TABLES = ("generated_reports",)

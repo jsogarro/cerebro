@@ -5,6 +5,7 @@ real login as ``cerebro_app`` or ``cerebro_maint``, so grants, policies and the
 pooled-connection reset are all the production ones.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -12,7 +13,7 @@ import uuid
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
@@ -61,6 +62,8 @@ NO_MAINTENANCE = frozenset(
         "critique_findings",
         "similarity_checks",
         "similarity_matches",
+        "agent_evaluation_results",
+        "model_call_reservations",
     }
 )
 ORG_A = uuid.uuid4()
@@ -413,6 +416,24 @@ async def test_the_outbox_relay_claims_every_tenants_rows_as_the_maintenance_rol
         event_publisher=publisher,
     )
     assert await relay.run_once() == 2
+
+
+async def test_run_event_wakeups_resolve_the_runs_tenant_only_as_the_maintenance_role(
+    app_engine: AsyncEngine, maint_engine: AsyncEngine
+) -> None:
+    from src.api.services.run_event_wakeup import RunEventWakeupSubscriber
+
+    envelope = json.dumps({"run_id": f"run-{ORG_A}", "sequence": 1})
+    hub = MagicMock()
+    for engine, wakes in ((app_engine, False), (maint_engine, True)):
+        subscriber = RunEventWakeupSubscriber(
+            redis_client=MagicMock(),
+            session_factory=async_sessionmaker(engine, expire_on_commit=False),
+            stream_hub=hub,
+        )
+        # The envelope carries no tenant, so the lookup runs without one.
+        assert await subscriber.handle_message(envelope) is wakes
+    hub.notify.assert_called_once_with(organization_id=ORG_A, run_id=f"run-{ORG_A}")
 
 
 async def test_the_app_role_cannot_reach_another_tenants_expired_rows_with_a_purge_flag(
