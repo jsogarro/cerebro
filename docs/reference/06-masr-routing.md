@@ -26,7 +26,7 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 
 ## Role in execution
 
-`MASRouter.route` returns a `RoutingDecision` (`src/ai_brain/router/masr.py`). The research execution path treats that decision as a proposal: `DirectExecutionService._propose_routing` asks MASR for it, and `ExecutionPlanCompiler.compile` (`src/ai_brain/router/execution_plan_compiler.py`) compares it with the trusted execution authority and rejects any mismatch in strategy, collaboration mode, worker types, supervisor type, domains or provider and model routes. MASR cannot supply the worker list, provider policy or budget that the compiled `ExecutionPlan` carries. See [research execution](05-research-execution.md).
+`MASRouter.route` returns a `RoutingDecision` (`src/ai_brain/router/masr.py`). The research execution path treats that decision as a proposal: `DirectExecutionService._propose_routing` asks MASR for it, and `ExecutionPlanCompiler.compile` (`src/ai_brain/router/execution_plan_compiler.py`) compares it with the trusted execution authority and rejects any mismatch in strategy, collaboration mode, worker types, supervisor type (not checked for `fast_path` and `direct`, which have no supervisor node), domains or provider and model routes. MASR cannot supply the worker list, provider policy or budget that the compiled `ExecutionPlan` carries. See [research execution](05-research-execution.md).
 
 `route` catches every `Exception` raised while routing, including a rejection by an open circuit breaker, and `_create_fallback_decision` returns a `DIRECT` decision with one worker of type `general`, supervisor type `general`, `confidence_score` 0.3, `fallback_strategy` `error_recovery` and the `llama-3.3-70b` model specification.
 
@@ -88,7 +88,7 @@ The strategy maps to a cost-optimizer strategy: `speed_first` to `latency_optimi
 
 | Mode | Worker count | Worker types |
 |---|---|---|
-| `fast_path` | 1 | one registered worker for the domain (`research` and `general`: `literature_review`, `content`: `drafting`, `analytics`: `data_analysis`, `finance`: `financial_analysis`); `supervisor_type` is `None` and the optimizer's fallback models are cleared |
+| `fast_path` | 1 | one registered worker for the domain (`research` and `general`: `literature_review`, `content`: `drafting`, `analytics`: `data_analysis`, `finance`: `financial_analysis`); the optimizer's fallback models are cleared |
 | `direct` | 1 | one per detected domain |
 | `parallel` | `min(domains + 1, max_parallel_workers)`, then the strategy budget | one per detected domain |
 | `hierarchical` | `min(subtask_count, max_agents)`, then the strategy budget | reasoning specialists, domain specialists and `validation_specialist` |
