@@ -266,7 +266,7 @@ async def test_an_upload_in_flight_during_erasure_does_not_survive_it(
         await engine.dispose()
 
 
-async def test_the_purge_works_for_a_non_owner_role_under_rls_and_leaves_no_poison(
+async def test_the_purge_works_for_the_maintenance_role_under_rls_and_leaves_no_poison(
     migrated: str,
 ) -> None:
     from datetime import UTC, datetime
@@ -280,18 +280,6 @@ async def test_the_purge_works_for_a_non_owner_role_under_rls_and_leaves_no_pois
     )
     try:
         async with engine.begin() as setup:
-            await setup.execute(
-                text(
-                    "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE "
-                    "rolname = 'doc_app') THEN CREATE ROLE doc_app NOLOGIN; END IF; END $$"
-                )
-            )
-            await setup.execute(
-                text(
-                    "GRANT SELECT, INSERT, UPDATE, DELETE ON uploaded_documents, "
-                    "usage_ledger, users, egress_events TO doc_app"
-                )
-            )
             user_id = await _insert_user(setup)
             await _insert_document(setup, usr=user_id)
             await _insert_document(setup, usr=user_id)
@@ -314,7 +302,7 @@ async def test_the_purge_works_for_a_non_owner_role_under_rls_and_leaves_no_pois
             )
 
         async with engine.connect() as connection:
-            await connection.execute(text("SET ROLE doc_app"))
+            await connection.execute(text("SET ROLE cerebro_maint"))
             await connection.commit()
             # A request transaction sets the tenant and ends, leaving the GUC empty.
             async with connection.begin():

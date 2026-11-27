@@ -143,26 +143,26 @@ async def init_db(database_url: str | None = None, **engine_kwargs: Any) -> None
         raise
 
     try:
-        _init_maintenance_engine(engine_kwargs)
+        _init_maintenance_engine(url, engine_kwargs)
     except RuntimeError:
         await close_db()
         raise
 
 
-def _init_maintenance_engine(engine_kwargs: dict[str, Any]) -> None:
+def _init_maintenance_engine(database_url: str, engine_kwargs: dict[str, Any]) -> None:
     global _maintenance_engine, _maintenance_session_factory
 
-    url = settings.MAINTENANCE_DATABASE_URL
-    if not url:
-        if settings.ENVIRONMENT == "production":
-            raise RuntimeError(
-                "MAINTENANCE_DATABASE_URL is required in production: the "
-                "application role sees no rows without a tenant context, so the "
-                "cross-tenant jobs cannot fall back to it."
-            )
-        return
+    maintenance_url = settings.MAINTENANCE_DATABASE_URL
+    if not maintenance_url:
+        if "sqlite" in database_url:
+            return
+        raise RuntimeError(
+            "MAINTENANCE_DATABASE_URL is required with a PostgreSQL database: "
+            "the application role sees no rows without a tenant context, so the "
+            "cross-tenant jobs cannot fall back to it."
+        )
     _maintenance_engine = create_engine(
-        url, **{**engine_kwargs, "pool_size": 2, "max_overflow": 2}
+        maintenance_url, **{**engine_kwargs, "pool_size": 2, "max_overflow": 2}
     )
     _maintenance_session_factory = async_sessionmaker(
         _maintenance_engine,
@@ -208,9 +208,8 @@ def get_maintenance_session_factory() -> async_sessionmaker[AsyncSession]:
     """Session factory for the cross-tenant jobs (outbox relay, warm-up, purge).
 
     Connects as the maintenance role, whose per-table policies admit exactly
-    those reads. Outside production an unset ``MAINTENANCE_DATABASE_URL`` falls
-    back to the application factory so SQLite and single-role development keep
-    working; ``init_db`` refuses to start in production without it.
+    those reads. SQLite has no roles, so there the application factory serves;
+    ``init_db`` refuses to start against PostgreSQL without the URL.
     """
     if _maintenance_session_factory is not None:
         return _maintenance_session_factory

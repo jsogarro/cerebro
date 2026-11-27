@@ -51,6 +51,15 @@ TENANT_TABLES = (
     "similarity_checks",
     "similarity_matches",
     "egress_events",
+    "generated_reports",
+)
+# Created without any policy; this migration adds one.
+NEW_POLICY_TABLES = ("generated_reports",)
+# The sweeps' old GUC-gated policies admitted every role; the maintenance role
+# replaces them, so the application role can no longer reach other tenants' rows.
+_PURGE_POLICIES = (
+    ("uploaded_documents", "expires_at <= now()"),
+    ("egress_events", "created_at <= now() - interval '1 day'"),
 )
 # Created before the NULLIF form was adopted; downgrade restores their bare cast.
 BARE_CAST_TABLES = (
@@ -72,13 +81,19 @@ BARE_CAST_TABLES = (
 _NULLIF = "organization_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid"
 _BARE = "organization_id = current_setting('app.current_org_id', true)::uuid"
 
+# Only the columns the relay writes: a row must never change tenant.
+_OUTBOX_PRIVILEGES = (
+    "SELECT, UPDATE (status, claimed_at, claimed_by, attempts, available_at, "
+    "last_error, delivered_at)"
+)
+
 # (table, command, USING predicate, privileges to grant)
 _MAINTENANCE_POLICIES = (
     ("agent_runs", "SELECT", "true", "SELECT"),
     ("agent_run_tasks", "SELECT", "true", "SELECT"),
     ("agent_task_attempts", "SELECT", "true", "SELECT"),
-    ("agent_run_event_outbox", "SELECT", "true", "SELECT, UPDATE"),
-    ("agent_run_event_outbox", "UPDATE", "true", "SELECT, UPDATE"),
+    ("agent_run_event_outbox", "SELECT", "true", _OUTBOX_PRIVILEGES),
+    ("agent_run_event_outbox", "UPDATE", "true", _OUTBOX_PRIVILEGES),
     ("agent_execution_authorities", "SELECT", "true", "SELECT"),
     ("agent_run_config_snapshots", "SELECT", "true", "SELECT"),
     ("uploaded_documents", "SELECT", "expires_at <= now()", "SELECT, DELETE"),
@@ -111,9 +126,28 @@ def upgrade() -> None:
         $$
         """
     )
+    for table in NEW_POLICY_TABLES:
+        op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        op.execute(
+            f"CREATE POLICY tenant_isolation_{table} ON {table} USING ({_NULLIF})"
+        )
     for table in TENANT_TABLES:
         op.execute(f"ALTER POLICY tenant_isolation_{table} ON {table} USING ({_NULLIF})")
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
+    for table, _predicate in _PURGE_POLICIES:
+        for command in ("select", "delete"):
+            op.execute(f"DROP POLICY purge_expired_{command}_{table} ON {table}")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cerebro_app') THEN
+                REVOKE ALL ON alembic_version FROM cerebro_app;
+            END IF;
+        END
+        $$
+        """
+    )
     for table, command, predicate, privileges in _MAINTENANCE_POLICIES:
         op.execute(
             f"CREATE POLICY {_policy_name(table, command)} ON {table} "
@@ -133,3 +167,13 @@ def downgrade() -> None:
         op.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
         predicate = _BARE if table in BARE_CAST_TABLES else _NULLIF
         op.execute(f"ALTER POLICY tenant_isolation_{table} ON {table} USING ({predicate})")
+    for table in NEW_POLICY_TABLES:
+        op.execute(f"DROP POLICY tenant_isolation_{table} ON {table}")
+        op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
+    for table, predicate in _PURGE_POLICIES:
+        for command in ("select", "delete"):
+            op.execute(
+                f"CREATE POLICY purge_expired_{command}_{table} ON {table} "
+                f"FOR {command.upper()} USING ({predicate} "
+                "AND current_setting('app.purge_expired', true) = 'on')"
+            )

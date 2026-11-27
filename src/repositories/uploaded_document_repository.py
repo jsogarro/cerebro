@@ -213,13 +213,9 @@ class UploadedDocumentRepository:
     async def purge_expired(self, now: datetime) -> int:
         """Delete every expired document across all owners.
 
-        On Postgres the row policy admits this only when the transaction says
-        it is the sweep, and then only for expired rows.
+        On Postgres only the maintenance role's policies admit this, and only
+        for expired rows.
         """
-        if self._session.get_bind().dialect.name == "postgresql":
-            await self._session.execute(
-                text("SELECT set_config('app.purge_expired', 'on', true)")
-            )
         result = await self._session.execute(
             delete(UploadedDocument).where(UploadedDocument.expires_at <= now)
         )

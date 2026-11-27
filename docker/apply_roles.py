@@ -22,6 +22,13 @@ async def apply_roles(admin_url: str) -> None:
     connection = await asyncpg.connect(admin_url.replace("+asyncpg", "", 1))
     try:
         async with connection.transaction():
+            # Bound parameters are echoed by log_statement=all, so stop logging
+            # before any password is sent.
+            await connection.execute(
+                "SET LOCAL log_statement = 'none'; "
+                "SET LOCAL log_min_duration_statement = -1; "
+                "SET LOCAL log_min_error_statement = 'panic'"
+            )
             for setting, variable in PASSWORD_SETTINGS.items():
                 await connection.execute(
                     "SELECT set_config($1, $2, true)", setting, os.environ[variable]

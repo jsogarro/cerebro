@@ -41,33 +41,10 @@ PASSWORDS = {
     "cerebro_maint": "maint-pw",
 }
 
-# Every table whose policy keys on app.current_org_id. A new tenant table must be
-# added here, forced, and given a maintenance policy or a place in NO_MAINTENANCE.
-TENANT_TABLES = frozenset(
-    {
-        "research_projects",
-        "agent_runs",
-        "agent_run_tasks",
-        "agent_task_attempts",
-        "agent_run_config_snapshots",
-        "agent_run_events",
-        "agent_run_event_outbox",
-        "agent_capability_grants",
-        "agent_capability_approvals",
-        "agent_artifacts",
-        "agent_tool_invocations",
-        "agent_evidence",
-        "agent_claim_supports",
-        "agent_execution_authorities",
-        "uploaded_documents",
-        "usage_ledger",
-        "document_critiques",
-        "critique_findings",
-        "similarity_checks",
-        "similarity_matches",
-        "egress_events",
-    }
-)
+# Tables with an organization_id column that are deliberately outside row policies.
+EXEMPT = {
+    "users": "identity rows are read before a tenant is known (login, token lookup)",
+}
 NO_MAINTENANCE = frozenset(
     {
         "research_projects",
@@ -79,6 +56,7 @@ NO_MAINTENANCE = frozenset(
         "agent_evidence",
         "agent_claim_supports",
         "usage_ledger",
+        "generated_reports",
         "document_critiques",
         "critique_findings",
         "similarity_checks",
@@ -260,6 +238,12 @@ def _run_row(org: uuid.UUID, run_id: str) -> AgentRun:
     )
 
 
+def admin_engine(admin_url: str) -> AsyncEngine:
+    return create_async_engine(
+        admin_url.replace("postgresql://", "postgresql+asyncpg://")
+    )
+
+
 async def _count(engine: AsyncEngine, sql: str) -> int:
     async with engine.begin() as connection:
         return int(await connection.scalar(text(f"SELECT count(*) FROM {sql}")) or 0)
@@ -268,7 +252,28 @@ async def _count(engine: AsyncEngine, sql: str) -> int:
 pytestmark.append(pytest.mark.asyncio(loop_scope="module"))
 
 
+async def _tenant_tables(admin_url: str) -> frozenset[str]:
+    """Every table with an organization_id column, minus the explained exemptions."""
+    engine = create_async_engine(
+        admin_url.replace("postgresql://", "postgresql+asyncpg://")
+    )
+    async with engine.connect() as connection:
+        rows = await connection.execute(
+            text(
+                "SELECT DISTINCT c.relname FROM pg_attribute a "
+                "JOIN pg_class c ON c.oid = a.attrelid "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE a.attname = 'organization_id' AND n.nspname = 'public' "
+                "AND c.relkind = 'r' AND NOT a.attisdropped"
+            )
+        )
+        names = {row[0] for row in rows}
+    await engine.dispose()
+    return frozenset(names - set(EXEMPT))
+
+
 async def test_catalog_roles_and_forced_tables(seeded: str) -> None:
+    tenant_tables = await _tenant_tables(seeded)
     engine = create_async_engine(
         seeded.replace("postgresql://", "postgresql+asyncpg://")
     )
@@ -311,23 +316,24 @@ async def test_catalog_roles_and_forced_tables(seeded: str) -> None:
     )
     assert roles["cerebro_migrator"].rolbypassrls
     assert owned == 0
-    tenant = {name for name in rls if name in TENANT_TABLES}
-    assert tenant == TENANT_TABLES, (
-        f"tenant tables without RLS: {TENANT_TABLES - tenant}"
+    tenant = {name for name in rls if name in tenant_tables}
+    assert tenant == tenant_tables, (
+        f"tenant tables without RLS: {tenant_tables - tenant}"
     )
-    assert all(rls[name] for name in TENANT_TABLES), "a tenant table is not FORCEd"
-    assert maint_tables == TENANT_TABLES - NO_MAINTENANCE
+    assert all(rls[name] for name in tenant_tables), "a tenant table is not FORCEd"
+    assert tenant_tables >= NO_MAINTENANCE
+    assert maint_tables == tenant_tables - NO_MAINTENANCE
 
 
 async def test_every_tenant_policy_tolerates_an_empty_setting(
-    app_engine: AsyncEngine,
+    app_engine: AsyncEngine, seeded: str
 ) -> None:
     """A pooled connection leaves ``''`` behind; a bare ::uuid cast would raise."""
     async with app_engine.begin() as connection:
         await connection.execute(
             text("SELECT set_config('app.current_org_id', :o, true)"), {"o": str(ORG_A)}
         )
-    for table in sorted(TENANT_TABLES):
+    for table in sorted(await _tenant_tables(seeded)):
         assert await _count(app_engine, table) == 0, table
 
 
@@ -409,6 +415,148 @@ async def test_the_outbox_relay_claims_every_tenants_rows_as_the_maintenance_rol
     assert await relay.run_once() == 2
 
 
+async def test_the_app_role_cannot_reach_another_tenants_expired_rows_with_a_purge_flag(
+    app_engine: AsyncEngine, seeded: str
+) -> None:
+    admin = create_async_engine(
+        seeded.replace("postgresql://", "postgresql+asyncpg://")
+    )
+    async with admin.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO egress_events (id, organization_id, user_id, host, "
+                "request_class, term_count, bytes_received, duration_ms, status, "
+                "created_at) SELECT gen_random_uuid(), organization_id, user_id, "
+                "'arxiv.org', 'pdf', 0, 1, 2222, '200', now() - interval '2 days' "
+                "FROM egress_events WHERE organization_id = :b LIMIT 1"
+            ),
+            {"b": ORG_B},
+        )
+    await admin.dispose()
+    async with app_engine.begin() as connection:
+        await connection.execute(
+            text("SELECT set_config('app.current_org_id', :o, true)"), {"o": str(ORG_A)}
+        )
+        await connection.execute(
+            text("SELECT set_config('app.purge_expired', 'on', true)")
+        )
+        docs = await connection.scalar(
+            text("SELECT count(*) FROM uploaded_documents WHERE organization_id = :b"),
+            {"b": ORG_B},
+        )
+        deleted = (
+            await connection.execute(
+                text(
+                    "DELETE FROM egress_events WHERE organization_id = :b RETURNING 1"
+                ),
+                {"b": ORG_B},
+            )
+        ).all()
+    async with admin_engine(seeded).begin() as connection:
+        await connection.execute(
+            text("DELETE FROM egress_events WHERE duration_ms = 2222")
+        )
+    assert (docs, deleted) == (0, [])
+
+
+async def test_the_maintenance_role_cannot_move_an_outbox_row_between_tenants(
+    maint_engine: AsyncEngine,
+) -> None:
+    async with maint_engine.begin() as connection:
+        with pytest.raises(DBAPIError, match="permission denied"):
+            await connection.execute(
+                text(
+                    "UPDATE agent_run_event_outbox SET organization_id = :b "
+                    "WHERE organization_id = :a"
+                ),
+                {"a": ORG_A, "b": ORG_B},
+            )
+
+
+async def test_the_app_role_cannot_touch_the_migration_ledger(seeded: str) -> None:
+    admin = create_async_engine(
+        seeded.replace("postgresql://", "postgresql+asyncpg://")
+    )
+    async with admin.connect() as connection:
+        privileges = await connection.scalar(
+            text(
+                "SELECT has_table_privilege('cerebro_app', 'alembic_version', "
+                "'SELECT, INSERT, UPDATE, DELETE')"
+            )
+        )
+    await admin.dispose()
+    assert privileges is False
+
+
+async def test_reapplying_roles_demotes_a_privileged_app_role(seeded: str) -> None:
+    admin = create_async_engine(
+        seeded.replace("postgresql://", "postgresql+asyncpg://"),
+        isolation_level="AUTOCOMMIT",
+    )
+    async with admin.connect() as connection:
+        await connection.execute(
+            text("ALTER ROLE cerebro_app SUPERUSER BYPASSRLS CREATEROLE")
+        )
+    _apply_roles(seeded)
+    async with admin.connect() as connection:
+        flags = (
+            await connection.execute(
+                text(
+                    "SELECT rolsuper, rolbypassrls, rolcreaterole FROM pg_roles "
+                    "WHERE rolname = 'cerebro_app'"
+                )
+            )
+        ).one()
+    await admin.dispose()
+    assert tuple(flags) == (False, False, False)
+
+
+def test_an_empty_role_password_is_rejected(seeded: str) -> None:
+    result = subprocess.run(
+        [sys.executable, "docker/apply_roles.py"],
+        cwd=REPO_ROOT,
+        env={
+            **os.environ,
+            "ROLES_ADMIN_DATABASE_URL": seeded,
+            "CEREBRO_MIGRATOR_PASSWORD": PASSWORDS["cerebro_migrator"],
+            "CEREBRO_APP_PASSWORD": "",
+            "CEREBRO_MAINT_PASSWORD": PASSWORDS["cerebro_maint"],
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+
+
+async def test_applying_roles_keeps_passwords_out_of_the_server_log(
+    seeded: str, server: PostgresContainer
+) -> None:
+    admin = create_async_engine(
+        seeded.replace("postgresql://", "postgresql+asyncpg://"),
+        isolation_level="AUTOCOMMIT",
+    )
+    async with admin.connect() as connection:
+        await connection.execute(text("ALTER SYSTEM SET log_statement = 'all'"))
+        await connection.execute(text("SELECT pg_reload_conf()"))
+    try:
+        _run(
+            [sys.executable, "docker/apply_roles.py"],
+            seeded,
+            ROLES_ADMIN_DATABASE_URL=seeded,
+            CEREBRO_MIGRATOR_PASSWORD=PASSWORDS["cerebro_migrator"],
+            CEREBRO_APP_PASSWORD=PASSWORDS["cerebro_app"],
+            CEREBRO_MAINT_PASSWORD="LEAK-CANARY-maint",
+        )
+    finally:
+        async with admin.connect() as connection:
+            await connection.execute(text("ALTER SYSTEM RESET log_statement"))
+            await connection.execute(text("SELECT pg_reload_conf()"))
+        await admin.dispose()
+        _apply_roles(seeded)
+    assert "LEAK-CANARY" not in server.get_wrapped_container().logs().decode()
+
+
 async def test_the_purge_deletes_expired_uploads_and_egress_rows_across_tenants(
     maint_engine: AsyncEngine, seeded: str
 ) -> None:
@@ -447,3 +595,25 @@ async def test_tenant_session_scopes_every_transaction_it_opens(
         ).scalar_one()
     assert (first, second) == (1, 1)
     assert await _count(app_engine, "agent_runs") == 0
+
+
+async def test_the_migration_role_owns_the_schema_and_can_downgrade_and_upgrade(
+    seeded: str,
+) -> None:
+    admin = create_async_engine(
+        seeded.replace("postgresql://", "postgresql+asyncpg://")
+    )
+    async with admin.connect() as connection:
+        foreign = await connection.scalar(
+            text(
+                "SELECT count(*) FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = 'public' AND c.relkind = 'r' "
+                "AND r.rolname <> 'cerebro_migrator'"
+            )
+        )
+    await admin.dispose()
+    assert foreign == 0
+    migrator_url = _role_url(seeded, "cerebro_migrator").replace("+asyncpg", "")
+    for command in (["downgrade", "-1"], ["upgrade", "head"]):
+        _run([str(ALEMBIC), *command], seeded, MIGRATION_DATABASE_URL=migrator_url)

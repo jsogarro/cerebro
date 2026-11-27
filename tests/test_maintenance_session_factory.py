@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.core.config import settings
 from src.models.db import session as db_session
@@ -18,19 +19,25 @@ async def _reset_db() -> None:
     await db_session.close_db()
 
 
-async def test_production_refuses_to_start_without_a_maintenance_url(
-    monkeypatch,
+@pytest.mark.parametrize("environment", ["production", "test", "development"])
+async def test_postgres_refuses_to_start_without_a_maintenance_url(
+    monkeypatch, environment
 ) -> None:
-    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "ENVIRONMENT", environment)
     monkeypatch.setattr(settings, "MAINTENANCE_DATABASE_URL", None)
+    # The connection probe is not under test; hand back a SQLite engine for it.
+    monkeypatch.setattr(
+        db_session,
+        "create_engine",
+        lambda *a, **k: create_async_engine("sqlite+aiosqlite://"),
+    )
     with pytest.raises(RuntimeError, match="MAINTENANCE_DATABASE_URL"):
-        await db_session.init_db("sqlite+aiosqlite://")
+        await db_session.init_db("postgresql+asyncpg://u:p@h/d")
     with pytest.raises(RuntimeError, match="not initialized"):
         db_session.get_session_factory()
 
 
-async def test_development_falls_back_to_the_application_factory(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
+async def test_sqlite_falls_back_to_the_application_factory(monkeypatch) -> None:
     monkeypatch.setattr(settings, "MAINTENANCE_DATABASE_URL", None)
     await db_session.init_db("sqlite+aiosqlite://")
     assert (

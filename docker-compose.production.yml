@@ -1,6 +1,26 @@
 version: '3.9'
 
 services:
+  # One-shot: applies the database roles with the admin credential so the
+  # runtime container never holds it.
+  db-roles:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    entrypoint: ["python", "/docker/apply_roles.py"]
+    environment:
+      - ROLES_ADMIN_DATABASE_URL=postgresql+asyncpg://research:${DB_PASSWORD}@postgres:5432/research_db
+      - CEREBRO_MIGRATOR_PASSWORD=${CEREBRO_MIGRATOR_PASSWORD:?}
+      - CEREBRO_APP_PASSWORD=${CEREBRO_APP_PASSWORD:?}
+      - CEREBRO_MAINT_PASSWORD=${CEREBRO_MAINT_PASSWORD:?}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - cerebro-prod
+    restart: "no"
+
   # FastAPI Application (Production)
   api:
     build:
@@ -13,11 +33,7 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://research:${DB_PASSWORD}@postgres:5432/research_db
-      - ROLES_ADMIN_DATABASE_URL=postgresql+asyncpg://research:${DB_PASSWORD}@postgres:5432/research_db
-      - CEREBRO_MIGRATOR_PASSWORD=${CEREBRO_MIGRATOR_PASSWORD}
-      - CEREBRO_APP_PASSWORD=${CEREBRO_APP_PASSWORD}
-      - CEREBRO_MAINT_PASSWORD=${CEREBRO_MAINT_PASSWORD}
-      - MAINTENANCE_DATABASE_URL=postgresql+asyncpg://cerebro_maint:${CEREBRO_MAINT_PASSWORD}@postgres:5432/research_db
+      - MAINTENANCE_DATABASE_URL=postgresql+asyncpg://cerebro_maint:${CEREBRO_MAINT_PASSWORD:?}@postgres:5432/research_db
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       # Direct execution uses the FastAPI-owned in-process MASR runtime.
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
@@ -37,6 +53,8 @@ services:
       
       # Performance settings
     depends_on:
+      db-roles:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
