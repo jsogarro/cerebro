@@ -14,7 +14,8 @@ The API records an audit trail of requests, sets browser security headers on eve
 | Delimiter escaping of worker output | Active | research supervisor prompts | `src/security/content_sanitizer.py` (`escape_for_delimited_prompt`) |
 | Prompt-injection sanitizer | Active | MCP tool path (default on), constraint pinning (`ENABLE_CONSTRAINT_PINNING=true`) | `src/security/content_sanitizer.py` (`ContentSanitizer`) |
 | PII redaction for logs and traces | Active | log call sites, Langfuse trace input | `src/core/pii_redactor.py` (`redact_pii`) |
-| Memory encryption | Not wired | none | `src/core/memory_encryption.py` (`MemoryEncryption`) |
+| Uploaded-document encryption | Active | `document_cipher()` in the documents, critiques and similarity-checks routes and services | `src/core/memory_encryption.py` (`MemoryEncryption`, `document_cipher`) |
+| Memory-tier encryption | Not wired | none | `src/ai_brain/memory/working_memory.py`, `episodic_memory.py` |
 | Client address resolution | Active | audit, rate limiting, auth, login | `src/api/client_ip.py` (`client_ip`) |
 | Prometheus `/metrics` | Active | `GET /metrics` | `src/api/main.py`, `src/core/observability.py` |
 | LLM cost drift middleware | Active | every request | `src/api/middleware/cost_drift.py` (`LLMCostDriftMiddleware`) |
@@ -105,7 +106,9 @@ The middleware also deletes `Server`, `X-Powered-By`, `X-AspNet-Version` and `X-
 
 **PII redaction.** `redact_pii` (`PIIRedactor.redact`) replaces email addresses with `[EMAIL]`, US-style phone numbers with `[PHONE]`, `NNN-NN-NNNN` numbers with `[SSN]` and 13 to 19 digit runs (spaces and hyphens allowed between digits) with `[CREDIT_CARD]`. It is called where query text or error text reaches logs: the query, agent and talkhier routes (query previews), `MASRouter`, `QueryAnalyzer`, the OpenRouter provider (error text) and the Langfuse trace input.
 
-> **Not wired.** `MemoryEncryption` encrypts memory payloads with Fernet using the key passed in or read from `MEMORY_ENCRYPTION_KEY`, and passes data through unchanged when no key is set. Its only consumers are `WorkingMemoryManager` and `EpisodicMemoryManager`, and no production code constructs the memory tiers. See [not wired](15-not-wired.md).
+`MemoryEncryption` encrypts payloads and text with Fernet (a comma-separated key list rotates keys) and passes data through unchanged when no key is set. It is live through `document_cipher()`, which builds it from `DOCUMENT_ENCRYPTION_KEY` with no environment fallback and raises `DocumentEncryptionUnavailable` when the key is blank. The repositories for `uploaded_documents`, `critique_findings` and `similarity_matches` use it for their `*_enc` columns, and the API lifespan calls `require_document_key` so that enabling a document feature without a key stops startup. See [configuration](02-configuration.md#document-encryption).
+
+> **Not wired.** The memory-tier use of `MemoryEncryption` (the `MEMORY_ENCRYPTION_KEY` fallback in `WorkingMemoryManager` and `EpisodicMemoryManager`) has no production caller, because no production code constructs the memory tiers. See [not wired](15-not-wired.md).
 
 ## Request limits and client address
 
@@ -149,7 +152,7 @@ All four probes are in the public-route allowlist.
 |---|---|
 | `GET /health` | `200` `{"status": "healthy", "service": "research-platform-api"}` |
 | `GET /live` | `200` `{"status": "alive"}` |
-| `GET /ready` | `200` `{"status": "ready", "service": ..., "checks": {"database": "ok", "redis": "ok"}}` when a `SELECT 1` on Postgres and a `PING` on Redis each succeed within 2 seconds. Otherwise `503` with `"status": "not_ready"` and `"unavailable"` for each failed check. |
+| `GET /ready` | `200` `{"status": "ready", "service": ..., "checks": {"database": "ok", "redis": "ok", "audit_logger": "ok", "jwt_keys": "ok"}}` when a `SELECT 1` on Postgres, a `PING` on Redis, a running audit-logger flush task and a loadable JWT key pair each succeed within 2 seconds. Otherwise `503` with `"status": "not_ready"` and `"unavailable"` for each failed check. |
 | `GET /ws/health` | `200` `{"status": "healthy", "websocket_stats": ..., "timestamp": ...}`. `websocket_stats` comes from the connection manager. `timestamp` is a fixed string, not the current time (see [durable runs and events](08-durable-runs-and-events.md#project-progress-websockets)). |
 
 ## Tracing

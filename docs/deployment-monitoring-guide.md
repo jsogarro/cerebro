@@ -99,7 +99,7 @@ No manifest in `k8s/` deploys a web image, so the workflow builds none. The veri
 
 ## Health and readiness
 
-The probes `GET /health`, `GET /live`, `GET /ready` and `GET /ws/health` are unauthenticated; their bodies and the public-route allowlist are in [HTTP API](reference/03-http-api.md#health-and-metrics), and what `/ready` checks is in [security, audit and observability](reference/12-security-audit-observability.md#health-probes). The Dockerfile healthcheck and both compose files call `/health`; the Kubernetes deployment uses `/health` for liveness and `/ready` for readiness. `/health` checks no dependency, so use `/ready` to confirm Postgres and Redis. The rate limiter skips these paths.
+The probes `GET /health`, `GET /live`, `GET /ready` and `GET /ws/health` are unauthenticated; their bodies and the public-route allowlist are in [HTTP API](reference/03-http-api.md#health-and-metrics), and what `/ready` checks is in [security, audit and observability](reference/12-security-audit-observability.md#health-probes). The Dockerfile healthcheck calls `/health`; the `api` service healthcheck in both compose files calls `/ready`, and the `nginx` service healthchecks call nginx's proxied `/health`; the Kubernetes deployment uses `/health` for liveness and `/ready` for readiness. `/health` checks no dependency, so use `/ready` to confirm Postgres, Redis, the audit logger and the JWT keys. The rate limiter skips these paths.
 
 ## Monitoring
 

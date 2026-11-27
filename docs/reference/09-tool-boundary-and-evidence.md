@@ -18,7 +18,8 @@ Every tool call made by an agent goes through one mediator, `ToolBoundary`, whic
 | Durable tool audit (`agent_tool_invocations`) | Active | `SessionToolAuditStore` | `src/agents/tools/durable_audit.py` |
 | MCP tool path for plan workers | Active | `MCP_TOOL_PATH_ENABLED` (default `true`) | `src/ai_brain/integration/masr_supervisor_bridge.py` (`_execute_plan_worker`) |
 | Search evidence and source snapshots | Active | `SearchEvidenceRecorder` | `src/core/acquisition/search_evidence.py` |
-| Source fetch tool, `acquire`, PDF text extraction | Not wired | none | `src/core/acquisition/fetch_tool.py`, `service.py`, `pdf_text.py` |
+| Source fetch tool and `acquire` | Not wired | none | `src/core/acquisition/fetch_tool.py`, `service.py` |
+| PDF text extraction | Active | document upload ingestion, through the `extract_child.py` subprocess | `src/core/acquisition/pdf_text.py`, `extract_child.py` |
 | Final-report artifact and claim records | Active | `_persist_transition` on `succeeded` | `src/core/claims/resolution.py`, `recording.py` |
 | Citation validators | Not wired | none | `src/core/claims/citation_binding.py` |
 
@@ -140,7 +141,7 @@ Each source commits in its own session; a failed write is reported against its U
 
 Locators are `bytes`, `char` or `line` spans, optionally followed by annotation segments (`xpath`, `css`, `jsonptr`, `page`, `sheet`, `heading`); only the span is authoritative. `resolve(locator, snapshot_bytes)` returns the cited bytes and raises `UnresolvableLocatorError` for an out-of-range span rather than truncating.
 
-> **Not wired.** The `source.fetch` tool (`snapshot_fetch_tool`), `SourceAcquisitionService.acquire` and `read_excerpt`, and the PDF extractor (`extract_pdf_text`, `build_extracted_text_artifact`) have no caller outside their own modules. Only `record_retrieved_source` and `locate` are reached, through `SearchEvidenceRecorder`.
+> **Not wired.** The `source.fetch` tool (`snapshot_fetch_tool`), `SourceAcquisitionService.acquire` and `read_excerpt`, and `build_extracted_text_artifact` have no caller outside their own modules. `extract_pdf_text` is live: `src/core/acquisition/extract_child.py` calls it in the sandboxed subprocess that `src/services/document_ingestion.py` launches for uploaded PDFs. Only `record_retrieved_source` and `locate` are reached, through `SearchEvidenceRecorder`.
 
 ## Claims and provenance
 
@@ -159,7 +160,7 @@ Trust labels (`TrustClassification`) are ordered `trusted_control`, `application
 
 ## Citation validators
 
-> **Not wired.** `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`, `src/core/contracts/citation.py` and `src/core/acquisition/pdf_text.py` have no importer under `src/` outside their own group; only tests exercise them. See [not wired](15-not-wired.md).
+> **Not wired.** `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`, and `src/core/contracts/citation.py` have no importer under `src/` outside their own group; only tests exercise them. (`src/core/acquisition/pdf_text.py` is imported by `extract_child.py`, the document ingestion service, the document repository and the critique panel.) See [not wired](15-not-wired.md).
 
 ## MCP server
 

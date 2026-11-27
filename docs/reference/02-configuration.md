@@ -23,7 +23,8 @@ Cerebro reads configuration from process environment variables, optional dotenv 
 | Gemini client variables (`GEMINI_MODEL` and related) | Wired | `GeminiConfig.from_env` | `src/services/gemini_config.py` (`GeminiConfig.from_env`) |
 | Report variables | Active | `create_report_settings()` | `src/services/report_config.py` (`ReportSettings`) |
 | CLI variables (`RESEARCH_*`) | Active | `research-cli` | `src/cli/config.py` (`CLIConfig.from_env`) |
-| Memory encryption key | Not wired | `MemoryEncryption` | `src/core/memory_encryption.py` (`MemoryEncryption`) |
+| Document encryption key (`DOCUMENT_ENCRYPTION_KEY`) | Active | `require_document_key` at startup, `document_cipher()` | `src/core/memory_encryption.py` (`document_cipher`), `src/services/document_ingestion.py` |
+| Memory encryption key (`MEMORY_ENCRYPTION_KEY`) | Not wired | the memory tiers only | `src/core/memory_encryption.py` (`MemoryEncryption`) |
 | Compose-level variables | Active | `docker compose` | `docker-compose.yml`, `docker-compose.production.yml` |
 
 ## How configuration loads
@@ -363,9 +364,13 @@ No variable named `GEMINI_TIMEOUT` or `GEMINI_RETRY_*` is read anywhere in `src`
 
 See [CLI and web clients](13-cli-and-web-clients.md) for the commands.
 
+### Document encryption
+
+`DOCUMENT_ENCRYPTION_KEY` (default empty, no fallback to another variable) is a Fernet key; a comma-separated list rotates keys (the first encrypts, all decrypt). `document_cipher()` builds a `MemoryEncryption` from it and raises `DocumentEncryptionUnavailable` when it is blank, so a missing key never stores plaintext. The `*_enc` columns of `uploaded_documents`, `critique_findings`, `similarity_matches` and the document critique and similarity repositories use it. At startup `require_document_key` (called from the API lifespan) refuses to start when `DOCUMENT_UPLOADS_ENABLED`, `DOCUMENT_CRITIQUE_ENABLED` or `SIMILARITY_CHECKS_ENABLED` is true and the key is blank or not a valid Fernet key.
+
 ### Memory encryption
 
-> **Not wired.** `MemoryEncryption` reads `MEMORY_ENCRYPTION_KEY` to encrypt memory payloads with Fernet. Its only consumers are `WorkingMemoryManager` and `EpisodicMemoryManager`, which no production code constructs.
+> **Not wired.** The `MemoryEncryption` class is live, but only through `document_cipher()` above, which ignores `MEMORY_ENCRYPTION_KEY`. The `MEMORY_ENCRYPTION_KEY` fallback is read only by `WorkingMemoryManager` and `EpisodicMemoryManager`, which no production code constructs.
 
 ### Database migrations
 
@@ -436,7 +441,7 @@ The file also sets values that differ from the code defaults: `DEBUG=true` (defa
 - `src/services/gemini_config.py`: `GeminiConfig` and its `from_env` reader
 - `src/services/report_config.py`: `ReportSettings` and report format, template and quality tables
 - `src/cli/config.py`: `CLIConfig` and `RESEARCH_*` variables
-- `src/core/memory_encryption.py`: `MEMORY_ENCRYPTION_KEY` reader
+- `src/core/memory_encryption.py`: `MemoryEncryption`, `document_cipher` (`DOCUMENT_ENCRYPTION_KEY`) and the `MEMORY_ENCRYPTION_KEY` fallback
 - `src/ai_brain/router/factory.py`: maps `Settings` onto the MASR router configuration
 - `alembic/env.py`: `DATABASE_URL` for migrations
 - `.env.example`, `.env.production.example`, `.env.cli.example`: environment templates

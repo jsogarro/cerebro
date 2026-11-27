@@ -45,7 +45,7 @@ services:
       - research-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/ready"]
       interval: 10s
       timeout: 5s
       retries: 12

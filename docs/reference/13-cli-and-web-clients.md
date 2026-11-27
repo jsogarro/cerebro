@@ -139,7 +139,7 @@ A failed request prints `<operation> failed: <detail>` (for example `Failed to f
 
 ### Serving
 
-The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage, then an nginx image that runs as the `nginx` user and listens on 8080) and publishes it on host port `${WEB_HOST_PORT:-3000}`. Its nginx serves the built files with a fallback to `index.html` for client-side routes and does not proxy the API. The compose `nginx` service publishes `${NGINX_HTTP_HOST_PORT:-80}` and `${NGINX_HTTPS_HOST_PORT:-443}` and uses `docker/nginx/nginx.conf`: `/api/` and `/ws` go to `api:8000`, `/health` is answered by nginx itself, `/docs` is served from nginx's own static root (and returns 404 there), and every other path goes to `web:8080`. `/ready` and `/live`, which `research-cli health` calls, therefore reach the web container, not the API, when the CLI points at the nginx port.
+The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage, then an nginx image that runs as the `nginx` user and listens on 8080) and publishes it on host port `${WEB_HOST_PORT:-3000}`. Its nginx serves the built files with a fallback to `index.html` for client-side routes and does not proxy the API. The compose `nginx` service publishes `${NGINX_HTTP_HOST_PORT:-80}` and `${NGINX_HTTPS_HOST_PORT:-443}` and uses `docker/nginx/nginx.conf`: `/api/` and `/ws` go to `api:8000`, `/health` and `/ready` are proxied to `api:8000`, `/docs` is served from nginx's own static root (and returns 404 there), and every other path goes to `web:8080`. `/live` is not proxied and reaches the web container.
 
 ### Authentication
 

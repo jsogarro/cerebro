@@ -23,7 +23,18 @@ class TestHealthEndpoints:
     @pytest.mark.asyncio
     async def test_readiness_check(self, async_client: AsyncClient):
         """Test readiness check endpoint."""
-        response = await async_client.get("/ready")
+        from types import SimpleNamespace
+
+        from src.api.main import app
+
+        # ASGITransport skips the lifespan that starts the audit logger.
+        app.state.audit_logger = SimpleNamespace(
+            flush_task=SimpleNamespace(done=lambda: False)
+        )
+        try:
+            response = await async_client.get("/ready")
+        finally:
+            del app.state.audit_logger
 
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
