@@ -22,7 +22,10 @@ from src.agents.models import AgentTask
 from src.mcp.client import MCPClient
 
 CRITERIA = ["cost", "speed"]
-GOOD = {"cost": [1.0, 2.0, 3.0, 4.0], "speed": [2.0, 4.0, 6.0, 8.1]}
+GOOD = {
+    "cost": [float(i) for i in range(1, 11)],
+    "speed": [2.0 * i + (0.1 if i == 10 else 0.0) for i in range(1, 11)],
+}
 
 
 def _agent(client: MCPClient | None = None) -> ComparativeAnalysisAgent:
@@ -131,3 +134,18 @@ async def test_execute_reports_a_malformed_shape_as_a_failed_result() -> None:
 
     assert result.status == "failed"
     assert result.output["error_type"] == "ValueError"
+
+
+@pytest.mark.asyncio
+async def test_three_items_are_refused_with_the_minimum_named() -> None:
+    with pytest.raises(ValueError, match="at least 10"):
+        await _agent()._perform_statistical_comparison(
+            _input({"cost": [1, 2, 3], "speed": [2, 4, 6]})
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_minimum_sample_size_is_accepted() -> None:
+    result = await _agent()._perform_statistical_comparison(_input(GOOD))
+
+    assert "correlation_analysis" in result["tests_performed"]
