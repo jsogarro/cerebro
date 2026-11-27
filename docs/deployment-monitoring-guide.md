@@ -109,4 +109,4 @@ The series exported are the `llm_*` metrics defined in `src/core/observability.p
 
 The production compose file runs Prometheus and Grafana containers. Their configuration files are not in the repository (see [Docker Compose](#docker-compose-production-file)), so you must supply the scrape targets, dashboards and data sources.
 
-Logs go to standard output through structlog; `LOG_LEVEL` does not change their verbosity ([configuration](reference/02-configuration.md)). Read them with `docker compose logs -f api` (or `make logs-api` for the development stack) and `kubectl -n research-platform logs -f deployment/research-api`.
+Logs go to standard output through structlog; `LOG_LEVEL` sets the minimum level ([configuration](reference/02-configuration.md)). Read them with `docker compose logs -f api` (or `make logs-api` for the development stack) and `kubectl -n research-platform logs -f deployment/research-api`.

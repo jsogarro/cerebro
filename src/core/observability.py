@@ -1,12 +1,24 @@
 """Shared observability primitives."""
 
+import logging
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 
+import structlog
 from prometheus_client import Counter, Histogram
 from structlog import get_logger
 
 logger = get_logger(__name__)
+
+
+def configure_logging(level: str) -> None:
+    """Drop structlog events below ``level`` (``LOG_LEVEL``); an unknown name fails startup."""
+    structlog.configure(
+        wrapper_class=structlog.make_filtering_bound_logger(
+            logging.getLevelNamesMapping()[level.upper()]
+        )
+    )
+
 
 llm_call_duration_seconds = Histogram(
     "llm_call_duration_seconds",
