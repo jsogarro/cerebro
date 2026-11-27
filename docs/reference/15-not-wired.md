@@ -68,6 +68,9 @@ Tests that exercise it: `tests/test_prompt_safety.py`, `tests/test_cache_ttl_exp
 ## Delegation brief and prompt identity
 
 > **Not wired.** The `DelegationContract` brief that `LLMWorkerAgentBase` appends to a plan worker's model prompt is not covered by recorded prompt identity: worker prompts are not pinned today, and the brief is added after the agent builds its prompt. See [research execution](05-research-execution.md).
+## Literature analysis output
+
+> **Not wired.** The literature prompt asks the model to cite each finding by evidence id, but `LiteratureReviewAgent` does not check the model's output against the ids it sent. An unknown or missing source label is not rejected, and the output's bibliography counts are not tied to evidence coverage.
 
 ## Stub packages
 

@@ -304,7 +304,9 @@ async def test_a_failed_search_records_no_evidence_visibly(
     )
 
     status = service.active_executions[execution_id]
-    assert status.status == "completed", status.errors
+    # No evidence fails the required worker, and the run with it.
+    assert status.status == "failed"
+    assert any("WORKER_FAILED" in error for error in status.errors), status.errors
     evidence_rows = await _rows(
         test_engine, "SELECT * FROM agent_evidence WHERE run_id = :r", r=run_id
     )
@@ -316,11 +318,10 @@ async def test_a_failed_search_records_no_evidence_visibly(
         t=TOOL_ACADEMIC_SEARCH,
     )
     assert search["status"] != "succeeded"
-
-    output = status.final_output[WORKER_ID]
-    assert output.get("data_source") == "no_evidence", output
-    assert output["sources_found"] == []
-    assert output["total_sources"] == 0
+    (run,) = await _rows(
+        test_engine, "SELECT status FROM agent_runs WHERE run_id = :r", r=run_id
+    )
+    assert run["status"] != "succeeded"
     # No silent substitute: no LLM-named sources and no analysis of nothing.
     gemini.generate_structured_content.assert_not_awaited()
     model_call.assert_not_awaited()

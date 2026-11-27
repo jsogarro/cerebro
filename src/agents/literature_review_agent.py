@@ -13,12 +13,18 @@ from structlog import get_logger
 from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.models import AgentResult, AgentTask
 from src.agents.tools.mediation import ToolCallIdentity
+from src.core.acquisition.resolution import locate
+from src.core.acquisition.search_result import source_text
 from src.core.constants import LONG_TERM_CACHE_TTL
 from src.models.research_project import ResearchDepth
 from src.services.parsers.json_parser import parse_json_response
 from src.services.prompts.agent_prompts import generate_literature_agent_prompt
 
 logger = get_logger()
+
+
+class LiteratureAnalysisError(Exception):
+    """The model produced nothing usable; the message is the failure reason."""
 
 
 class LiteratureReviewAgent(LLMWorkerAgentBase):
@@ -71,30 +77,39 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 academic_sources = await self._search_academic_sources(
                     task.input_data, task
                 )
-                # With a tool path, only sources the tool boundary retrieved
-                # count. Anything else is recorded as no evidence rather than
-                # replaced by model-named sources.
-                if self.mcp_integration is not None and not (
+                # Only sources the tool boundary retrieved count, and when
+                # evidence is recorded only those that became evidence. Anything
+                # less is a failed run, never model-named or canned findings.
+                if not (
                     academic_sources.get("data_source") == "mcp_tools"
                     and academic_sources.get("sources")
                 ):
-                    self.log_warning(
-                        "literature_review_no_evidence",
-                        tool_outcome=academic_sources.get("tool_outcome"),
-                        error_code=academic_sources.get("error_code"),
+                    return self._failed_result(
+                        task,
+                        academic_sources,
+                        "INSUFFICIENT_EVIDENCE",
+                        str(
+                            academic_sources.get("error_code")
+                            or academic_sources.get("tool_outcome")
+                            or "no_sources_retrieved"
+                        ),
                     )
-                    academic_sources = {
-                        **academic_sources,
-                        "sources": [],
-                        "total_found": 0,
-                        "data_source": "no_evidence",
-                    }
-                    literature_analysis_dict: dict[str, Any] = {}
-                else:
+                if not self._select_sources(academic_sources):
+                    return self._failed_result(
+                        task,
+                        academic_sources,
+                        "INSUFFICIENT_EVIDENCE",
+                        "no_source_became_evidence",
+                    )
+                try:
                     literature_analysis_dict = (
                         await self._analyze_literature_with_gemini(
                             task.input_data, academic_sources, task
                         )
+                    )
+                except LiteratureAnalysisError as error:
+                    return self._failed_result(
+                        task, academic_sources, "ANALYSIS_FAILED", str(error)
                     )
                 from src.agents.schemas import LiteratureAnalysisSchema
 
@@ -151,6 +166,10 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 "databases_searched": academic_sources.get("databases_searched", []),
                 "formatted_citations": formatted_citations,
                 "knowledge_graph": knowledge_graph,
+                "analysis_status": "grounded"
+                if academic_sources.get("data_source") == "mcp_tools"
+                else "model_recalled",
+                "source_evidence": academic_sources.get("source_evidence", {}),
                 # Reported by the tool boundary, not inferred here. The
                 # expression this replaces read `success` alone, and every
                 # fallback set `success: True` -- so a fabricated stand-in was
@@ -428,39 +447,6 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         key_string = "|".join(key_parts)
         return hashlib.md5(key_string.encode()).hexdigest()
 
-    def _generate_mock_analysis(self, task: AgentTask) -> dict[str, Any]:
-        """
-        Generate mock analysis for testing without Gemini.
-
-        Args:
-            task: The task to analyze
-
-        Returns:
-            Mock literature analysis
-        """
-        return {
-            "search_strategy": "Mock systematic search",
-            "sources_found": [
-                {
-                    "title": f"Mock Paper {i}",
-                    "authors": [f"Author {i}"],
-                    "year": 2024 - i,
-                    "relevance_score": 0.9 - (i * 0.1),
-                }
-                for i in range(min(5, task.input_data.get("max_sources", 5)))
-            ],
-            "key_findings": [
-                "Mock finding 1: Significant correlation identified",
-                "Mock finding 2: Novel approach discovered",
-            ],
-            "methodologies_used": ["Systematic review", "Meta-analysis"],
-            "research_gaps": [
-                "Limited longitudinal studies",
-                "Lack of geographical diversity",
-            ],
-            "quality_assessment": "Mock quality assessment",
-        }
-
     async def _search_academic_sources(
         self, input_data: dict[str, Any], task: AgentTask | None = None
     ) -> dict[str, Any]:
@@ -475,10 +461,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             Academic search results
         """
         if not self.mcp_integration:
-            self.log_warning(
-                "MCP integration not available, using Gemini source search"
-            )
-            return await self._fallback_academic_search(input_data, task)
+            return self._no_evidence_search("search_unavailable")
 
         query = input_data.get("query", "")
         domains = input_data.get("domains", [])
@@ -502,14 +485,28 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 identity=ToolCallIdentity.from_agent_task(task),
             )
 
-            self.log_info(
-                f"Academic search completed: {result.get('total_found', 0)} sources found"
-            )
-            return dict(result)
-
         except OSError as e:
             self.log_error(f"MCP academic search failed: {e}")
-            return self._static_fallback_sources(query, domains)
+            return self._no_evidence_search("search_unreachable")
+
+        if not isinstance(result, dict):
+            return self._no_evidence_search("malformed_search_result")
+        self.log_info(
+            f"Academic search completed: {result.get('total_found', 0)} sources found"
+        )
+        return result
+
+    @staticmethod
+    def _no_evidence_search(reason: str) -> dict[str, Any]:
+        return {
+            "success": False,
+            "sources": [],
+            "total_found": 0,
+            "databases_searched": [],
+            "search_strategy": "No source search available",
+            "data_source": "no_evidence",
+            "error_code": reason,
+        }
 
     async def _analyze_literature_with_gemini(
         self,
@@ -528,29 +525,94 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         Returns:
             Literature analysis from Gemini
         """
-        # Prepare sources for Gemini analysis
-        sources_text = self._prepare_sources_for_analysis(
-            academic_sources.get("sources", [])
-        )
-
         enhanced_input = input_data.copy()
-        enhanced_input["found_sources"] = sources_text
-        enhanced_input["source_count"] = len(academic_sources.get("sources", []))
+        enhanced_input["found_sources"] = self._prepare_sources_for_analysis(
+            self._select_sources(academic_sources)
+        )
 
         prompt = generate_literature_agent_prompt(enhanced_input)
 
+        content, _confidence = await self._generate_with_routing(prompt, task)
+        if content is None:
+            raise LiteratureAnalysisError("no_model_output")
         try:
-            # Use routing instead of direct Gemini call
-            content, _confidence = await self._generate_with_routing(prompt, task)
-            if content is None:
-                return self._generate_mock_analysis_from_sources(academic_sources)
-
             parsed_response = parse_json_response(content)
-            result = parsed_response.get("literature_analysis", {})
-            return dict(result) if isinstance(result, dict) else {}
         except (ValueError, TypeError) as e:
-            self.log_error(f"Gemini analysis failed: {e}")
-            return self._generate_mock_analysis_from_sources(academic_sources)
+            raise LiteratureAnalysisError("unparseable_model_output") from e
+        result = parsed_response.get("literature_analysis")
+        if not isinstance(result, dict):
+            raise LiteratureAnalysisError("unparseable_model_output")
+        return dict(result)
+
+    def _select_sources(self, academic_sources: dict[str, Any]) -> list[dict[str, Any]]:
+        """Sources the analysis may use, each tagged with its evidence id and locator.
+
+        When the search recorded evidence, only sources that became evidence
+        qualify, so every conclusion can cite something durable.
+        """
+        sources = academic_sources.get("sources") or []
+        recording = academic_sources.get("source_evidence") or {}
+        if "recorded" not in recording:
+            return list(sources)
+        evidence_by_index = {
+            outcome["index"]: outcome["evidence_id"]
+            for outcome in recording.get("sources", [])
+            if outcome.get("evidence_id")
+        }
+        selected = []
+        for index, source in enumerate(sources):
+            if index not in evidence_by_index:
+                continue
+            length = len(source_text(source).encode())
+            selected.append(
+                {
+                    **source,
+                    "evidence_id": evidence_by_index[index],
+                    "locator": locate("bytes", 0, length),
+                }
+            )
+        return selected
+
+    def _failed_result(
+        self,
+        task: AgentTask,
+        academic_sources: dict[str, Any],
+        error_code: str,
+        reason: str,
+    ) -> AgentResult:
+        """A failed result that carries what was retrieved and why it stopped."""
+        self.log_warning(
+            "literature_review_failed", error_code=error_code, reason=reason
+        )
+        retrieved = (
+            []
+            if error_code == "INSUFFICIENT_EVIDENCE"
+            else self._rank_sources_by_relevance(academic_sources.get("sources", []))
+        )
+        return AgentResult(
+            task_id=task.id,
+            status="failed",
+            output={
+                "error": f"{error_code}: {reason}",
+                "error_code": error_code,
+                "reason": reason,
+                "analysis_status": "no_evidence"
+                if error_code == "INSUFFICIENT_EVIDENCE"
+                else "analysis_failed",
+                "data_source": "no_evidence"
+                if error_code == "INSUFFICIENT_EVIDENCE"
+                else academic_sources.get("data_source"),
+                "sources_found": retrieved,
+                "total_sources": len(retrieved),
+                "key_findings": [],
+                "research_gaps": [],
+                "methodologies_used": [],
+                "source_evidence": academic_sources.get("source_evidence", {}),
+            },
+            confidence=0.0,
+            execution_time=0.0,
+            metadata=self.build_execution_metadata(task_type=task.agent_type),
+        )
 
     async def _build_literature_knowledge_graph(
         self,
@@ -662,37 +724,28 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         return list(set(databases))
 
     def _prepare_sources_for_analysis(self, sources: list[dict[str, Any]]) -> str:
-        """
-        Prepare sources text for Gemini analysis.
+        """Render sources for the prompt with their evidence ids and locators.
 
-        Args:
-            sources: List of source dictionaries
-
-        Returns:
-            Formatted sources text
+        ponytail: whole abstracts, top 10 sources; fitting to a token budget is
+        the bounded-selection slice's job.
         """
         if not sources:
             return "No sources found."
 
-        sources_text = []
-        for i, source in enumerate(sources[:10], 1):  # Top 10 sources
-            source_info = f"{i}. {source.get('title', 'Unknown Title')}"
+        blocks = []
+        for i, source in enumerate(sources[:10], 1):
+            line = f"{i}. {source.get('title', 'Unknown Title')}"
             if source.get("authors"):
-                source_info += (
-                    f" by {', '.join(source['authors'][:3])}"  # First 3 authors
-                )
+                line += f" by {', '.join(source['authors'][:3])}"
             if source.get("year"):
-                source_info += f" ({source['year']})"
+                line += f" ({source['year']})"
+            if source.get("evidence_id"):
+                line += f"\nEvidence: {source['evidence_id']} @ {source['locator']}"
             if source.get("abstract"):
-                abstract = (
-                    source["abstract"][:200] + "..."
-                    if len(source["abstract"]) > 200
-                    else source["abstract"]
-                )
-                source_info += f"\\nAbstract: {abstract}"
-            sources_text.append(source_info)
+                line += f"\nAbstract: {source['abstract']}"
+            blocks.append(line)
 
-        return "\\n\\n".join(sources_text)
+        return "\n\n".join(blocks)
 
     async def _search_sources_structured(
         self, input_data: dict[str, Any]
@@ -800,156 +853,6 @@ Analyze the literature and provide:
             methodologies_used=analysis.get("methodologies_used", []),
             quality_assessment=analysis.get("quality_assessment", "Unable to assess"),
         )
-
-    async def _fallback_academic_search(
-        self, input_data: dict[str, Any], task: AgentTask | None = None
-    ) -> dict[str, Any]:
-        """
-        Fallback academic search using Gemini when MCP tools are unavailable.
-
-        Uses the LLM's training knowledge to identify real, published academic
-        papers relevant to the query.
-
-        Args:
-            input_data: Task input data
-            task: Optional AgentTask for routing context
-
-        Returns:
-            Search results with real academic sources identified by Gemini
-        """
-        query = input_data.get("query", "")
-        domains = input_data.get("domains", [])
-        max_sources = input_data.get("max_sources", 10)
-
-        domains_str = ", ".join(domains) if domains else "general research"
-        prompt = f"""You are an academic research librarian. Identify {max_sources} real, published academic papers
-relevant to this research question:
-
-"{query}"
-
-Domains: {domains_str}
-
-Return ONLY valid JSON (no markdown fences) with this exact structure:
-{{
-  "sources": [
-    {{
-      "title": "exact paper title",
-      "authors": ["First Author", "Second Author"],
-      "year": 2023,
-      "journal": "journal or conference name",
-      "abstract": "2-3 sentence summary of the paper's contribution",
-      "doi": "DOI if known, otherwise null",
-      "relevance_score": 0.95
-    }}
-  ]
-}}
-
-Requirements:
-- Only include papers you are confident actually exist
-- Prioritize influential, highly-cited papers from top venues
-- Include a mix of recent (2022-2025) and foundational papers
-- Sort by relevance_score (highest first)
-- If you are not sure a paper exists, do not include it"""
-
-        try:
-            self.log_info(f"Searching for sources via Gemini: {query[:80]}...")
-
-            if task is None:
-                task = AgentTask(
-                    id="fallback_search",
-                    agent_type="literature_review",
-                    input_data=input_data,
-                )
-
-            # Use routing instead of direct Gemini call
-            content, _confidence = await self._generate_with_routing(prompt, task)
-            if content is None:
-                return self._static_fallback_sources(query, domains)
-
-            self.log_info(f"Gemini source response: {len(content)} chars")
-            from src.services.parsers.json_parser import parse_json_response
-
-            parsed = parse_json_response(content)
-
-            if "sources" in parsed:
-                sources = parsed["sources"]
-            elif isinstance(parsed, list):
-                sources = parsed
-            elif "title" in parsed and "authors" in parsed:
-                # Single source returned as top-level object
-                sources = [parsed]
-            else:
-                sources = []
-
-            if sources:
-                self.log_info(f"Gemini identified {len(sources)} academic sources")
-                return {
-                    "success": True,
-                    "sources": sources,
-                    "total_found": len(sources),
-                    "databases_searched": ["gemini_knowledge"],
-                    "search_strategy": "LLM-assisted source identification (Gemini)",
-                    # This method IS the fallback (called when MCP tools are
-                    # unavailable, see call sites above), and these sources
-                    # are recalled from the model's training knowledge, not
-                    # retrieved from a database. Labeling that "not a
-                    # fallback" was the defect; this is the correct label.
-                    "fallback": True,
-                }
-            self.log_warning(
-                f"Gemini returned no sources. Parsed keys: {list(parsed.keys())}"
-            )
-        except (ValueError, TypeError) as e:
-            self.log_error(f"Gemini source search failed: {e}")
-
-        return self._static_fallback_sources(query, domains)
-
-    def _static_fallback_sources(
-        self, query: str, domains: list[str]
-    ) -> dict[str, Any]:
-        """Last-resort static fallback when both MCP and Gemini are unavailable."""
-        return {
-            "success": False,
-            "sources": [],
-            "total_found": 0,
-            "databases_searched": [],
-            "search_strategy": "No source search available",
-            "fallback": True,
-        }
-
-    def _generate_mock_analysis_from_sources(
-        self, academic_sources: dict[str, Any]
-    ) -> dict[str, Any]:
-        """
-        Generate mock Gemini analysis based on real sources.
-
-        Args:
-            academic_sources: Real or mock academic sources
-
-        Returns:
-            Mock literature analysis
-        """
-        sources = academic_sources.get("sources", [])
-        source_count = len(sources)
-
-        return {
-            "key_findings": [
-                f"Analysis of {source_count} sources reveals significant patterns",
-                "Methodological consistency across studies",
-                "Emerging trends in the field identified",
-            ],
-            "methodologies_used": [
-                "Systematic literature review",
-                "Thematic analysis",
-                "Cross-study comparison",
-            ],
-            "research_gaps": [
-                "Limited longitudinal studies in the dataset",
-                "Need for more diverse geographical representation",
-                "Methodological standardization required",
-            ],
-            "quality_assessment": f"Analysis based on {source_count} peer-reviewed sources with good methodological rigor",
-        }
 
     def _get_mcp_status(self) -> dict[str, Any]:
         """Get MCP integration status."""

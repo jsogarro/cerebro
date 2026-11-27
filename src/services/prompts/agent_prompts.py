@@ -15,7 +15,7 @@ from src.services.prompts.base_prompts import (
 AGENT_PROMPT_TEMPLATE_METADATA: dict[str, dict[str, str]] = {
     "literature_review": {
         "template": "generate_literature_agent_prompt",
-        "version": "1.0.0",
+        "version": "1.1.0",
     },
     "comparative_analysis": {
         "template": "generate_comparative_agent_prompt",
@@ -63,11 +63,21 @@ def generate_literature_agent_prompt(task: dict[str, Any]) -> str:
     domains = task.get("domains", [])
     max_sources = task.get("max_sources", 50)
 
+    found_sources = task.get("found_sources")
+    sources_block = (
+        f"""
+Retrieved sources (the only evidence you may draw on; cite each finding by its evidence id):
+{found_sources}
+"""
+        if found_sources
+        else ""
+    )
+
     task_description = f"""
 Conduct a systematic literature review on: {query}
 Research domains: {", ".join(domains)}
 Target number of sources: {max_sources}
-
+{sources_block}
 Please provide a comprehensive literature analysis following systematic review protocols.
 """
 
