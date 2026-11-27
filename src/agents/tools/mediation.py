@@ -117,6 +117,13 @@ ATTEMPT_ID_CONTEXT_KEY: Final[str] = "attempt_id"
 ORGANIZATION_ID_CONTEXT_KEY: Final[str] = "organization_id"
 """Context key carrying the durable organization identifier for an agent task."""
 
+WORKER_SCOPE_CONTEXT_KEY: Final[str] = "worker_scope"
+"""Context key carrying the admitted ``<execution_plan_id>:<worker_id>`` scope.
+
+Set only by the plan executor from the frozen plan, so a worker's identical
+tool calls stay distinct from another worker's under the one root task.
+"""
+
 DEFAULT_GRANT_TTL: Final[timedelta] = timedelta(minutes=5)
 """How long a self-issued grant stays valid.
 
@@ -158,6 +165,7 @@ class ToolCallIdentity:
     attempt_id: str
     organization_id: str | None = None
     bound: bool = True
+    worker_scope: str | None = None
     """Whether a caller actually supplied this identity.
 
     ``False`` means it was synthesized. It is carried into the returned payload
@@ -216,6 +224,11 @@ class ToolCallIdentity:
             run_id=run_id,
             task_id=task_id,
             attempt_id=attempt_id,
+            worker_scope=(
+                str(context[WORKER_SCOPE_CONTEXT_KEY])
+                if context.get(WORKER_SCOPE_CONTEXT_KEY)
+                else None
+            ),
             organization_id=organization_id
             or (
                 str(context[ORGANIZATION_ID_CONTEXT_KEY])
@@ -515,6 +528,7 @@ __all__ = [
     "RUN_ID_CONTEXT_KEY",
     "SELF_ISSUED_SCOPE_PREFIX",
     "TASK_ID_CONTEXT_KEY",
+    "WORKER_SCOPE_CONTEXT_KEY",
     "UNBOUND_RUN_PREFIX",
     "InMemoryToolAuditStore",
     "SelfIssuedPolicy",

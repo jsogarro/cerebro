@@ -21,6 +21,7 @@ from src.agents.llm_worker_base import (
     render_upstream_evidence,
 )
 from src.agents.models import AgentResult, AgentTask
+from src.agents.tools.mediation import WORKER_SCOPE_CONTEXT_KEY
 from src.core.budget import (
     BUDGET_LEDGER_CONTEXT_KEY,
     BudgetExceededError,
@@ -364,7 +365,13 @@ class ExecutionPlanTopologyExecutor:
                         },
                     },
                 },
-                context={**task.context, BUDGET_LEDGER_CONTEXT_KEY: ledger},
+                context={
+                    **task.context,
+                    BUDGET_LEDGER_CONTEXT_KEY: ledger,
+                    WORKER_SCOPE_CONTEXT_KEY: (
+                        f"{plan.execution_plan_id}:{worker.worker_id}"
+                    ),
+                },
                 timeout=decision.budget.task_timeout_seconds,
                 priority=task.priority,
             )
