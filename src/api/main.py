@@ -166,11 +166,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             event_publisher.shutdown,
         )
 
-        from src.models.db.session import get_session_factory, init_db
+        from src.models.db import session as db_session
+        from src.models.db.session import close_db, get_session_factory, init_db
 
         database_initialized = False
         try:
+            opens_engine = db_session._engine is None
             await init_db()
+            if opens_engine:
+                # Pooled connections are bound to this event loop; a later
+                # lifespan in another loop must not inherit them.
+                resources.push_async_callback(
+                    _close_lifespan_resource, "database", close_db
+                )
             database_initialized = True
             logger.info("Database initialized")
 
@@ -488,7 +496,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     "Langfuse shutdown timed out after 5 s — background export threads may still be running"
                 )
 
-            # await close_database()
             # await close_redis()
             # await close_temporal()
 
