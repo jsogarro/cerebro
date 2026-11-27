@@ -229,8 +229,11 @@ async def _run(
         organization_id=ORG_ID,
     )
     if wait:
+        # Workflows only: a lease heartbeat outlives its workflow while a
+        # refused terminal write is still waiting to land.
         await asyncio.wait_for(
-            asyncio.gather(*service._background_tasks, return_exceptions=True), 30
+            asyncio.gather(*service._workflow_tasks.values(), return_exceptions=True),
+            30,
         )
     return _Harness(service, execution_id, run_id)
 
