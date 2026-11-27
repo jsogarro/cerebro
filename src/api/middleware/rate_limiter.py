@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 import redis.asyncio as redis
 import structlog
+from prometheus_client import Counter
 from redis.exceptions import RedisError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -145,6 +146,12 @@ class ResilientRateLimitStore:
             logger.warning("Rate-limit primary store unavailable", error=str(exc))
 
 
+rate_limit_rejections_total = Counter(
+    "cerebro_rate_limit_rejections_total",
+    "Requests rejected with 429 by the rate limiter.",
+)
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Apply per-user or per-client fixed-window rate limits."""
 
@@ -181,6 +188,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         result = await self.check_request(request)
         if not result.allowed:
+            rate_limit_rejections_total.inc()
             audit_rejection(request, AuditEventType.RATE_LIMIT_EXCEEDED, "rate limit")
             return JSONResponse(
                 status_code=HTTP_429_TOO_MANY_REQUESTS,

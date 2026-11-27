@@ -71,3 +71,27 @@ async def test_rotating_x_api_key_does_not_evade_login_rate_limit(
     # Requests under the limit reach the route (whatever it answers without a DB).
     assert 429 not in statuses[:LIMIT]
     assert statuses[LIMIT:] == [429, 429]
+
+
+@pytest.mark.asyncio
+async def test_each_429_increments_the_exposed_counter(
+    limiter: RateLimitMiddleware,
+) -> None:
+    from prometheus_client import REGISTRY
+
+    from src.api.main import app
+
+    def rejected() -> float:
+        return REGISTRY.get_sample_value("cerebro_rate_limit_rejections_total") or 0.0
+
+    before = rejected()
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        statuses = [
+            (await client.post(LOGIN, json={})).status_code for _ in range(LIMIT + 2)
+        ]
+
+    assert statuses.count(429) == 2
+    assert rejected() - before == 2

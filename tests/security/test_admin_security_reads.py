@@ -70,3 +70,59 @@ async def test_superuser_reads_globally(app: FastAPI, path: str) -> None:
 async def test_limit_is_bounded(app: FastAPI, path: str) -> None:
     async with _as(app, superuser=True) as client:
         assert (await client.get(path, params={"limit": 100000})).status_code == 422
+
+
+class _AckDb:
+    def __init__(self, alert: Any | None) -> None:
+        self.alert = alert
+
+    async def get(self, model: Any, key: Any) -> Any:
+        return self.alert if self.alert is not None and key == self.alert.id else None
+
+
+def _alert() -> Any:
+    from src.models.db.security_alert import (
+        AlertSeverity,
+        AlertStatus,
+        AlertType,
+        SecurityAlert,
+    )
+
+    return SecurityAlert(
+        id=uuid.uuid4(),
+        alert_type=AlertType.FAILED_LOGIN_ATTEMPTS,
+        severity=AlertSeverity.HIGH,
+        status=AlertStatus.NEW,
+        title="t",
+        description="d",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+
+async def test_non_superuser_cannot_acknowledge(app: FastAPI) -> None:
+    alert = _alert()
+    app.dependency_overrides[get_session] = lambda: _AckDb(alert)
+    async with _as(app, superuser=False) as client:
+        response = await client.post(f"/admin/alerts/{alert.id}/acknowledge")
+    assert response.status_code == 403
+    assert alert.acknowledged_by is None
+
+
+async def test_superuser_acknowledge_records_who(app: FastAPI) -> None:
+    alert = _alert()
+    app.dependency_overrides[get_session] = lambda: _AckDb(alert)
+    async with _as(app, superuser=True) as client:
+        response = await client.post(f"/admin/alerts/{alert.id}/acknowledge")
+        who = app.dependency_overrides[get_current_active_user]().id
+    assert response.status_code == 200
+    assert response.json()["status"] == "acknowledged"
+    assert alert.acknowledged_by == str(who)
+    assert alert.acknowledged_at is not None
+
+
+async def test_acknowledging_an_unknown_alert_is_404(app: FastAPI) -> None:
+    app.dependency_overrides[get_session] = lambda: _AckDb(None)
+    async with _as(app, superuser=True) as client:
+        response = await client.post(f"/admin/alerts/{uuid.uuid4()}/acknowledge")
+    assert response.status_code == 404
