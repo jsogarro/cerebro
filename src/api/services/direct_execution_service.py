@@ -63,7 +63,10 @@ from ...agents.tools.mediation import (
     RUN_ID_CONTEXT_KEY,
     TASK_ID_CONTEXT_KEY,
 )
-from ...ai_brain.integration.execution_plan_topology import PlanExecutionResult
+from ...ai_brain.integration.execution_plan_topology import (
+    PlanExecutionResult,
+    WorkerOutcomeStatus,
+)
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from ...ai_brain.router.execution_plan_compiler import ExecutionPlanCompiler
 from ...ai_brain.router.masr import MASRouter
@@ -2592,7 +2595,17 @@ class DirectExecutionService:
     ) -> None:
         """Record a semantic worker failure as terminal; retrying cannot fix it."""
         failures = plan_result.failures
-        execution_status.failure_code = "WORKER_FAILED"
+        timed_out = next(
+            (
+                o
+                for o in plan_result.outcomes.values()
+                if o.status is WorkerOutcomeStatus.TIMED_OUT
+            ),
+            None,
+        )
+        execution_status.failure_code = (
+            timed_out.code if timed_out and timed_out.code else "WORKER_FAILED"
+        )
         execution_status.errors.extend(
             f"{f['worker_id']}: {f['status']} ({f['code']})" for f in failures
         )
@@ -2601,7 +2614,9 @@ class DirectExecutionService:
             execution_status,
             run_target=RunStatus.FAILED,
             task_target=TaskStatus.FAILED,
-            attempt_target=AttemptStatus.FAILED,
+            attempt_target=(
+                AttemptStatus.TIMED_OUT if timed_out else AttemptStatus.FAILED
+            ),
             event_type="run.failed",
             payload=self._terminal_payload(
                 execution_status,

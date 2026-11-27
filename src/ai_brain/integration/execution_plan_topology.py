@@ -6,6 +6,7 @@ import asyncio
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -232,7 +233,9 @@ class ExecutionPlanTopologyExecutor:
         worker_executor: WorkerExecutor,
         capability_checker: CapabilityChecker,
         upstream_checker: UpstreamChecker | None = None,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
+        self._clock = clock
         self._worker_executor = worker_executor
         self._capability_checker = capability_checker
         self._upstream_checker = upstream_checker
@@ -365,9 +368,24 @@ class ExecutionPlanTopologyExecutor:
                 timeout=decision.budget.task_timeout_seconds,
                 priority=task.priority,
             )
-            async with semaphore:
-                ledger.ensure_not_exceeded()
-                return await self._worker_executor(worker, worker_task)
+            # One budget covers queueing and the call: a worker waiting on the
+            # semaphore cannot outlive the plan deadline.
+            remaining = (plan.deadline - self._clock()).total_seconds()
+            task_limit = decision.budget.task_timeout_seconds
+            code = "DEADLINE_EXCEEDED" if remaining <= task_limit else "TASK_TIMEOUT"
+            if remaining > 0:
+                try:
+                    async with asyncio.timeout(min(remaining, task_limit)) as limit:
+                        async with semaphore:
+                            ledger.ensure_not_exceeded()
+                            return await self._worker_executor(worker, worker_task)
+                except TimeoutError:
+                    if not limit.expired():  # raised by the worker, not our limit
+                        raise
+            preflight_failures[worker_id] = WorkerOutcome(
+                worker_id, WorkerOutcomeStatus.TIMED_OUT, code
+            )
+            return None
 
         while pending:
             ready = sorted(

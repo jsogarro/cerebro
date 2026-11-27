@@ -78,7 +78,7 @@ def _plan(
         routing_policy_id="policy-1",
         routing_policy_version="1",
         compiled_at=now,
-        deadline=now + timedelta(minutes=1),
+        deadline=datetime.now(UTC) + timedelta(minutes=1),
         amendment=None,
         routing_decision=RoutingDecision(
             routing_decision_id="decision-1",
@@ -582,3 +582,57 @@ def test_production_bridge_wires_the_upstream_consumer_check() -> None:
 
     with pytest.raises(ExecutionTopologyUnsupportedError, match="'check'"):
         bridge.admit_execution_plan(plan)
+
+
+@pytest.mark.asyncio
+async def test_an_expired_plan_dispatches_no_worker() -> None:
+    plan = _plan()
+    dispatched: list[str] = []
+
+    async def execute(worker: WorkerAssignment, task: AgentTask) -> AgentResult:
+        dispatched.append(str(worker.worker_id))
+        return AgentResult(task.id, "success", {}, 1, 0)
+
+    result = await ExecutionPlanTopologyExecutor(
+        worker_executor=execute,
+        capability_checker=lambda _: True,
+        clock=lambda: plan.deadline + timedelta(seconds=1),
+    ).execute(plan, AgentTask(id="root", agent_type="execution_plan", input_data={}))
+
+    assert dispatched == []
+    assert not result.succeeded
+    assert {(o.status.value, o.code) for o in result.outcomes.values()} == {
+        ("timed_out", "DEADLINE_EXCEEDED")
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_worker_queued_behind_the_semaphore_is_bound_by_the_deadline() -> None:
+    plan = _plan()
+    decision = plan.routing_decision
+    plan = plan.model_copy(
+        update={
+            "deadline": datetime.now(UTC) + timedelta(seconds=0.3),
+            "routing_decision": decision.model_copy(
+                update={
+                    "budget": decision.budget.model_copy(
+                        update={"max_parallel_tasks": 1}
+                    )
+                }
+            ),
+        }
+    )
+    dispatched: list[str] = []
+
+    async def execute(worker: WorkerAssignment, task: AgentTask) -> AgentResult:
+        dispatched.append(str(worker.worker_id))
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    result = await ExecutionPlanTopologyExecutor(
+        worker_executor=execute, capability_checker=lambda _: True
+    ).execute(plan, AgentTask(id="root", agent_type="execution_plan", input_data={}))
+
+    assert dispatched == ["worker-a"]
+    assert {o.code for o in result.outcomes.values()} == {"DEADLINE_EXCEEDED"}
+    assert set(result.outcomes) == {"worker-a", "worker-b"}

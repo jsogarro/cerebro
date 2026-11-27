@@ -97,7 +97,14 @@ def _worker(worker_type: str, schema: dict[str, Any] = _NO_SCHEMA) -> WorkerAssi
     )
 
 
-def _binding(run_id: str, workers: tuple[WorkerAssignment, ...]):
+def _binding(
+    run_id: str,
+    workers: tuple[WorkerAssignment, ...],
+    *,
+    task_timeout_seconds: int = 60,
+    deadline_seconds: float = 600,
+    dependencies: tuple[tuple[str, str], ...] = (),
+):
     now = datetime.now(UTC)
     raw = ExecutionAuthorityBinding.create_for_test(
         authority_id=AUTHORITY_ID,
@@ -118,6 +125,10 @@ def _binding(run_id: str, workers: tuple[WorkerAssignment, ...]):
                 relation="delegates",
             )
             for w in workers
+        )
+        + tuple(
+            RoutingEdge(source_node_id=src, target_node_id=dst, relation="depends_on")
+            for src, dst in dependencies
         ),
         provider_model_policy=ProviderModelPolicy(
             primary=ProviderModelRoute(provider="gemini", model="gemini-2.5-pro"),
@@ -132,17 +143,26 @@ def _binding(run_id: str, workers: tuple[WorkerAssignment, ...]):
             max_tool_invocations=0,
             max_parallel_tasks=len(workers),
             max_attempts_per_task=1,
-            task_timeout_seconds=60,
+            task_timeout_seconds=task_timeout_seconds,
         ),
         stop_conditions=("complete",),
         evaluator_requirements=(),
-        deadline=now + timedelta(minutes=10),
+        deadline=now + timedelta(seconds=deadline_seconds),
         compiled_at=now,
     )
+    # Dependency edges need a data-handoff workflow version.
+    version = "2" if dependencies else "1"
     return dataclasses.replace(
         raw,
         run=raw.run.model_copy(
-            update={"tenant_id": ORG_ID, "idempotency_key": f"key-{run_id}"}
+            update={
+                "tenant_id": ORG_ID,
+                "idempotency_key": f"key-{run_id}",
+                "workflow_definition_version": version,
+            }
+        ),
+        workflow_definition=raw.workflow_definition.model_copy(
+            update={"workflow_version": version}
         ),
     )
 
