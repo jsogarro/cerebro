@@ -154,7 +154,7 @@ class MultiTierMemorySystem:
 
             return token_count
 
-        except Exception as e:
+        except (TypeError, ValueError) as e:
             logger.debug(
                 "Failed to measure recall result tokens",
                 error=str(e),
@@ -195,44 +195,39 @@ class MultiTierMemorySystem:
             True if stored successfully
         """
 
-        try:
-            self.total_operations += 1
+        self.total_operations += 1
 
-            # Store in working memory (conversation context)
-            if context.session_id:
-                success_working = await self._store_in_working_memory(
-                    context, interaction_data
-                )
-            else:
-                success_working = True
-
-            # Store in episodic memory (interaction history)
-            success_episodic = await self._store_in_episodic_memory(
-                context, interaction_data, performance_score
-            )
-
-            # Extract and store knowledge in semantic memory
-            success_semantic = await self._extract_and_store_knowledge(
+        # Store in working memory (conversation context)
+        if context.session_id:
+            success_working = await self._store_in_working_memory(
                 context, interaction_data
             )
+        else:
+            success_working = True
 
-            # Learn procedures if applicable
-            success_procedural = await self._learn_procedures(
-                context, interaction_data, performance_score
-            )
+        # Store in episodic memory (interaction history)
+        success_episodic = await self._store_in_episodic_memory(
+            context, interaction_data, performance_score
+        )
 
-            return all(
-                [
-                    success_working,
-                    success_episodic,
-                    success_semantic,
-                    success_procedural,
-                ]
-            )
+        # Extract and store knowledge in semantic memory
+        success_semantic = await self._extract_and_store_knowledge(
+            context, interaction_data
+        )
 
-        except Exception as e:
-            logger.error(f"Failed to store interaction: {e}")
-            return False
+        # Learn procedures if applicable
+        success_procedural = await self._learn_procedures(
+            context, interaction_data, performance_score
+        )
+
+        return all(
+            [
+                success_working,
+                success_episodic,
+                success_semantic,
+                success_procedural,
+            ]
+        )
 
     async def intelligent_recall(
         self, query: str, context: MemoryContext, max_results: int | None = None
@@ -249,68 +244,61 @@ class MultiTierMemorySystem:
             Intelligent recall results
         """
 
-        try:
-            self.total_operations += 1
-            max_results = max_results or self.max_recall_items
+        self.total_operations += 1
+        max_results = max_results or self.max_recall_items
 
-            # Parallel retrieval from all tiers
-            recall_tasks = [
-                self._recall_from_working_memory(query, context),
-                self._recall_from_episodic_memory(query, context),
-                self._recall_from_semantic_memory(query, context),
-                self._recall_from_procedural_memory(query, context),
-            ]
+        # Parallel retrieval from all tiers
+        recall_tasks = [
+            self._recall_from_working_memory(query, context),
+            self._recall_from_episodic_memory(query, context),
+            self._recall_from_semantic_memory(query, context),
+            self._recall_from_procedural_memory(query, context),
+        ]
 
-            if self.enable_cross_tier_retrieval:
-                self.cross_tier_retrievals += 1
+        if self.enable_cross_tier_retrieval:
+            self.cross_tier_retrievals += 1
 
-            # Wait for all retrievals
-            (
+        # Wait for all retrievals
+        (
+            working_results,
+            episodic_results,
+            semantic_results,
+            procedural_results,
+        ) = await asyncio.gather(*recall_tasks, return_exceptions=True)
+
+        for i, result in enumerate(
+            [
                 working_results,
                 episodic_results,
                 semantic_results,
                 procedural_results,
-            ) = await asyncio.gather(*recall_tasks, return_exceptions=True)
+            ]
+        ):
+            if isinstance(result, BaseException):
+                logger.error(f"Memory tier {i} retrieval failed: {result}")
+                if i == 0:
+                    working_results = []
+                elif i == 1:
+                    episodic_results = []
+                elif i == 2:
+                    semantic_results = []
+                elif i == 3:
+                    procedural_results = []
 
-            for i, result in enumerate(
-                [
-                    working_results,
-                    episodic_results,
-                    semantic_results,
-                    procedural_results,
-                ]
-            ):
-                if isinstance(result, BaseException):
-                    logger.error(f"Memory tier {i} retrieval failed: {result}")
-                    if i == 0:
-                        working_results = []
-                    elif i == 1:
-                        episodic_results = []
-                    elif i == 2:
-                        semantic_results = []
-                    elif i == 3:
-                        procedural_results = []
+        # Combine and rank results
+        recall = self._combine_and_rank_results(
+            working_results if isinstance(working_results, list) else [],
+            episodic_results if isinstance(episodic_results, list) else [],
+            semantic_results if isinstance(semantic_results, list) else [],
+            procedural_results if isinstance(procedural_results, list) else [],
+            query,
+            max_results,
+        )
 
-            # Combine and rank results
-            recall = self._combine_and_rank_results(
-                working_results if isinstance(working_results, list) else [],
-                episodic_results if isinstance(episodic_results, list) else [],
-                semantic_results if isinstance(semantic_results, list) else [],
-                procedural_results if isinstance(procedural_results, list) else [],
-                query,
-                max_results,
-            )
+        # Measure token size of recall result
+        self._measure_recall_result_tokens(recall)
 
-            # Measure token size of recall result
-            self._measure_recall_result_tokens(recall)
-
-            return recall
-
-        except Exception as e:
-            logger.error(f"Intelligent recall failed: {e}")
-            return IntelligentRecall(
-                confidence_score=0.0, recall_reasoning="Recall failed"
-            )
+        return recall
 
     async def get_conversation_context(
         self, session_id: str
@@ -391,57 +379,51 @@ class MultiTierMemorySystem:
             "procedure_id": None,
         }
 
-        try:
-            # Store episodic memory
-            episode = Episode(
-                session_id=context.session_id or "unknown",
-                user_id=context.user_id,
-                agent_id=context.agent_id,
-                event_type=EventType.LEARNING_EVENT,
-                event_data=interaction_data,
-                success=success,
-                quality_score=performance_score,
-                tags=context.tags,
+        # Store episodic memory
+        episode = Episode(
+            session_id=context.session_id or "unknown",
+            user_id=context.user_id,
+            agent_id=context.agent_id,
+            event_type=EventType.LEARNING_EVENT,
+            event_data=interaction_data,
+            success=success,
+            quality_score=performance_score,
+            tags=context.tags,
+        )
+
+        results["episodic_stored"] = await self.episodic_memory.store_episode(episode)
+
+        # Extract knowledge if successful interaction
+        if success and performance_score > 0.7:
+            knowledge_content = self._extract_knowledge_from_interaction(
+                interaction_data
+            )
+            if knowledge_content:
+                await self.semantic_memory.store_knowledge(
+                    knowledge_content,
+                    domain=context.domain,
+                    source="learned_interaction",
+                    confidence=performance_score,
+                )
+                results["knowledge_extracted"] = True
+
+        # Learn procedure if applicable
+        if interaction_data.get("steps") and success:
+            procedure_id = await self.procedural_memory.learn_from_episode(
+                {
+                    **interaction_data,
+                    "domain": context.domain,
+                    "agent_type": context.agent_id,
+                    "task_type": context.task_type,
+                    "episode_id": episode.id,
+                },
+                performance_score,
+                success,
             )
 
-            results["episodic_stored"] = await self.episodic_memory.store_episode(
-                episode
-            )
-
-            # Extract knowledge if successful interaction
-            if success and performance_score > 0.7:
-                knowledge_content = self._extract_knowledge_from_interaction(
-                    interaction_data
-                )
-                if knowledge_content:
-                    await self.semantic_memory.store_knowledge(
-                        knowledge_content,
-                        domain=context.domain,
-                        source="learned_interaction",
-                        confidence=performance_score,
-                    )
-                    results["knowledge_extracted"] = True
-
-            # Learn procedure if applicable
-            if interaction_data.get("steps") and success:
-                procedure_id = await self.procedural_memory.learn_from_episode(
-                    {
-                        **interaction_data,
-                        "domain": context.domain,
-                        "agent_type": context.agent_id,
-                        "task_type": context.task_type,
-                        "episode_id": episode.id,
-                    },
-                    performance_score,
-                    success,
-                )
-
-                if procedure_id:
-                    results["procedure_learned"] = True
-                    results["procedure_id"] = procedure_id
-
-        except Exception as e:
-            logger.error(f"Failed to learn from interaction: {e}")
+            if procedure_id:
+                results["procedure_learned"] = True
+                results["procedure_id"] = procedure_id
 
         return results
 
@@ -455,33 +437,29 @@ class MultiTierMemorySystem:
             "procedures_optimized": 0,
         }
 
-        try:
-            # Clean up expired working memory
-            consolidation_results[
-                "working_cleaned"
-            ] = await self.working_memory.cleanup_expired()
+        # Clean up expired working memory
+        consolidation_results[
+            "working_cleaned"
+        ] = await self.working_memory.cleanup_expired()
 
-            # Clean up old episodic memories
-            consolidation_results[
-                "episodic_cleaned"
-            ] = await self.episodic_memory.cleanup_old_episodes()
+        # Clean up old episodic memories
+        consolidation_results[
+            "episodic_cleaned"
+        ] = await self.episodic_memory.cleanup_old_episodes()
 
-            # Clean up old procedures
-            consolidation_results[
-                "procedures_optimized"
-            ] = await self.procedural_memory.cleanup_old_procedures()
+        # Clean up old procedures
+        consolidation_results[
+            "procedures_optimized"
+        ] = await self.procedural_memory.cleanup_old_procedures()
 
-            # TODO: Implement semantic memory optimization
-            # This could include:
-            # - Removing duplicate knowledge
-            # - Consolidating similar items
-            # - Updating relevance scores
+        # TODO: Implement semantic memory optimization
+        # This could include:
+        # - Removing duplicate knowledge
+        # - Consolidating similar items
+        # - Updating relevance scores
 
-            self.consolidation_count += 1
-            logger.info(f"Memory consolidation completed: {consolidation_results}")
-
-        except Exception as e:
-            logger.error(f"Memory consolidation failed: {e}")
+        self.consolidation_count += 1
+        logger.info(f"Memory consolidation completed: {consolidation_results}")
 
         return consolidation_results
 
@@ -648,35 +626,30 @@ class MultiTierMemorySystem:
     ) -> list[MemoryResult]:
         results = []
 
-        try:
-            if context.session_id:
-                conv_context = await self.working_memory.retrieve_conversation_context(
-                    context.session_id
-                )
+        if context.session_id:
+            conv_context = await self.working_memory.retrieve_conversation_context(
+                context.session_id
+            )
 
-                if conv_context:
-                    # Simple relevance check on recent messages
-                    query_lower = query.lower()
+            if conv_context:
+                # Simple relevance check on recent messages
+                query_lower = query.lower()
 
-                    for message in conv_context.messages[-10:]:  # Last 10 messages
-                        message_content = str(message.get("data", message))
-                        if any(
-                            word in message_content.lower()
-                            for word in query_lower.split()
-                        ):
-                            result = MemoryResult(
-                                tier=MemoryTier.WORKING,
-                                content=message,
-                                relevance_score=0.8,  # High relevance for working memory
-                                timestamp=datetime.fromisoformat(
-                                    message.get("timestamp", datetime.now().isoformat())
-                                ),
-                                metadata={"session_id": context.session_id},
-                            )
-                            results.append(result)
-
-        except Exception as e:
-            logger.error(f"Working memory recall failed: {e}")
+                for message in conv_context.messages[-10:]:  # Last 10 messages
+                    message_content = str(message.get("data", message))
+                    if any(
+                        word in message_content.lower() for word in query_lower.split()
+                    ):
+                        result = MemoryResult(
+                            tier=MemoryTier.WORKING,
+                            content=message,
+                            relevance_score=0.8,  # High relevance for working memory
+                            timestamp=datetime.fromisoformat(
+                                message.get("timestamp", datetime.now().isoformat())
+                            ),
+                            metadata={"session_id": context.session_id},
+                        )
+                        results.append(result)
 
         return results
 
@@ -685,34 +658,30 @@ class MultiTierMemorySystem:
     ) -> list[MemoryResult]:
         results = []
 
-        try:
-            # Query recent episodes
-            episode_query = EpisodeQuery(
-                user_id=context.user_id,
-                agent_id=context.agent_id,
-                start_time=datetime.now() - timedelta(days=7),
-                limit=5,
-            )
+        # Query recent episodes
+        episode_query = EpisodeQuery(
+            user_id=context.user_id,
+            agent_id=context.agent_id,
+            start_time=datetime.now() - timedelta(days=7),
+            limit=5,
+        )
 
-            episodes = await self.episodic_memory.retrieve_episodes(episode_query)
+        episodes = await self.episodic_memory.retrieve_episodes(episode_query)
 
-            # Simple relevance matching
-            query_lower = query.lower()
+        # Simple relevance matching
+        query_lower = query.lower()
 
-            for episode in episodes:
-                episode_content = str(episode.event_data)
-                if any(word in episode_content.lower() for word in query_lower.split()):
-                    result = MemoryResult(
-                        tier=MemoryTier.EPISODIC,
-                        content=episode,
-                        relevance_score=0.6,  # Medium relevance
-                        timestamp=episode.timestamp,
-                        metadata={"episode_id": episode.id},
-                    )
-                    results.append(result)
-
-        except Exception as e:
-            logger.error(f"Episodic memory recall failed: {e}")
+        for episode in episodes:
+            episode_content = str(episode.event_data)
+            if any(word in episode_content.lower() for word in query_lower.split()):
+                result = MemoryResult(
+                    tier=MemoryTier.EPISODIC,
+                    content=episode,
+                    relevance_score=0.6,  # Medium relevance
+                    timestamp=episode.timestamp,
+                    metadata={"episode_id": episode.id},
+                )
+                results.append(result)
 
         return results
 
@@ -721,23 +690,19 @@ class MultiTierMemorySystem:
     ) -> list[MemoryResult]:
         results = []
 
-        try:
-            knowledge_items = await self.semantic_memory.retrieve_knowledge(
-                query, domain=context.domain, limit=3
+        knowledge_items = await self.semantic_memory.retrieve_knowledge(
+            query, domain=context.domain, limit=3
+        )
+
+        for item in knowledge_items:
+            result = MemoryResult(
+                tier=MemoryTier.SEMANTIC,
+                content=item,
+                relevance_score=item["similarity"],
+                timestamp=datetime.fromisoformat(item["created_at"]),
+                metadata={"domain": item["domain"]},
             )
-
-            for item in knowledge_items:
-                result = MemoryResult(
-                    tier=MemoryTier.SEMANTIC,
-                    content=item,
-                    relevance_score=item["similarity"],
-                    timestamp=datetime.fromisoformat(item["created_at"]),
-                    metadata={"domain": item["domain"]},
-                )
-                results.append(result)
-
-        except Exception as e:
-            logger.error(f"Semantic memory recall failed: {e}")
+            results.append(result)
 
         return results
 
@@ -746,26 +711,22 @@ class MultiTierMemorySystem:
     ) -> list[MemoryResult]:
         results = []
 
-        try:
-            if context.task_type:
-                procedure = await self.procedural_memory.get_best_procedure_for_task(
-                    context.task_type,
-                    domain=context.domain,
-                    agent_type=context.agent_id,
+        if context.task_type:
+            procedure = await self.procedural_memory.get_best_procedure_for_task(
+                context.task_type,
+                domain=context.domain,
+                agent_type=context.agent_id,
+            )
+
+            if procedure:
+                result = MemoryResult(
+                    tier=MemoryTier.PROCEDURAL,
+                    content=procedure,
+                    relevance_score=procedure.confidence,
+                    timestamp=procedure.last_updated,
+                    metadata={"procedure_id": procedure.id},
                 )
-
-                if procedure:
-                    result = MemoryResult(
-                        tier=MemoryTier.PROCEDURAL,
-                        content=procedure,
-                        relevance_score=procedure.confidence,
-                        timestamp=procedure.last_updated,
-                        metadata={"procedure_id": procedure.id},
-                    )
-                    results.append(result)
-
-        except Exception as e:
-            logger.error(f"Procedural memory recall failed: {e}")
+                results.append(result)
 
         return results
 

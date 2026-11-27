@@ -126,7 +126,7 @@ class SemanticMemoryManager:
             try:
                 self.embedding_model = SentenceTransformer(self.embedding_model_name)
                 logger.info(f"Initialized embedding model: {self.embedding_model_name}")
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.error(f"Failed to load embedding model: {e}")
                 self.embedding_model = None
 
@@ -289,22 +289,17 @@ class SemanticMemoryManager:
     async def update_item(self, item_id: str, updates: dict[str, Any]) -> bool:
         """Update an existing semantic memory item."""
 
-        try:
-            if self.vector_client:
-                # For vector DB, we need to retrieve, update, and re-store
-                # This is a simplified approach
-                return False  # Not implemented in this version
-            else:
-                for item in self._fallback_storage:
-                    if item.id == item_id:
-                        for key, value in updates.items():
-                            if hasattr(item, key):
-                                setattr(item, key, value)
-                        return True
-                return False
-
-        except Exception as e:
-            logger.error(f"Failed to update semantic item {item_id}: {e}")
+        if self.vector_client:
+            # For vector DB, we need to retrieve, update, and re-store
+            # This is a simplified approach
+            return False  # Not implemented in this version
+        else:
+            for item in self._fallback_storage:
+                if item.id == item_id:
+                    for key, value in updates.items():
+                        if hasattr(item, key):
+                            setattr(item, key, value)
+                    return True
             return False
 
     async def delete_item(self, item_id: str) -> bool:
@@ -386,7 +381,7 @@ class SemanticMemoryManager:
                 # Generate embedding using sentence transformer
                 embedding = self.embedding_model.encode(text)
                 return embedding.tolist()
-            except Exception as e:
+            except (RuntimeError, TypeError, ValueError) as e:
                 logger.error(f"Failed to generate embedding: {e}")
 
         # Fallback: simple hash-based "embedding"

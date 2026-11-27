@@ -45,6 +45,7 @@ try:
         desc,
         or_,  # noqa: F401
     )
+    from sqlalchemy.exc import SQLAlchemyError
     from sqlalchemy.ext.asyncio import AsyncEngine as _AsyncEngine
     from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
     from sqlalchemy.ext.asyncio import create_async_engine
@@ -60,9 +61,18 @@ try:
     AsyncSession = _AsyncSession
     AsyncEngine = _AsyncEngine
     Base = declarative_base()
+    _DB_ERRORS: tuple[type[Exception], ...] = (SQLAlchemyError, OSError)
 except ImportError:
+    _DB_ERRORS = (OSError,)
     # Fallback if SQLAlchemy not available
     logger.warning("SQLAlchemy not available - episodic memory will use fallback")
+
+_DB_INIT_ERRORS: tuple[type[Exception], ...] = (*_DB_ERRORS, ImportError)
+_DB_STORE_ERRORS: tuple[type[Exception], ...] = (
+    *_DB_ERRORS,
+    TypeError,
+    ValueError,
+)
 
 # Database models
 if HAS_SQLALCHEMY:
@@ -264,7 +274,7 @@ class EpisodicMemoryManager:
 
                 logger.info("Episodic memory initialized with PostgreSQL")
 
-            except Exception as e:
+            except _DB_INIT_ERRORS as e:
                 logger.error(
                     f"Failed to initialize PostgreSQL for episodic memory: {e}"
                 )
@@ -294,7 +304,7 @@ class EpisodicMemoryManager:
             logger.debug(f"Stored episode: {episode.event_type.value}")
             return True
 
-        except Exception as e:
+        except _DB_STORE_ERRORS as e:
             logger.error(f"Failed to store episode {episode.id}: {e}")
             return False
 
@@ -309,32 +319,22 @@ class EpisodicMemoryManager:
             List of matching episodes
         """
 
-        try:
-            if self.engine and self.session_factory:
-                episodes = await self._retrieve_episodes_db(query)
-            else:
-                episodes = self._retrieve_episodes_fallback(query)
+        if self.engine and self.session_factory:
+            episodes = await self._retrieve_episodes_db(query)
+        else:
+            episodes = self._retrieve_episodes_fallback(query)
 
-            self.read_count += 1
-            logger.debug(f"Retrieved {len(episodes)} episodes")
-            return episodes
-
-        except Exception as e:
-            logger.error(f"Failed to retrieve episodes: {e}")
-            return []
+        self.read_count += 1
+        logger.debug(f"Retrieved {len(episodes)} episodes")
+        return episodes
 
     async def get_session_summary(self, session_id: str) -> dict[str, Any] | None:
         """Get summary statistics for a session."""
 
-        try:
-            if self.engine and self.session_factory:
-                return await self._get_session_summary_db(session_id)
-            else:
-                return self._get_session_summary_fallback(session_id)
-
-        except Exception as e:
-            logger.error(f"Failed to get session summary for {session_id}: {e}")
-            return None
+        if self.engine and self.session_factory:
+            return await self._get_session_summary_db(session_id)
+        else:
+            return self._get_session_summary_fallback(session_id)
 
     async def find_similar_episodes(
         self,
@@ -484,15 +484,10 @@ class EpisodicMemoryManager:
         retention_days = retention_days or self.retention_days
         cutoff_date = datetime.now() - timedelta(days=retention_days)
 
-        try:
-            if self.engine and self.session_factory:
-                return await self._cleanup_old_episodes_db(cutoff_date)
-            else:
-                return self._cleanup_old_episodes_fallback(cutoff_date)
-
-        except Exception as e:
-            logger.error(f"Failed to cleanup old episodes: {e}")
-            return 0
+        if self.engine and self.session_factory:
+            return await self._cleanup_old_episodes_db(cutoff_date)
+        else:
+            return self._cleanup_old_episodes_fallback(cutoff_date)
 
     async def get_memory_stats(self) -> dict[str, Any]:
         """Get episodic memory statistics."""
@@ -533,7 +528,7 @@ class EpisodicMemoryManager:
                     }
                 )
 
-        except Exception as e:
+        except _DB_ERRORS as e:
             logger.error(f"Failed to get episodic memory stats: {e}")
 
         return stats
@@ -709,13 +704,9 @@ class EpisodicMemoryManager:
     async def delete_by_user_id(self, user_id: str) -> int:
         """Delete episodic memory associated with a user."""
 
-        try:
-            if self.engine and self.session_factory:
-                return await self._delete_by_user_id_db(user_id)
-            return self._delete_by_user_id_fallback(user_id)
-        except Exception as e:
-            logger.error(f"Failed to delete episodic memory for user {user_id}: {e}")
-            return 0
+        if self.engine and self.session_factory:
+            return await self._delete_by_user_id_db(user_id)
+        return self._delete_by_user_id_fallback(user_id)
 
     async def _delete_by_user_id_db(self, user_id: str) -> int:
         """Delete episodic database rows for a user."""

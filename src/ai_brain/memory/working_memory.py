@@ -27,11 +27,13 @@ from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 try:
     import redis.asyncio as redis_module
     from redis.asyncio import Redis as RedisType
+    from redis.asyncio import RedisError
 
     REDIS_AVAILABLE = True
 except ImportError:
     redis_module = None  # type: ignore[assignment]
     RedisType = type(None)  # type: ignore[assignment, misc]
+    RedisError = OSError  # type: ignore[assignment, misc]
     REDIS_AVAILABLE = False
 
 logger = get_logger()
@@ -147,7 +149,7 @@ class WorkingMemoryManager:
 
             return token_count
 
-        except Exception as e:
+        except (TypeError, ValueError) as e:
             logger.debug(
                 "Failed to measure context tokens",
                 context_label=context_label,
@@ -166,7 +168,7 @@ class WorkingMemoryManager:
                 # Start background cleanup
                 self._cleanup_task = self._bg_tasks.create_task(self._cleanup_loop())
 
-            except Exception as e:
+            except (RedisError, OSError) as e:
                 logger.error(f"Failed to connect to Redis: {e}")
                 self.redis_client = None
 
@@ -219,7 +221,7 @@ class WorkingMemoryManager:
             logger.debug(f"Stored working memory item: {key}")
             return True
 
-        except Exception as e:
+        except (RedisError, OSError, TypeError, ValueError) as e:
             logger.error(f"Failed to store working memory item {key}: {e}")
             return False
 
@@ -255,7 +257,7 @@ class WorkingMemoryManager:
                 self.miss_count += 1
                 return None
 
-        except Exception as e:
+        except (RedisError, OSError) as e:
             logger.error(f"Failed to retrieve working memory item {key}: {e}")
             self.miss_count += 1
             return None
@@ -270,7 +272,7 @@ class WorkingMemoryManager:
             else:
                 return self._memory_fallback.pop(key, None) is not None
 
-        except Exception as e:
+        except (RedisError, OSError) as e:
             logger.error(f"Failed to delete working memory item {key}: {e}")
             return False
 
@@ -283,7 +285,7 @@ class WorkingMemoryManager:
             else:
                 return key in self._memory_fallback
 
-        except Exception as e:
+        except (RedisError, OSError) as e:
             logger.error(f"Failed to check working memory existence {key}: {e}")
             return False
 
@@ -316,7 +318,7 @@ class WorkingMemoryManager:
         if context_data:
             try:
                 return ConversationContext(**context_data)
-            except Exception as e:
+            except TypeError as e:
                 logger.error(f"Failed to deserialize conversation context: {e}")
                 return None
 
@@ -429,7 +431,7 @@ class WorkingMemoryManager:
                     if fnmatch.fnmatch(key, pattern)
                 ]
 
-        except Exception as e:
+        except (RedisError, OSError) as e:
             logger.error(f"Failed to get keys by pattern {pattern}: {e}")
             return []
 
@@ -438,34 +440,30 @@ class WorkingMemoryManager:
 
         matching_keys = []
 
-        try:
-            if self.redis_client:
-                pattern = f"{self.key_prefix}*"
-                all_keys = await self.redis_client.keys(pattern)
+        if self.redis_client:
+            pattern = f"{self.key_prefix}*"
+            all_keys = await self.redis_client.keys(pattern)
 
-                for key in all_keys:
-                    try:
-                        data = await self.redis_client.get(key)
-                        if data:
-                            item_data = self._deserialize_stored_item(data)
-                            item_tags = item_data.get("tags", [])
+            for key in all_keys:
+                try:
+                    data = await self.redis_client.get(key)
+                    if data:
+                        item_data = self._deserialize_stored_item(data)
+                        item_tags = item_data.get("tags", [])
 
-                            if any(tag in item_tags for tag in tags):
-                                clean_key = key.decode().replace(self.key_prefix, "")
-                                matching_keys.append(clean_key)
+                        if any(tag in item_tags for tag in tags):
+                            clean_key = key.decode().replace(self.key_prefix, "")
+                            matching_keys.append(clean_key)
 
-                    except Exception as e:
-                        logger.debug(f"Failed to check tags for key {key}: {e}")
-                        continue
-            else:
-                # Fallback implementation
-                for key, item in self._memory_fallback.items():
-                    item_tags = item.tags if hasattr(item, "tags") else []
-                    if any(tag in item_tags for tag in tags):
-                        matching_keys.append(key)
-
-        except Exception as e:
-            logger.error(f"Failed to get keys by tags {tags}: {e}")
+                except (RedisError, OSError, ValueError) as e:
+                    logger.debug(f"Failed to check tags for key {key}: {e}")
+                    continue
+        else:
+            # Fallback implementation
+            for key, item in self._memory_fallback.items():
+                item_tags = item.tags if hasattr(item, "tags") else []
+                if any(tag in item_tags for tag in tags):
+                    matching_keys.append(key)
 
         return matching_keys
 
@@ -474,26 +472,23 @@ class WorkingMemoryManager:
 
         deleted_count = 0
 
-        try:
-            if self.redis_client:
-                pattern = f"{self.key_prefix}*"
-                all_keys = await self.redis_client.keys(pattern)
-                for redis_key in all_keys:
-                    clean_key = redis_key.decode().replace(self.key_prefix, "")
-                    item = await self._retrieve_redis(clean_key)
-                    if item and self._item_belongs_to_user(item, user_id):
-                        deleted_count += 1 if await self.delete(clean_key) else 0
-            else:
-                keys_to_delete = [
-                    key
-                    for key, item in self._memory_fallback.items()
-                    if self._item_belongs_to_user(item, user_id)
-                ]
-                for key in keys_to_delete:
-                    del self._memory_fallback[key]
-                    deleted_count += 1
-        except Exception as e:
-            logger.error(f"Failed to delete working memory for user {user_id}: {e}")
+        if self.redis_client:
+            pattern = f"{self.key_prefix}*"
+            all_keys = await self.redis_client.keys(pattern)
+            for redis_key in all_keys:
+                clean_key = redis_key.decode().replace(self.key_prefix, "")
+                item = await self._retrieve_redis(clean_key)
+                if item and self._item_belongs_to_user(item, user_id):
+                    deleted_count += 1 if await self.delete(clean_key) else 0
+        else:
+            keys_to_delete = [
+                key
+                for key, item in self._memory_fallback.items()
+                if self._item_belongs_to_user(item, user_id)
+            ]
+            for key in keys_to_delete:
+                del self._memory_fallback[key]
+                deleted_count += 1
 
         return deleted_count
 
@@ -502,29 +497,25 @@ class WorkingMemoryManager:
 
         cleaned_count = 0
 
-        try:
-            if self.redis_client:
-                # Redis handles TTL automatically, but we can check for manual cleanup
-                pass
-            else:
-                # Manual cleanup for fallback
-                now = datetime.now()
-                expired_keys = []
+        if self.redis_client:
+            # Redis handles TTL automatically, but we can check for manual cleanup
+            pass
+        else:
+            # Manual cleanup for fallback
+            now = datetime.now()
+            expired_keys = []
 
-                for key, item in self._memory_fallback.items():
-                    if (
-                        hasattr(item, "expires_at")
-                        and item.expires_at
-                        and now > item.expires_at
-                    ):
-                        expired_keys.append(key)
+            for key, item in self._memory_fallback.items():
+                if (
+                    hasattr(item, "expires_at")
+                    and item.expires_at
+                    and now > item.expires_at
+                ):
+                    expired_keys.append(key)
 
-                for key in expired_keys:
-                    del self._memory_fallback[key]
-                    cleaned_count += 1
-
-        except Exception as e:
-            logger.error(f"Failed to cleanup expired items: {e}")
+            for key in expired_keys:
+                del self._memory_fallback[key]
+                cleaned_count += 1
 
         if cleaned_count > 0:
             logger.info(f"Cleaned up {cleaned_count} expired working memory items")
@@ -560,7 +551,7 @@ class WorkingMemoryManager:
                     }
                 )
 
-        except Exception as e:
+        except (RedisError, OSError) as e:
             logger.error(f"Failed to get memory stats: {e}")
 
         return stats
@@ -621,7 +612,7 @@ class WorkingMemoryManager:
                     metadata=item_data.get("metadata", {}),
                 )
 
-            except Exception as e:
+            except (KeyError, TypeError, ValueError) as e:
                 logger.error(f"Failed to deserialize Redis item {key}: {e}")
                 return None
 
@@ -677,7 +668,7 @@ class WorkingMemoryManager:
                 if ttl > 0:
                     # Re-store with updated stats
                     await self._store_redis(key, item, ttl)
-        except Exception as e:
+        except (RedisError, OSError, TypeError, ValueError) as e:
             logger.debug(f"Failed to update access stats for {key}: {e}")
 
     async def _cleanup_loop(self) -> None:
