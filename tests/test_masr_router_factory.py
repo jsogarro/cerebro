@@ -315,3 +315,25 @@ def test_legacy_service_health_reports_redis_errors_but_not_router_bugs() -> Non
     )
     with pytest.raises(AttributeError):
         TestClient(service.app).get("/health")
+
+
+def test_create_router_refuses_memory_routing_flag_without_memory() -> None:
+    from src.ai_brain.router.factory import create_masr_router
+
+    with pytest.raises(ValueError, match="MEMORY_INFORMED_ROUTING_ENABLED"):
+        create_masr_router(
+            Settings(
+                SECRET_KEY="x" * 40,
+                MEMORY_INFORMED_ROUTING_ENABLED=True,
+            )
+        )
+
+
+def test_create_router_allows_memory_routing_flag_in_fixture_mode() -> None:
+    from src.ai_brain.router.factory import create_masr_router
+
+    router = create_masr_router(
+        Settings(SECRET_KEY="x" * 40, MEMORY_INFORMED_ROUTING_ENABLED=True),
+        fixture_mode=True,
+    )
+    assert router.memory_informed_routing_enabled is False

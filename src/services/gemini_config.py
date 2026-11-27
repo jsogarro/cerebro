@@ -51,14 +51,14 @@ class GeminiConfig:
     block_most: bool = False
 
     @classmethod
-    def from_env(cls) -> "GeminiConfig":
+    def from_env(cls, api_key: str | None = None) -> "GeminiConfig":
         """
         Create configuration from environment variables.
 
         This is a pure function that reads environment and returns config.
         """
         load_environment()
-        api_key = os.getenv("GEMINI_API_KEY")
+        api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY environment variable is required")
 
@@ -71,7 +71,7 @@ class GeminiConfig:
             max_output_tokens=int(os.getenv("GEMINI_MAX_TOKENS", "32768")),
             rate_limit=int(os.getenv("GEMINI_RATE_LIMIT", "10")),
             rate_period=int(os.getenv("GEMINI_RATE_PERIOD", "60")),
-            max_concurrent=int(os.getenv("GEMINI_MAX_CONCURRENT", "5")),
+            max_concurrent=int(os.getenv("GEMINI_MAX_CONCURRENT", cls.max_concurrent)),
             cache_enabled=os.getenv("GEMINI_CACHE_ENABLED", "true").lower() == "true",
             cache_ttl=int(os.getenv("GEMINI_CACHE_TTL", "3600")),
         )

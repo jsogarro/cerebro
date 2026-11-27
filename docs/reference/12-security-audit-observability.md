@@ -21,7 +21,7 @@ The API records an audit trail of requests, sets browser security headers on eve
 | Health probes | Active | `/health`, `/live`, `/ready`, `/ws/health` | `src/api/routes/health.py`, `src/api/routes/websocket.py` |
 | Langfuse tracing | Off by default | `LANGFUSE_ENABLED` | `src/core/tracing.py` |
 | Context-compaction telemetry | Off by default | `ENABLE_CONTEXT_COMPACTION_TELEMETRY` | `src/core/telemetry.py` |
-| `ENABLE_TRACING`, `OTEL_EXPORTER_OTLP_ENDPOINT` | Not wired | none | `src/core/config.py` (`Settings`) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Not wired | none | `src/core/config.py` (`Settings`) |
 | Tracing verification script | Active | `python scripts/verify_tracing.py` | `scripts/verify_tracing.py` |
 | Sanitizer probe script | Active | `python scripts/red_team_security_probe.py` | `scripts/red_team_security_probe.py` |
 
@@ -162,7 +162,7 @@ All four probes are in the public-route allowlist.
 
 > **Off by default.** Context-compaction telemetry logs token counts: `DirectExecutionService` logs `domain_output_token_measurement` events, and `BaseSupervisor`, `WorkingMemoryManager` and `MultiTierMemorySystem` each measure token counts behind the same flag, `ENABLE_CONTEXT_COMPACTION_TELEMETRY=true`. Counting needs `tiktoken`; without it the count is 0.
 
-> **Not wired.** `ENABLE_TRACING` (default `true`) and `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4317`) are declared in `Settings` and read by no code under `src/`. Setting them changes nothing. See [configuration](02-configuration.md).
+> **Not wired.** `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4317`) is declared in `Settings` and read by no code under `src/`. Setting it changes nothing. See [configuration](02-configuration.md).
 
 ## Security probe script
 

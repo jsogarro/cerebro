@@ -458,3 +458,28 @@ class TestJWTService:
             abs(refresh_exp - now - (jwt_service.refresh_token_expire_days * 24 * 3600))
             < 5
         )
+
+
+class TestRefreshKeepsEmail:
+    @pytest.mark.asyncio
+    async def test_refreshed_access_token_keeps_the_user_email(self):
+        """The refresh token carries no email, so the server-side record must."""
+        store: dict[str, str] = {}
+        redis_fake = AsyncMock(spec=redis.Redis)
+        redis_fake.exists = AsyncMock(return_value=0)
+        redis_fake.get = AsyncMock(return_value=None)
+        redis_fake.setex = AsyncMock(
+            side_effect=lambda key, _ttl, value: store.__setitem__(key, value) or True
+        )
+        redis_fake.getdel = AsyncMock(side_effect=lambda key: store.pop(key, None))
+        service = JWTService(redis_client=redis_fake)
+
+        pair = await service.generate_token_pair(
+            user_id="u1", email="user@example.com", device_id="d1"
+        )
+        new_pair = await service.refresh_tokens(pair.refresh_token, device_id="d1")
+
+        access = jwt.decode(
+            new_pair.access_token, service.public_key, algorithms=[service.algorithm]
+        )
+        assert access["email"] == "user@example.com"

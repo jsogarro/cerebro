@@ -80,8 +80,6 @@ class Settings(BaseSettings):
 
     # Monitoring
     ENABLE_METRICS: bool = True
-    ENABLE_TRACING: bool = True
-    OTEL_EXPORTER_OTLP_ENDPOINT: str = "http://localhost:4317"
 
     # Feature Flags
     ENABLE_CACHE: bool = True
@@ -215,7 +213,6 @@ class Settings(BaseSettings):
         "balanced": "anthropic/claude-sonnet-4.6",  # Mid-tier quality
         "complex": "anthropic/claude-sonnet-4.6",  # Quality-focused
     }
-    OPENROUTER_VALIDATE_SLUGS_ON_STARTUP: bool = True
 
     # Multi-Provider Routing Feature Flag
     MULTI_PROVIDER_ROUTING_ENABLED: bool = (
@@ -305,11 +302,6 @@ class Settings(BaseSettings):
     # Multi-Domain Merge Configuration
     MULTI_DOMAIN_MERGE_STRATEGY: str = "concat"  # concat | llm
     MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT: int = 4000
-
-    # TalkHier Communication Configuration
-    TALKHIER_MAX_REFINEMENT_ROUNDS: int = 3
-    TALKHIER_CONSENSUS_THRESHOLD: float = 0.95
-    TALKHIER_ENABLE_HIERARCHICAL_REFINEMENT: bool = True
 
     # Self-Improvement Configuration
     SELF_IMPROVEMENT_REFLECTION_FREQUENCY: int = 100  # Every N queries
@@ -543,11 +535,6 @@ class Settings(BaseSettings):
                     "enable_auto_scaling": self.HIERARCHICAL_ENABLE_AUTO_SCALING,
                     "scale_up_threshold": self.HIERARCHICAL_SCALE_UP_THRESHOLD,
                     "scale_down_threshold": self.HIERARCHICAL_SCALE_DOWN_THRESHOLD,
-                },
-                "communication": {
-                    "max_refinement_rounds": self.TALKHIER_MAX_REFINEMENT_ROUNDS,
-                    "consensus_threshold": self.TALKHIER_CONSENSUS_THRESHOLD,
-                    "enable_hierarchical_refinement": self.TALKHIER_ENABLE_HIERARCHICAL_REFINEMENT,
                 },
             },
             # Learning and Improvement

@@ -15,7 +15,6 @@ services:
       - DATABASE_URL=postgresql+asyncpg://research:${DB_PASSWORD}@postgres:5432/research_db
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       # Direct execution uses the FastAPI-owned in-process MASR runtime.
-      - ENABLE_DIRECT_EXECUTION=true
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO

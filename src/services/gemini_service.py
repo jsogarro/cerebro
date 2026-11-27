@@ -7,6 +7,7 @@ This service integrates with Google's Gemini API following functional programmin
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from typing import Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -39,7 +40,7 @@ class GeminiService:
     def __init__(
         self,
         api_key: str | None = None,
-        model_name: str = "gemini-2.5-flash",
+        model_name: str | None = None,
         config: GeminiConfig | None = None,
         cache_client: aioredis.Redis[Any] | None = None,
         **kwargs: Any,
@@ -58,7 +59,10 @@ class GeminiService:
         if config:
             self.config = config
         elif api_key:
-            self.config = GeminiConfig(api_key=api_key, model_name=model_name, **kwargs)
+            overrides = dict(kwargs)
+            if model_name is not None:
+                overrides["model_name"] = model_name
+            self.config = replace(GeminiConfig.from_env(api_key=api_key), **overrides)
         else:
             self.config = GeminiConfig.from_env()
 

@@ -132,6 +132,7 @@ Tests that exercise them live in `tests/unit/core/claims/` and `tests/unit/core/
 - `DirectExecutionService.max_domain_parallelism` is assigned `4` in `__init__` and read nowhere.
 - `DirectExecutionService._fast_path_passes_quality` is a method that nothing calls.
 - `DirectExecutionService._fast_path_provider` is initialised to `None`, never assigned a provider and only closed and reset in `close`.
+- `Settings.TEMPORAL_HOST` and `Settings.OTEL_EXPORTER_OTLP_ENDPOINT` have no reader under `src/` outside `get_ai_brain_config` (tracked in #297; `config/production.py` and `config/staging.py` read their own copies).
 - `Settings.MULTI_DOMAIN_MERGE_STRATEGY` (default `concat`) and `Settings.MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT` (default 4000) are read by no code under `src/`.
 
 ## Settings with no effect

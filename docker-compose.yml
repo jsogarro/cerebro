@@ -36,7 +36,6 @@ services:
       - MASR_ENABLE_ADAPTIVE=${MASR_ENABLE_ADAPTIVE:-true}
       - ADAPTIVE_ROUTING_ENABLED=${ADAPTIVE_ROUTING_ENABLED:-false}
       - MEMORY_INFORMED_ROUTING_ENABLED=${MEMORY_INFORMED_ROUTING_ENABLED:-false}
-      - ENABLE_DIRECT_EXECUTION=true
     depends_on:
       postgres:
         condition: service_healthy

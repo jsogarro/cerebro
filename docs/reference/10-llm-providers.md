@@ -31,7 +31,7 @@ Language-model calls go through two layers. `GeminiService` is the default clien
 | concurrent requests | 2 |
 | retry | up to 3 attempts, exponential wait of 5 to 30 seconds, on any exception |
 
-The `GEMINI_*` environment variables are read only by `GeminiConfig.from_env`, which runs when no `api_key` or `config` is given; see [configuration](02-configuration.md).
+The `GEMINI_*` environment variables are read by `GeminiConfig.from_env`, which `GeminiService` uses unless a complete `config` is given; an `api_key` argument replaces only `GEMINI_API_KEY`. See [configuration](02-configuration.md).
 
 - **Generation.** `generate_content(prompt)` returns text. `generate_structured_content(prompt, schema, max_retries=2)` appends Pydantic format instructions, parses the reply with `PydanticOutputParser` and retries on a parse failure, for up to three attempts in total.
 - **Research helpers.** `generate_research_plan`, `analyze_literature`, `synthesize_findings`, `generate_citations` and `validate_hypothesis` build a prompt from `src/services/prompts/`, call the model and parse JSON with `parse_json_response`.

@@ -287,7 +287,7 @@ env-help: ## Show required environment variables
 	@echo "  JWT_PUBLIC_KEY_FILE=/absolute/host/path/jwt_public.pem"
 	@echo "  GEMINI_API_KEY=production-gemini-key"
 	@echo "  GRAFANA_PASSWORD=secure-grafana-password"
-	@echo "  CORS_ORIGINS=https://your-domain.com"
+	@echo '  CORS_ORIGINS=["https://your-domain.com"]'
 	@echo ""
 	@echo "Generate one matching RSA pair before prod-up:"
 	@echo "  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /secure/path/jwt_private.pem"
