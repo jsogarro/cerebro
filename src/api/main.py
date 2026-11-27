@@ -77,6 +77,9 @@ make_non_dumpable()
 configure_logging(settings.LOG_LEVEL)
 
 
+_RESOURCE_CLOSE_TIMEOUT_SECONDS = 10.0
+
+
 async def _close_lifespan_resource(
     resource_name: str,
     close: Callable[[], Awaitable[None]],
@@ -84,7 +87,9 @@ async def _close_lifespan_resource(
     """Close one lifespan-owned resource without blocking later cleanup."""
 
     try:
-        await close()
+        await asyncio.wait_for(close(), timeout=_RESOURCE_CLOSE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        logger.warning("lifespan_resource_shutdown_timed_out", resource=resource_name)
     except Exception as exc:
         logger.warning(
             "lifespan_resource_shutdown_failed",
