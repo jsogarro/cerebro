@@ -174,6 +174,8 @@ def test_ready_reports_providers_without_gating_or_probing(
 
     monkeypatch.setattr(health, "_check_database", ok)
     monkeypatch.setattr(health, "_check_redis", ok)
+    monkeypatch.setattr(health, "_check_audit_logger", lambda _request: ok())
+    monkeypatch.setattr(health, "_check_jwt_keys", ok)
     monkeypatch.setattr(settings, "GEMINI_ENABLED", True)
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "k")
 
@@ -194,6 +196,8 @@ def test_ready_stays_200_when_no_provider_is_configured(
 
     monkeypatch.setattr(health, "_check_database", ok)
     monkeypatch.setattr(health, "_check_redis", ok)
+    monkeypatch.setattr(health, "_check_audit_logger", lambda _request: ok())
+    monkeypatch.setattr(health, "_check_jwt_keys", ok)
     for name in (
         "GEMINI_ENABLED",
         "DEEPSEEK_ENABLED",
