@@ -1,6 +1,7 @@
 """Observed contracts of the legacy ``/api/v1/query`` route functions."""
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -187,25 +188,26 @@ async def test_execution_status_results_and_resume_pin_legacy_error_details():
 
 
 @pytest.mark.asyncio
-async def test_routing_recommendation_is_local_heuristic_and_invalid_context_is_500():
+async def test_routing_recommendation_comes_from_router_and_invalid_context_is_500():
+    from tests.test_issue_260_placeholder_values import _FakeRouter
+
+    service = SimpleNamespace(router=_FakeRouter())
     strategies = await query_api.get_available_routing_strategies()
     recommendation = await query_api.get_routing_recommendation(
-        query="short query", context='{"domains": ["research"]}'
+        query="short query", context='{"domains": ["research"]}', service=service
     )
 
     assert strategies["default_strategy"] == "balanced"
-    assert recommendation["query_analysis"] == {
-        "complexity": "simple",
-        "estimated_domains": ["research"],
-        "confidence": 0.85,
-    }
+    assert recommendation["query_analysis"]["complexity"] == "complex"
     assert (
         recommendation["routing_recommendation"]["suggested_strategy"]
-        == "cost_efficient"
+        == "quality_focused"
     )
 
     with pytest.raises(
         HTTPException, match="Failed to generate routing recommendation"
     ) as error:
-        await query_api.get_routing_recommendation(query="query", context="not-json")
+        await query_api.get_routing_recommendation(
+            query="query", context="not-json", service=service
+        )
     assert error.value.status_code == 500

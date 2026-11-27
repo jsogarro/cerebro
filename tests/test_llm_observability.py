@@ -41,7 +41,6 @@ REPOSITORY_PROMPT_PLATFORM_MODULES = [
     SRC_DIR / "repositories" / "report_repository.py",
     SRC_DIR / "prompts" / "manager.py",
     SRC_DIR / "prompts" / "versioning.py",
-    SRC_DIR / "research_platform" / "__init__.py",
 ]
 MCP_MODULES = [
     SRC_DIR / "mcp" / "base.py",

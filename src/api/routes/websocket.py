@@ -7,6 +7,7 @@ to various clients including web browsers and CLI tools.
 
 import asyncio
 import contextlib
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -563,5 +564,5 @@ async def websocket_health() -> dict[str, Any]:
     return {
         "status": "healthy",
         "websocket_stats": stats,
-        "timestamp": "2024-01-01T00:00:00Z",  # Will be updated with actual timestamp
+        "timestamp": datetime.now(UTC).isoformat(),
     }

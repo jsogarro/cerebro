@@ -653,10 +653,8 @@ class MASRouter:
         if len(complexity_analysis.domains) > 2:
             return CollaborationMode.PARALLEL
 
-        # High uncertainty benefits from debate/validation
-        if complexity_analysis.uncertainty > 0.7:
-            return CollaborationMode.DEBATE
-
+        # DEBATE is deliberately not chosen: the plan compiler rejects it
+        # (COLLABORATION_MODE_SUPPORT), so high uncertainty falls through.
         # Complex single-domain queries use hierarchical
         if complexity_analysis.level == ComplexityLevel.COMPLEX:
             return CollaborationMode.HIERARCHICAL

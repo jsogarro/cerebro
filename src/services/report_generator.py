@@ -157,43 +157,12 @@ class ReportGenerator:
         This function normalizes data from different sources (project ID or direct data)
         into a consistent format for report generation.
         """
-        if request.project_id:
-            # Load data from project ID (would integrate with database)
-            return await self._load_project_data(str(request.project_id))
-        elif request.workflow_data:
-            # Use direct workflow data
+        if request.workflow_data:
             return self._validate_workflow_data(request.workflow_data)
-        else:
-            raise ReportGenerationError(
-                "No data source provided (project_id or workflow_data)"
-            )
-
-    async def _load_project_data(self, project_id: str) -> dict[str, Any]:
-        """Load project data from database (mock implementation)."""
-        # In a real implementation, this would query the database
-        # For now, return mock data structure
-        return {
-            "title": f"Research Project {project_id}",
-            "query": "Sample research question",
-            "domains": ["AI", "Technology"],
-            "aggregated_results": {
-                "sources": [],
-                "findings": {},
-                "insights": [],
-                "citations": [],
-                "recommendations": [],
-            },
-            "quality_report": {
-                "passed": True,
-                "issues_found": [],
-            },
-            "metadata": {
-                "workflow_id": str(uuid4()),
-                "agents_used": ["literature_review", "synthesis"],
-                "total_sources": 0,
-                "total_citations": 0,
-            },
-        }
+        raise ReportGenerationError(
+            "No report content provided: workflow_data is required "
+            "(a project_id alone does not load stored results)"
+        )
 
     def _validate_workflow_data(self, data: dict[str, Any]) -> dict[str, Any]:
         """Validate and normalize workflow data."""
