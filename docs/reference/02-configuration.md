@@ -343,10 +343,10 @@ No variable named `GEMINI_TIMEOUT` or `GEMINI_RETRY_*` is read anywhere in `src`
 | `TEMPLATE_CACHE_TTL` | `3600` | none | no effect |
 | `MIN_REPORT_WORD_COUNT` | `100` | `ReportQualityConfig.get_min_word_count` | fallback for a report type with no entry; every `ReportType` has an entry, so the value is never used |
 | `MIN_REPORT_SOURCES` | `1` | `ReportQualityConfig.get_min_sources` | fallback for a report type with no entry; every `ReportType` has an entry, so the value is never used |
-| `ENABLE_VISUALIZATIONS` | `true` | `src/services/visualization_generator.py` | the only reader is a module no production code imports |
-| `MAX_VISUALIZATIONS_PER_REPORT` | `20` | `src/services/visualization_generator.py` | same |
-| `DEFAULT_CHART_WIDTH` | `800` | `src/services/visualization_generator.py` | same |
-| `DEFAULT_CHART_HEIGHT` | `600` | `src/services/visualization_generator.py` | same |
+| `ENABLE_VISUALIZATIONS` | `true` | `VisualizationGenerator` | when false no chart image is rendered and charts appear as value tables |
+| `MAX_VISUALIZATIONS_PER_REPORT` | `20` | `VisualizationGenerator` | caps the charts rendered per report |
+| `DEFAULT_CHART_WIDTH` | `800` | `VisualizationGenerator` | chart width in pixels |
+| `DEFAULT_CHART_HEIGHT` | `600` | `VisualizationGenerator` | chart height in pixels |
 
 ### CLI
 
