@@ -112,8 +112,10 @@ async def test_claim_verdicts_are_exposed(client, new_account):
     )
 
 
-@_missing(
-    "P06", "GET /api/v1/reports/{report_id} returns 500 for the report's own owner"
+@pytest.mark.xfail(
+    strict=True,
+    raises=(AssertionError, pytest.fail.Exception),
+    reason="P06: report download and citation-to-evidence mapping are not built",
 )
 async def test_report_is_generated_and_downloadable(client, db, new_account):
     alice = await new_account("alice")

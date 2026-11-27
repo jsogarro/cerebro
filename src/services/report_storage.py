@@ -662,15 +662,15 @@ class ReportStorageService:
         *,
         organization_id: UUID | str,
         user_id: UUID | str | None = None,
-    ) -> dict[str, Any]:
-        """Verify the integrity of a report and its files."""
+    ) -> dict[str, Any] | None:
+        """Verify a report's files; None when the caller cannot see the report."""
         report = await self.retrieve_report(
             report_id,
             organization_id=organization_id,
             user_id=user_id,
         )
         if not report:
-            return {"status": "error", "message": "Report not found"}
+            return None
 
         integrity_results: dict[str, Any] = {
             "report_id": str(report_id),

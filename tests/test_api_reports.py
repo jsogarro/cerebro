@@ -527,6 +527,66 @@ class TestReportsAPI:
             assert data["formats_checked"] == 3
             assert data["formats_valid"] == 3
 
+    def test_verify_integrity_missing_report_is_404(self, client: TestClient) -> None:
+        with patch("src.api.routes.reports.get_report_services") as mock_services:
+            mock_storage = MagicMock()
+            mock_storage.verify_report_integrity = AsyncMock(return_value=None)
+            mock_services.return_value = (
+                MagicMock(),
+                mock_storage,
+                MagicMock(),
+                MagicMock(),
+            )
+
+            response = client.get(f"/api/v1/reports/{uuid4()}/integrity")
+
+            assert response.status_code == 404
+
+    def test_generate_commits_the_row_before_queueing_the_task(
+        self, client: TestClient
+    ) -> None:
+        events: list[str] = []
+        session = AsyncMock(spec=AsyncSession)
+        session.commit.side_effect = lambda: events.append("commit")
+
+        async def override_session():
+            yield session
+
+        async def record_task(*_args: Any) -> None:
+            events.append("task")
+
+        report = MagicMock(spec=GeneratedReport)
+        report.id = uuid4()
+        report.title = "T"
+        report.query = "q"
+        report.report_type = "comprehensive"
+        report.generation_status = "pending"
+        report.formats = []
+        report.word_count = 0
+        report.page_count = 0
+        report.quality_score = 0.0
+        report.confidence_score = 0.0
+        report.created_at = datetime.now()
+        report.generation_time_seconds = None
+        repo = MagicMock()
+        repo.create_report = AsyncMock(return_value=report)
+        repo.get_report_with_formats = AsyncMock(return_value=report)
+
+        from src.api.main import app
+
+        app.dependency_overrides[get_session] = override_session
+        with (
+            patch("src.api.routes.reports.get_report_services") as mock_services,
+            patch("src.api.routes.reports._generate_report_task", new=record_task),
+        ):
+            mock_services.return_value = (MagicMock(), MagicMock(), repo, MagicMock())
+            response = client.post(
+                "/api/v1/reports/generate", json={"title": "T", "query": "q"}
+            )
+
+        assert response.status_code == 202, response.text
+        assert events == ["commit", "task"]
+
     def test_service_unavailable_handling(self, client: TestClient) -> None:
         """Test handling when services are unavailable."""
         with patch("src.api.routes.reports.get_report_services") as mock_services:

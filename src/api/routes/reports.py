@@ -330,6 +330,9 @@ async def generate_report(
             raise RuntimeError("Persisted report could not be reloaded")
         db_report = reloaded_report
 
+        # The worker opens its own session; the row must be visible to it.
+        await session.commit()
+
         background_tasks.add_task(
             _generate_report_task,
             generator,
@@ -721,6 +724,12 @@ async def verify_report_integrity(
             organization_id=organization_id,
             user_id=authenticated_user_id,
         )
+
+        if integrity_result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Report {report_id} not found",
+            )
 
         if not isinstance(integrity_result, dict):
             raise HTTPException(
