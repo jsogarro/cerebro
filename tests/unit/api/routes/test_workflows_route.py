@@ -29,3 +29,29 @@ def test_listing_requires_an_authenticated_caller():
         401,
         403,
     )
+
+
+def test_listing_omits_disabled_entries(monkeypatch):
+    from src.api.services.workflow_catalog import (
+        ExecutableWorkflowCatalog,
+        default_workflow_entries,
+    )
+    from src.core.kernel.component_keys import AGENT_KEYS
+
+    (entry,) = default_workflow_entries()
+    hidden = entry.model_copy(
+        update={
+            "enabled": False,
+            "workflow": entry.workflow.model_copy(update={"workflow_version": "2"}),
+        }
+    )
+    catalog = ExecutableWorkflowCatalog(
+        [entry, hidden], registered_workers=tuple(AGENT_KEYS)
+    )
+    monkeypatch.setattr(workflows, "get_workflow_catalog", lambda: catalog)
+
+    versions = [
+        w["workflow_version"]
+        for w in _client().get("/api/v1/workflows").json()["workflows"]
+    ]
+    assert versions == ["1"]

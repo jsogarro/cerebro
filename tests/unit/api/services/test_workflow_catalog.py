@@ -83,3 +83,81 @@ def test_resolve_matches_version_exactly_and_defaults_to_newest():
     assert catalog.resolve(DEFAULT_RESEARCH_WORKFLOW_ID, "1") is not None
     assert catalog.resolve(DEFAULT_RESEARCH_WORKFLOW_ID, "2") is None
     assert catalog.resolve("unknown", None) is None
+
+
+def _with_workflow(entry, **changes):
+    return entry.model_copy(
+        update={"workflow": entry.workflow.model_copy(update=changes)}
+    )
+
+
+def test_default_policy_pointer_must_match_the_entrys_policy():
+    (entry,) = default_workflow_entries()
+    bad = _with_workflow(entry, default_routing_policy_version="9")
+    with pytest.raises(WorkflowCatalogError, match="default routing policy"):
+        ExecutableWorkflowCatalog([bad], registered_workers=REGISTERED)
+
+
+def test_entry_must_name_exactly_one_domain():
+    (entry,) = default_workflow_entries()
+    bad = entry.model_copy(update={"domains": ("research", "content")})
+    with pytest.raises(WorkflowCatalogError, match="one domain"):
+        ExecutableWorkflowCatalog([bad], registered_workers=REGISTERED)
+
+
+def test_budget_parallelism_cannot_exceed_the_worker_count():
+    (entry,) = default_workflow_entries()
+    policy = entry.routing_policy.model_copy(update={"max_parallel_tasks": 2})
+    budget = entry.budget_ceiling.model_copy(update={"max_parallel_tasks": 2})
+    bad = entry.model_copy(update={"routing_policy": policy, "budget_ceiling": budget})
+    with pytest.raises(WorkflowCatalogError, match="budget disagrees"):
+        ExecutableWorkflowCatalog([bad], registered_workers=REGISTERED)
+
+
+def test_output_schema_with_a_remote_reference_is_rejected():
+    (entry,) = default_workflow_entries()
+    bad = _with_workflow(
+        entry, output_schema={"$ref": "https://example.com/schema.json"}
+    )
+    with pytest.raises(WorkflowCatalogError, match="local definitions"):
+        ExecutableWorkflowCatalog([bad], registered_workers=REGISTERED)
+
+
+def test_resolve_without_a_version_returns_the_newest_enabled():
+    (entry,) = default_workflow_entries()
+    newer = _with_workflow(entry, workflow_version="2")
+    catalog = ExecutableWorkflowCatalog([entry, newer], registered_workers=REGISTERED)
+    resolved = catalog.resolve(DEFAULT_RESEARCH_WORKFLOW_ID, None)
+    assert resolved.workflow.workflow_version == "2"
+
+
+def test_catalog_never_lists_a_disabled_entry_even_when_it_is_newest():
+    (entry,) = default_workflow_entries()
+    newer = _with_workflow(entry, workflow_version="2").model_copy(
+        update={"enabled": False}
+    )
+    catalog = ExecutableWorkflowCatalog([entry, newer], registered_workers=REGISTERED)
+    assert [e.workflow.workflow_version for e in catalog.enabled()] == ["1"]
+    assert (
+        catalog.resolve(DEFAULT_RESEARCH_WORKFLOW_ID, None).workflow.workflow_version
+        == "1"
+    )
+
+
+def test_entry_shape_carries_what_routing_must_honour():
+    (entry,) = default_workflow_entries()
+    shape = entry.shape()
+    assert shape.domains == entry.domains
+    assert shape.worker_types == entry.routing_policy.worker_types
+    assert shape.provider_allowlist == entry.routing_policy.provider_allowlist
+    assert shape.collaboration_mode.value == entry.routing_policy.collaboration_mode
+
+
+def test_provider_allowlist_uses_dispatchable_provider_names():
+    (entry,) = default_workflow_entries()
+    assert set(entry.routing_policy.provider_allowlist) <= {
+        "deepseek",
+        "gemini",
+        "llama",
+        "openrouter",
+    }

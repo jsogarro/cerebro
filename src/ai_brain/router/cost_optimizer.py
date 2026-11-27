@@ -370,7 +370,11 @@ class CostOptimizer:
             "min_context_window", complexity_analysis.estimated_tokens * 2
         )
 
+        allowed_providers = constraints.get("provider_allowlist")
+
         for model in self.models.values():
+            if allowed_providers and model.provider not in allowed_providers:
+                continue
             estimated_cost = (
                 model.cost_per_1k_tokens * complexity_analysis.estimated_tokens / 1000
             )

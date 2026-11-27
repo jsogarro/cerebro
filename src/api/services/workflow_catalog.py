@@ -15,6 +15,7 @@ from decimal import Decimal
 from functools import lru_cache
 
 from src.ai_brain.integration.execution_plan_topology import schema_rejection_reason
+from src.ai_brain.router.routing_types import WorkflowShape
 from src.core.contracts import (
     COLLABORATION_MODE_SUPPORT,
     CollaborationMode,
@@ -43,6 +44,18 @@ class WorkflowCatalogEntry(ContractModel):
     domains: tuple[ContractId, ...]
     budget_ceiling: ExecutionBudget
     enabled: bool = True
+
+    def shape(self) -> WorkflowShape:
+        """The execution shape routing must produce for this entry."""
+
+        policy = self.routing_policy
+        return WorkflowShape(
+            strategy=policy.strategy,
+            domains=tuple(self.domains),
+            collaboration_mode=CollaborationMode(policy.collaboration_mode),
+            worker_types=tuple(policy.worker_types),
+            provider_allowlist=tuple(policy.provider_allowlist),
+        )
 
     @property
     def key(self) -> tuple[str, str]:
@@ -169,7 +182,7 @@ def default_workflow_entries() -> tuple[WorkflowCatalogEntry, ...]:
         max_parallel_tasks=1,
         max_attempts_per_task=1,
         task_timeout_seconds=_RESEARCH_BUDGET.task_timeout_seconds,
-        provider_allowlist=("openrouter",),
+        provider_allowlist=("deepseek",),
     )
     return (
         WorkflowCatalogEntry(

@@ -54,6 +54,7 @@ from src.api.routes import (
     workflows,
 )
 from src.api.services.event_publisher import event_publisher
+from src.api.services.workflow_catalog import get_workflow_catalog
 from src.api.websocket.connection_manager import websocket_manager
 from src.core.config import settings
 from src.core.observability import configure_logging
@@ -134,6 +135,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup
     logger.info("Starting Research Platform API", environment=settings.ENVIRONMENT)
     require_document_key(settings)
+    # An invalid enabled catalogue entry must stop startup, not the first request.
+    get_workflow_catalog()
 
     async with AsyncExitStack() as resources:
         from src.middleware.auth_middleware import close_jwt_service

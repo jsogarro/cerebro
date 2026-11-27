@@ -17,6 +17,7 @@ import json
 from decimal import Decimal
 from typing import Annotated
 
+from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.api.services.workflow_catalog import (
@@ -44,7 +45,14 @@ RESERVED_LAUNCH_KEYS = frozenset(
         "binding",
         "plan",
         "execution_plan",
+        "requester",
+        "owner_id",
+        "org_id",
+        "provider",
         "providers",
+        "model",
+        "fixture_mode",
+        "fixture_result",
         "tools",
         "tool_allowlist",
         "permission_scopes",
@@ -53,6 +61,20 @@ RESERVED_LAUNCH_KEYS = frozenset(
 )
 
 _MAX_INPUT_BYTES = 64 * 1024
+
+
+def _reserved_keys(node: object) -> set[str]:
+    """Reserved names at any depth, matched case-insensitively."""
+    found: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if str(key).lower().replace("-", "_") in RESERVED_LAUNCH_KEYS:
+                found.add(str(key))
+            found |= _reserved_keys(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _reserved_keys(item)
+    return found
 
 
 class WorkflowLaunchRejectedError(Exception):
@@ -93,7 +115,7 @@ class WorkflowLaunchRequest(BaseModel):
 
     @model_validator(mode="after")
     def reject_reserved_inputs(self) -> WorkflowLaunchRequest:
-        reserved = RESERVED_LAUNCH_KEYS & self.inputs.keys()
+        reserved = _reserved_keys(self.inputs)
         if reserved:
             raise ValueError(f"reserved launch keys: {sorted(reserved)}")
         if len(json.dumps(self.inputs, default=str)) > _MAX_INPUT_BYTES:
@@ -146,6 +168,11 @@ class WorkflowLaunchService:
                 "PROVIDER_POLICY_NOT_ALLOWED", 422, "provider policy is not authorized"
             )
         budget = self._narrow(entry.budget_ceiling, request.budget)
+        schema = entry.workflow.model_dump(mode="json")["input_schema"]
+        if not Draft202012Validator(schema).is_valid(
+            {"objective": request.objective, **request.inputs}
+        ):
+            raise _reject("INPUTS_INVALID", 422, "inputs do not match the workflow")
         digest = hashlib.sha256(
             json.dumps(
                 {
@@ -154,6 +181,7 @@ class WorkflowLaunchService:
                     "objective": request.objective,
                     "inputs": request.inputs,
                     "dry_run": request.dry_run,
+                    "mode": request.mode,
                     "budget": budget.model_dump(mode="json"),
                     "provider_policy_id": policy.routing_policy_id,
                     "parent_run_id": request.parent_run_id,
@@ -195,7 +223,9 @@ class WorkflowLaunchService:
             updates["max_cost_usd"] = hint.max_cost_usd
         if hint.max_total_tokens is not None:
             updates["max_total_tokens"] = hint.max_total_tokens
-        narrowed = ceiling.model_copy(update=updates)
+        narrowed = ExecutionBudget.model_validate(
+            {**ceiling.model_dump(mode="json"), **updates}
+        )
         if (
             narrowed.max_cost_usd > ceiling.max_cost_usd
             or narrowed.max_total_tokens > ceiling.max_total_tokens

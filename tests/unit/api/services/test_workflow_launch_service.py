@@ -118,3 +118,68 @@ def test_digest_is_stable_and_binds_requester_query_dry_run_and_parent():
 
 def test_digest_ignores_the_idempotency_key_itself():
     assert _select(key="a").launch_digest == _select(key="b").launch_digest
+
+
+def test_budget_hint_cannot_widen_the_cost_ceiling():
+    ceiling = _select().budget
+    over = str(ceiling.max_cost_usd + 1)
+    assert _rejection(request=_request(budget={"max_cost_usd": over})).code == (
+        "BUDGET_EXPANSION"
+    )
+
+
+def test_cost_hint_narrows_the_cost_ceiling():
+    assert (
+        str(_select(_request(budget={"max_cost_usd": "0.25"})).budget.max_cost_usd)
+        == "0.25"
+    )
+
+
+def test_budget_hint_rejects_unknown_fields():
+    with pytest.raises(ValidationError):
+        _request(budget={"max_attempts_per_task": 5})
+
+
+def test_digest_binds_inputs_budget_workflow_and_mode_hint():
+    base = _select().launch_digest
+    assert _select(_request(inputs={"n": 1})).launch_digest != base
+    assert _select(_request(budget={"max_total_tokens": 10})).launch_digest != base
+    assert _select(_request(mode="fast_path")).launch_digest != base
+    (entry,) = default_workflow_entries()
+    other_entry = entry.model_copy(
+        update={"workflow": entry.workflow.model_copy(update={"workflow_version": "2"})}
+    )
+    both = WorkflowLaunchService(
+        ExecutableWorkflowCatalog(
+            [entry, other_entry], registered_workers=tuple(AGENT_KEYS)
+        )
+    )
+    v1 = both.select(
+        _request(workflow_version="1"), requester="u1", idempotency_key="k1"
+    )
+    v2 = both.select(
+        _request(workflow_version="2"), requester="u1", idempotency_key="k1"
+    )
+    assert v1.launch_digest != v2.launch_digest
+
+
+@pytest.mark.parametrize(
+    "inputs",
+    [
+        {"User_ID": "x"},
+        {"context": {"user_id": "x"}},
+        {"a": [{"Organization_Id": "x"}]},
+        {"requester": "x"},
+        {"provider": "anthropic"},
+        {"model": "gpt-5"},
+        {"fixture_mode": True},
+    ],
+)
+def test_reserved_keys_are_rejected_at_any_depth_and_in_any_case(inputs):
+    with pytest.raises(ValidationError, match="reserved launch keys"):
+        _request(inputs=inputs)
+
+
+def test_inputs_are_validated_against_the_entrys_input_schema():
+    rejection = _rejection(request=_request(inputs={"objective": 5}))
+    assert (rejection.code, rejection.http_status) == ("INPUTS_INVALID", 422)

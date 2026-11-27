@@ -46,3 +46,21 @@ def test_configured_weights_reach_the_analyzer():
 def test_settings_defaults_are_the_calibrated_cutoffs():
     thresholds = get_settings().MASR_COMPLEXITY_THRESHOLDS
     assert (thresholds["simple"], thresholds["moderate"]) == (0.12, 0.22)
+
+
+@pytest.mark.parametrize(
+    "thresholds",
+    [
+        {"simple": 0.1},
+        {"moderate": 0.2},
+        {"simple": 0.5, "moderate": 0.2},
+        {"simple": 0.2, "moderate": 0.2},
+    ],
+)
+def test_incomplete_or_inverted_thresholds_fail_settings_validation(thresholds):
+    from pydantic import ValidationError
+
+    from src.core.config import Settings
+
+    with pytest.raises(ValidationError, match="MASR_COMPLEXITY_THRESHOLDS"):
+        Settings(MASR_COMPLEXITY_THRESHOLDS=thresholds)

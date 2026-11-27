@@ -345,6 +345,15 @@ class Settings(BaseSettings):
     DEV_MOCK_PROVIDERS: bool = False
     DEV_MOCK_MEMORY: bool = False
 
+    @field_validator("MASR_COMPLEXITY_THRESHOLDS")
+    @classmethod
+    def validate_complexity_thresholds(cls, v: dict[str, float]) -> dict[str, float]:
+        """The analyzer reads both cutoffs; a missing or inverted one would
+        otherwise surface as a swallowed routing error."""
+        if not {"simple", "moderate"} <= v.keys() or not v["simple"] < v["moderate"]:
+            raise ValueError("MASR_COMPLEXITY_THRESHOLDS needs simple < moderate")
+        return v
+
     @field_validator("TRUSTED_PROXIES")
     @classmethod
     def validate_trusted_proxies(cls, v: list[str]) -> list[str]:

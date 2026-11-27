@@ -7,12 +7,11 @@ import pytest
 
 from src.ai_brain.integration.execution_plan_topology import (
     ExecutionPlanTopologyExecutor,
-    ExecutionTopologyUnsupportedError,
 )
 from src.ai_brain.router.execution_plan_compiler import ExecutionPlanCompiler
 from src.ai_brain.router.factory import settings_to_router_config
 from src.ai_brain.router.masr import MASRouter
-from src.ai_brain.router.routing_types import RoutingStrategy
+from src.ai_brain.router.routing_types import WorkflowShapeUnsupportedError
 from src.api.services.workflow_catalog import default_workflow_entries
 from src.core.config import get_settings
 from src.core.contracts import (
@@ -28,9 +27,14 @@ from src.models.execution_authority import ExecutionAuthorityBinding
 
 
 def _binding(proposal) -> ExecutionAuthorityBinding:
-    """What the launch service will build: entry shape, proposal's primary route."""
+    """What the launch service will build: the catalogue entry is the authority.
+
+    Only the primary model comes from the proposal, and it must sit inside the
+    entry's provider allowlist.
+    """
     now = datetime(2026, 11, 27, tzinfo=UTC)
     route = proposal.optimization_result.primary_model
+    allowlist = ENTRY.routing_policy.provider_allowlist
     worker_type = ENTRY.routing_policy.worker_types[0]
     return ExecutionAuthorityBinding.create_for_test(
         authority_id="authority-1",
@@ -40,7 +44,7 @@ def _binding(proposal) -> ExecutionAuthorityBinding:
         routing_policy_id=ENTRY.routing_policy.routing_policy_id,
         strategy=ENTRY.routing_policy.strategy,
         collaboration_mode=ENTRY.routing_policy.collaboration_mode,
-        domains=tuple(d.value for d in proposal.complexity_analysis.domains),
+        domains=ENTRY.domains,
         supervisor_id=None,
         supervisor_type=None,  # single-worker modes have no supervisor node
         workers=(
@@ -58,7 +62,7 @@ def _binding(proposal) -> ExecutionAuthorityBinding:
             primary=ProviderModelRoute(provider=route.provider, model=route.name),
             fallback_mode=FallbackMode.FAIL_CLOSED,
             fallbacks=(),
-            provider_allowlist=(route.provider,),
+            provider_allowlist=allowlist,
             model_allowlist=(route.name,),
         ),
         budget=ENTRY.budget_ceiling,
@@ -84,21 +88,13 @@ async def _route(query: str):
     router = MASRouter(
         config=settings_to_router_config(get_settings(), fixture_mode=True)
     )
-    # The launch path routes under the strategy its catalogue policy pins.
-    return await router.route(
-        query, {}, strategy=RoutingStrategy(ENTRY.routing_policy.strategy)
-    )
+    return await router.route(query, {}, shape=ENTRY.shape())
 
 
 @pytest.mark.asyncio
 async def test_simple_query_routes_compiles_and_admits_with_one_registered_worker():
     proposal = await _route("What is photosynthesis?")
 
-    assert proposal.collaboration_mode.value == "fast_path"
-    assert proposal.optimization_result.fallback_models == []
-    assert list(proposal.agent_allocation.worker_types) == [
-        ENTRY.routing_policy.worker_types[0]
-    ]
     plan = ExecutionPlanCompiler().compile(proposal, _binding(proposal))
     _topology().admit(plan)
     assert len(plan.routing_decision.workers) == 1
@@ -108,16 +104,29 @@ async def test_simple_query_routes_compiles_and_admits_with_one_registered_worke
 @pytest.mark.parametrize(
     "query",
     [
+        "What is photosynthesis?",
+        "Summarize recent literature on sleep and memory",
         "Compare and contrast two machine learning approaches for fraud detection "
         "with tradeoffs.",
-        "Summarize recent literature on sleep and memory",
     ],
 )
-async def test_queries_the_catalogue_cannot_serve_are_rejected_before_dispatch(query):
+async def test_simple_and_research_queries_admit_under_the_catalogue_entry(query):
     proposal = await _route(query)
 
-    with pytest.raises((ValueError, ExecutionTopologyUnsupportedError)):
-        _topology().admit(ExecutionPlanCompiler().compile(proposal, _binding(proposal)))
+    assert proposal.optimization_result.primary_model.provider in (
+        ENTRY.routing_policy.provider_allowlist
+    )
+    plan = ExecutionPlanCompiler().compile(proposal, _binding(proposal))
+    _topology().admit(plan)
+    assert [w.worker_type for w in plan.routing_decision.workers] == list(
+        ENTRY.routing_policy.worker_types
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_query_outside_the_entrys_domain_is_rejected_by_the_router():
+    with pytest.raises(WorkflowShapeUnsupportedError, match="domain"):
+        await _route("Write a blog post and analyze our quarterly revenue data")
 
 
 @pytest.mark.asyncio
@@ -130,3 +139,22 @@ async def test_a_binding_that_claims_a_supervisor_for_the_fast_path_is_rejected(
 
     with pytest.raises(ValueError, match="supervisor does not match"):
         ExecutionPlanCompiler().compile(proposal, claimed)
+
+
+@pytest.mark.asyncio
+async def test_out_of_domain_queries_do_not_trip_the_routing_breaker():
+    router = MASRouter(
+        config=settings_to_router_config(get_settings(), fixture_mode=True)
+    )
+    for _ in range(6):
+        with pytest.raises(WorkflowShapeUnsupportedError):
+            await router.route(
+                "Write a blog post and analyze our revenue data",
+                {},
+                shape=ENTRY.shape(),
+            )
+
+    decision = await router.route("What is photosynthesis?", {}, shape=ENTRY.shape())
+    assert decision.agent_allocation.worker_types == list(
+        ENTRY.routing_policy.worker_types
+    )

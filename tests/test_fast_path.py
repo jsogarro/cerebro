@@ -227,36 +227,46 @@ class TestStrategyBudgets:
 
 
 class TestFastPathWorker:
-    """The fast path names one concrete, registered worker and no fallbacks."""
+    """The fast path never names an unregistered worker."""
 
     @pytest.fixture
     def router(self):
         return MASRouter(config={"default_strategy": "balanced"})
 
     @pytest.mark.parametrize(
-        ("domain", "worker"),
+        ("domain", "workers"),
         [
-            ("research", "literature_review"),
-            ("general", "literature_review"),
-            ("content", "drafting"),
-            ("analytics", "data_analysis"),
-            ("finance", "financial_analysis"),
+            ("research", ["literature_review"]),
+            ("content", ["drafting"]),
+            ("analytics", ["data_analysis"]),
+            ("finance", ["financial_analysis"]),
+            # No registered worker: none is named, as before.
+            ("general", []),
+            ("service", []),
+            ("multimodal", []),
         ],
     )
-    def test_fast_path_allocates_exactly_one_registered_worker(
-        self, router, domain, worker
-    ):
+    def test_fast_path_names_only_registered_workers(self, router, domain, workers):
         from src.core.kernel.component_keys import AGENT_KEYS
 
         allocation = router._allocate_agents(
             make_complexity(domains=[domain]), CollaborationMode.FAST_PATH, None, None
         )
-        assert allocation.worker_types == [worker]
-        assert allocation.worker_count == 1
-        assert worker in AGENT_KEYS
+        assert allocation.worker_types == workers
+        assert set(allocation.worker_types) <= set(AGENT_KEYS)
 
-    @pytest.mark.parametrize("domain", ["service", "multimodal"])
-    def test_domain_without_a_registered_worker_does_not_fast_path(
-        self, router, domain
+    @pytest.mark.parametrize("domain", ["general", "service", "multimodal"])
+    def test_eligibility_does_not_depend_on_having_a_worker(self, router, domain):
+        assert router._should_use_fast_path(make_complexity(domains=[domain])) is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "query", ["Hello", "Reset my account password", "Describe this image"]
+    )
+    async def test_uncatalogued_routing_names_no_unregistered_worker(
+        self, router, query
     ):
-        assert router._should_use_fast_path(make_complexity(domains=[domain])) is False
+        from src.core.kernel.component_keys import AGENT_KEYS
+
+        decision = await router.route(query, {})
+        assert set(decision.agent_allocation.worker_types) <= set(AGENT_KEYS)
