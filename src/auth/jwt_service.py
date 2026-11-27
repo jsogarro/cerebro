@@ -359,9 +359,13 @@ class JWTService:
         token: str,
         token_type: str = "access",
         verify_blacklist: bool = True,
+        audience: str | None = None,
     ) -> TokenPayload:
         """
         Validate and decode JWT token.
+
+        ``audience`` is required for a token that carries ``aud`` and rejects
+        one that does not; with ``None`` any token carrying ``aud`` is refused.
 
         Args:
             token: JWT token to validate
@@ -380,8 +384,13 @@ class JWTService:
                 token,
                 self.public_key,
                 algorithms=[self.algorithm],
+                audience=audience,
                 options={"verify_exp": True},
             )
+
+            # python-jose skips the audience check when the claim is absent.
+            if audience is not None and payload.get("aud") != audience:
+                raise JWTError("Invalid audience")
 
             # Verify token type
             if payload.get("token_type") != token_type:

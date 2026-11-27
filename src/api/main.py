@@ -623,9 +623,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount Prometheus metrics endpoint
-metrics_app = make_asgi_app()
-app.mount("/metrics", metrics_app)
+# Mount Prometheus metrics endpoint. AuthMiddleware gates it on the metrics
+# credential, never on an ordinary tenant token.
+if settings.ENABLE_METRICS:
+    app.mount("/metrics", make_asgi_app())
 
 # Include routers
 app.include_router(health.router, tags=["health"])

@@ -53,7 +53,6 @@ KNOWN_UNREAD: frozenset[str] = frozenset(
         "DEV_MOCK_MEMORY",
         "DEV_MOCK_PROVIDERS",
         "ENABLE_CACHE",
-        "ENABLE_METRICS",
         "ENABLE_MFA",
         "EPISODIC_MEMORY_ENABLED",
         "EPISODIC_MEMORY_MAX_SESSION_DURATION_HOURS",

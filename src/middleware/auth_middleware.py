@@ -66,6 +66,17 @@ PUBLIC_ROUTE_ALLOWLIST: Final[dict[tuple[str, str], str]] = {
 }
 
 
+# Audience and permission of the scraper credential. Ordinary tokens carry no
+# audience, so ``/metrics`` never accepts them and the scraper token never
+# passes as an API credential (python-jose rejects an unexpected ``aud``).
+METRICS_AUDIENCE: Final = "cerebro-metrics"
+METRICS_PERMISSION: Final = "metrics:read"
+
+
+def _is_metrics_path(path: str) -> bool:
+    return path == "/metrics" or path.startswith("/metrics/")
+
+
 def _set_request_identity(
     request: Request, token_payload: TokenPayload | PersonalAccessTokenPayload
 ) -> None:
@@ -220,6 +231,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 401, "Personal access tokens are only accepted on /mcp"
             )
 
+        metrics_route = _is_metrics_path(request.url.path)
         token_payload: TokenPayload | PersonalAccessTokenPayload
         try:
             jwt_service = await resolve_jwt_service(request)
@@ -227,6 +239,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 pat_service = await resolve_pat_service(request)
                 token_payload = await pat_service.validate_token(
                     token, jwt_service=jwt_service
+                )
+            elif metrics_route:
+                token_payload = await jwt_service.validate_token(
+                    token, audience=METRICS_AUDIENCE
                 )
             else:
                 token_payload = await jwt_service.validate_token(token)
@@ -244,6 +260,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
         except Exception as exc:
             logger.error("Authentication validation unavailable", error=str(exc))
             return _authentication_response(503, "Authentication service unavailable")
+
+        if metrics_route and not token_payload.has_permission(METRICS_PERMISSION):
+            audit_rejection(
+                request, AuditEventType.UNAUTHORIZED_ACCESS, "missing metrics scope"
+            )
+            return JSONResponse(
+                status_code=403,
+                content=build_error_payload(
+                    code="FORBIDDEN", message="Metrics access denied"
+                ),
+            )
 
         _set_request_identity(request, token_payload)
         response: Response = await call_next(request)
