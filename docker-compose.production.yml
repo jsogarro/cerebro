@@ -13,6 +13,11 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://research:${DB_PASSWORD}@postgres:5432/research_db
+      - ROLES_ADMIN_DATABASE_URL=postgresql+asyncpg://research:${DB_PASSWORD}@postgres:5432/research_db
+      - CEREBRO_MIGRATOR_PASSWORD=${CEREBRO_MIGRATOR_PASSWORD}
+      - CEREBRO_APP_PASSWORD=${CEREBRO_APP_PASSWORD}
+      - CEREBRO_MAINT_PASSWORD=${CEREBRO_MAINT_PASSWORD}
+      - MAINTENANCE_DATABASE_URL=postgresql+asyncpg://cerebro_maint:${CEREBRO_MAINT_PASSWORD}@postgres:5432/research_db
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       # Direct execution uses the FastAPI-owned in-process MASR runtime.
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}

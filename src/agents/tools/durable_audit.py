@@ -29,6 +29,7 @@ from src.core.contracts import (
 from src.core.tools.audit import EVENT_COMPLETED, ToolAuditEvent
 from src.core.tools.errors import ToolInvocationConflictError
 from src.models.db.run_lifecycle import AgentRun, AgentRunTask, AgentTaskAttempt
+from src.models.db.session import tenant_session
 from src.models.db.tool_invocation import AgentToolInvocation
 from src.repositories.run_event_repository import RunEventRepository
 from src.repositories.tenant_scope import (
@@ -112,7 +113,9 @@ class SessionToolAuditStore:
             attempt_id=attempt_id,
             organization_id=organization_id,
         )
-        async with self.session_factory() as session:
+        async with tenant_session(
+            self.session_factory, normalized_organization_id
+        ) as session:
             query = select(AgentToolInvocation).where(
                 AgentToolInvocation.run_id == run_id,
                 AgentToolInvocation.attempt_id == attempt_id,
@@ -154,7 +157,9 @@ class SessionToolAuditStore:
             attempt_id=attempt_id,
             organization_id=organization_id,
         )
-        async with self.session_factory() as session:
+        async with tenant_session(
+            self.session_factory, normalized_organization_id
+        ) as session:
             query = select(AgentToolInvocation).where(
                 AgentToolInvocation.run_id == run_id,
                 AgentToolInvocation.attempt_id == attempt_id,
@@ -197,7 +202,9 @@ class SessionToolAuditStore:
             attempt_id=attempt_id,
             organization_id=organization_id,
         )
-        async with self.session_factory() as session:
+        async with tenant_session(
+            self.session_factory, normalized_organization_id
+        ) as session:
             try:
                 query = select(AgentToolInvocation).where(
                     AgentToolInvocation.run_id == run_id,
@@ -266,7 +273,9 @@ class SessionToolAuditStore:
             attempt_id=attempt_id,
             organization_id=organization_id,
         )
-        async with self.session_factory() as session:
+        async with tenant_session(
+            self.session_factory, normalized_organization_id
+        ) as session:
             try:
                 statement = (
                     update(AgentToolInvocation)
@@ -319,7 +328,9 @@ class SessionToolAuditStore:
             organization_id=organization_id,
         )
 
-        async with self.session_factory() as session:
+        async with tenant_session(
+            self.session_factory, normalized_organization_id
+        ) as session:
             try:
                 await _require_durable_parent_context(
                     session,

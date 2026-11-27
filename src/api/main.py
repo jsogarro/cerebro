@@ -172,7 +172,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
 
         from src.models.db import session as db_session
-        from src.models.db.session import close_db, get_session_factory, init_db
+        from src.models.db.session import (
+            close_db,
+            get_maintenance_session_factory,
+            get_session_factory,
+            init_db,
+        )
 
         database_initialized = False
         try:
@@ -282,6 +287,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 durable_session_factory = get_session_factory()
             except RuntimeError as e:
                 logger.warning(f"Session factory unavailable: {e}")
+        # Cross-tenant jobs read without a tenant context, so they connect as
+        # the maintenance role rather than the application role.
+        maintenance_session_factory = (
+            get_maintenance_session_factory()
+            if durable_session_factory is not None
+            else None
+        )
         direct_execution_service = configure_direct_execution_service(
             gemini_service=gemini_service,
             masr_router=masr_runtime.router,
@@ -300,16 +312,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         existing_resolver = getattr(app.state, "execution_authority_resolver", None)
         if existing_resolver is not None:
             direct_execution_service.execution_authority_resolver = existing_resolver
-        elif durable_session_factory is not None:
+        elif maintenance_session_factory is not None:
             from src.api.services.execution_authority_resolver import (
                 PersistedExecutionAuthorityResolver,
             )
 
             persisted_resolver = PersistedExecutionAuthorityResolver(
-                session_factory=durable_session_factory
+                session_factory=maintenance_session_factory
             )
             try:
-                async with durable_session_factory() as warm_session:
+                async with maintenance_session_factory() as warm_session:
                     warmed = await persisted_resolver.warm_from_snapshots(warm_session)
                 logger.info(
                     "Execution authority resolver warmed from snapshots",
@@ -328,7 +340,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             from src.api.services.outbox_relay import OutboxRelay
 
             outbox_relay = OutboxRelay(
-                session_factory=durable_session_factory,
+                session_factory=maintenance_session_factory,
                 event_publisher=event_publisher,
             )
             outbox_relay.start()
@@ -343,7 +355,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
                 wakeups = RunEventWakeupSubscriber(
                     redis_client=event_publisher.redis_subscriber,
-                    session_factory=durable_session_factory,
+                    session_factory=maintenance_session_factory,
                 )
                 wakeups.start()
                 resources.push_async_callback(
@@ -352,7 +364,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     wakeups.stop,
                 )
 
-        _start_document_purge(resources, app, durable_session_factory)
+        _start_document_purge(resources, app, maintenance_session_factory)
 
         app.state.document_jobs = set()
         app.state.critique_reserved = 0

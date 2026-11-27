@@ -75,6 +75,7 @@ A field is listed here when a production module outside `src/core/config.py` rea
 | Setting | Default | Read by | Effect |
 |---|---|---|---|
 | `DATABASE_URL` | local development URL (`localhost:5432`, database `research_db`) | `src/models/db/session.py` (`get_database_url`), `src/api/main.py` (`lifespan`) | SQLAlchemy async URL; a URL containing `sqlite` makes the lifespan create tables from the ORM metadata; in `production` the validator rejects URLs containing default credentials |
+| `MAINTENANCE_DATABASE_URL` | unset | `src/models/db/session.py` (`get_maintenance_session_factory`), `src/api/main.py` (`lifespan`) | URL of the `cerebro_maint` role for the outbox relay, authority warm-up and upload purge. Required when `ENVIRONMENT=production`; elsewhere unset falls back to `DATABASE_URL` |
 | `REDIS_URL` | `redis://localhost:6379/0` | `src/api/main.py`, `src/api/auth/auth_router.py`, `src/middleware/auth_middleware.py`, `src/api/routes/health.py`, `src/api/services/event_publisher.py`, `src/ai_brain/router/factory.py` | Redis for rate limiting, idempotency, login throttling, token blacklist, event pub/sub, health probe and adaptive routing state |
 
 ### MASR

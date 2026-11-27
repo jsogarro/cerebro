@@ -25,7 +25,14 @@ services:
       - source_snapshots:/var/lib/cerebro/source_snapshots
     environment:
       - SOURCE_SNAPSHOT_DIR=/var/lib/cerebro/source_snapshots
+      # Runtime stays on the superuser until execution-service sessions set the
+      # tenant; the maintenance jobs already use their own role.
       - DATABASE_URL=postgresql+asyncpg://research:research123@postgres:5432/research_db
+      - ROLES_ADMIN_DATABASE_URL=postgresql+asyncpg://research:research123@postgres:5432/research_db
+      - CEREBRO_MIGRATOR_PASSWORD=migrator-dev-only
+      - CEREBRO_APP_PASSWORD=app-dev-only
+      - CEREBRO_MAINT_PASSWORD=maint-dev-only
+      - MAINTENANCE_DATABASE_URL=postgresql+asyncpg://cerebro_maint:maint-dev-only@postgres:5432/research_db
       - REDIS_URL=redis://redis:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - SECRET_KEY=${SECRET_KEY:-development-only-secret-key-32-chars}
