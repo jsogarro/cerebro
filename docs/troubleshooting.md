@@ -38,7 +38,7 @@ docker compose exec postgres pg_isready
 docker compose exec redis redis-cli ping
 ```
 
-`docker-compose.yml` defines `api`, `postgres`, `redis`, `nginx` and `web`, plus `masr-router` under the profile `legacy-masr-service` and `pgadmin` and `redis-commander` under the profile `dev-tools`. There is no worker service: executions run inside the `api` container.
+`docker-compose.yml` defines `api`, `postgres`, `redis`, `nginx` and `web`, plus `pgadmin` and `redis-commander` under the profile `dev-tools`. There is no worker service: executions run inside the `api` container.
 
 ## Connection issues
 
@@ -214,10 +214,6 @@ Postgres runs from `postgres:16-alpine` with user `research`.
 ### Redis
 
 Redis runs from `redis:7-alpine`. For "OOM command not allowed", check usage with `docker compose exec redis redis-cli INFO memory` and raise the memory available to the container. An eviction policy that removes keys can remove token-revocation and refresh keys; see [backup and recovery](backup-recovery.md) before enabling one.
-
-### Standalone MASR container
-
-The `masr-router` container (port 9100, profile `legacy-masr-service`) does not start: its command module `src.ai_brain.router.masr_service` no longer exists. It is not on the query path: routing runs in the `api` process, and `MASR_SERVICE_URL` is not read by the application. See [MASR routing](reference/06-masr-routing.md).
 
 ## Debug logging
 

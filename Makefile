@@ -1,7 +1,7 @@
 # Cerebro AI Brain Platform - Developer Makefile
 # Provides convenient commands for development, testing, and deployment
 
-.PHONY: help install dev test lint type-check format clean docker-dev docker-prod k8s-deploy legacy-masr
+.PHONY: help install dev test lint type-check format clean docker-dev docker-prod k8s-deploy
 
 # Default target
 help: ## Show this help message
@@ -34,9 +34,6 @@ dev-stop: ## Stop development environment
 dev-clean: ## Clean development environment (removes volumes)
 	./scripts/compose.sh down -v --remove-orphans
 	docker system prune -f
-
-legacy-masr: ## Start the non-authoritative standalone MASR diagnostics service
-	./scripts/compose.sh --profile legacy-masr-service up -d masr-router
 
 ## Production Environment
 prod-build: ## Build production images
@@ -163,9 +160,6 @@ k8s-clean: ## Clean Kubernetes deployment
 ## Monitoring
 logs-api: ## Follow API logs
 	./scripts/compose.sh logs -f api
-
-logs-masr: ## Follow MASR logs
-	./scripts/compose.sh --profile legacy-masr-service logs -f masr-router
 
 logs-all: ## Follow all service logs
 	./scripts/compose.sh logs -f

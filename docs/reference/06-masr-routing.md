@@ -246,10 +246,6 @@ Two offline scripts evaluate the allocation policy without enabling it; see the 
 - `routing_observability.py` exports the Prometheus series `cerebro_masr_adaptive_effective_state` (one-hot gauge over `disabled`, `fixture_off`, `cold`, `degraded`, `active`), `cerebro_masr_outcomes_total` and `cerebro_masr_outcome_metric_availability_total`. The gauge is updated by the router; the two counters are updated only by `RoutingOutcomeRecorder.record`. Labels are fixed enumerations. See [security, audit and observability](12-security-audit-observability.md).
 - When `LANGFUSE_ENABLED` is `true`, `MASRouter.route` is wrapped in `trace_masr_routing` (`src/core/tracing.py`), which sends a redacted, length-capped query prefix and routing metadata.
 
-## Legacy standalone MASR service
-
-> **Removed.** The module `src.ai_brain.router.masr_service` no longer exists, but the `masr-router` image (`docker/Dockerfile.masr`) still names it as its command, so the `legacy-masr-service` compose profile does not start. The API routes in-process through `MASRRuntime.create`.
-
 ## Source map
 
 - `src/ai_brain/router/masr.py`: `MASRouter`, `RoutingDecision`, mode selection, allocation, adaptive state handling

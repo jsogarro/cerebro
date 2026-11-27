@@ -27,7 +27,6 @@ Cerebro is a FastAPI application that accepts research queries, routes each one 
 | CLI | Active | `research-cli` | `src/cli/main.py` (`cli`), `pyproject.toml` (`[project.scripts]`) |
 | Web workbench | Active (partly backed; see [CLI and web clients](13-cli-and-web-clients.md)) | `web` compose service | `cerebro/web`, `docker-compose.yml` |
 | Persistence | Active | `init_db` during `lifespan` | `src/models/db/session.py` (`init_db`, `get_session_factory`) |
-| Legacy standalone MASR service | Not startable: its module was removed | `docker compose --profile legacy-masr-service up masr-router` | `docker-compose.yml` (`masr-router`), `docker/Dockerfile.masr` |
 | Code that is not wired | Not wired | none | see [not wired](15-not-wired.md) |
 
 Subsystems are detailed on their own pages ([documentation index](../README.md)). Code with no production caller is listed in [not wired](15-not-wired.md); two instances belong here: the citation contract module (`src/core/contracts/citation.py`) and the execution-policy fixture mode of `DirectExecutionService`; the second is described in [research execution](05-research-execution.md).
@@ -43,7 +42,6 @@ The `docker-compose.yml` stack runs these services.
 | `redis` | `redis:7-alpine` with `--appendonly yes`. The API's idempotency store and rate-limit store connect to it through `REDIS_URL`. |
 | `web` | The React workbench built from `cerebro/web`, served by its own nginx on container port 8080. |
 | `nginx` | A reverse proxy built from `docker/nginx/nginx.conf`. It answers `/health` itself, proxies `/api/` and `/ws` to the `api` upstream, serves `/docs` from its own static root and proxies every other path to the `web` upstream. |
-| `masr-router` | The `legacy-masr-service` compose profile (`docker/Dockerfile.masr`, port 9100). Its command names a module that no longer exists, so it does not start. The API process does not call it; the router the API uses is built in-process by `MASRRuntime.create`. |
 | `pgadmin`, `redis-commander` | Development tools in the `dev-tools` profile. |
 
 ```mermaid
@@ -53,7 +51,6 @@ flowchart LR
     nginx -->|"all other paths"| web
     api --> postgres[(Postgres)]
     api --> redis[(Redis)]
-    masr["masr-router (legacy-masr-service profile)"] --> redis
 ```
 
 See the [deployment guide](../deployment-monitoring-guide.md) for how the services are started.

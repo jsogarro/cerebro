@@ -10,7 +10,6 @@ This guide covers the deployment artifacts that exist in this repository: one Do
 | Container entrypoint | `docker/entrypoint.sh` | Runs `alembic upgrade head`, then starts the command |
 | Database init script | `docker/init.sql` | Extensions, schemas and types for a fresh Postgres container |
 | Reverse proxy config | `docker/nginx/nginx.conf` | Routes `/api/` and `/ws` to the API and `/` to the web container; answers `/health` itself |
-| Standalone MASR (Multi-Agent System Router) image | `docker/Dockerfile.masr` | Image for the legacy MASR service |
 | Development stack | `docker-compose.yml` | API, MCP server, Postgres, Redis, nginx, web, optional tools |
 | Production stack | `docker-compose.production.yml` | The same services with limits, secrets, Prometheus and Grafana |
 | Kubernetes manifests | `k8s/` | Namespace, service account, config map, external secrets, deployment, services, ingress, autoscaler, network policy, Kustomize file |
@@ -43,7 +42,6 @@ Build locally with `docker compose build` (development stage, `docker-compose.ym
 | Service | Image or build | Host port | Notes |
 |---|---|---|---|
 | `api` | `Dockerfile`, target `production` | 8000 | Memory limit 2G, `read_only: true`, `tmpfs` for `/tmp` and `/var/cache/nginx` |
-| `masr-router` | `docker/Dockerfile.masr` | 9100 | Profile `legacy-masr-service`; see [legacy MASR service](#legacy-standalone-masr-service) |
 | `postgres` | `postgres:16-alpine` | 5432 | Volume `postgres_data_prod`, user `research`, database `research_db` |
 | `redis` | `redis:7-alpine` | 6379 | Started with `--requirepass ${REDIS_PASSWORD}`, volume `redis_data_prod` |
 | `web` | `cerebro/web/Dockerfile` | none | Built with `VITE_API_URL=/api/v1` |
@@ -112,7 +110,3 @@ The series exported are the `llm_*` metrics defined in `src/core/observability.p
 The production compose file runs Prometheus and Grafana containers. Their configuration files are not in the repository (see [Docker Compose](#docker-compose-production-file)), so you must supply the scrape targets, dashboards and data sources.
 
 Logs go to standard output through structlog; `LOG_LEVEL` does not change their verbosity ([configuration](reference/02-configuration.md)). Read them with `docker compose logs -f api` (or `make logs-api` for the development stack) and `kubectl -n research-platform logs -f deployment/research-api`.
-
-## Legacy standalone MASR service
-
-`masr-router` is a container behind the `legacy-masr-service` profile (`make legacy-masr`). The module `src.ai_brain.router.masr_service` no longer exists, but the `masr-router` image (`docker/Dockerfile.masr`) still names it as its command, so the `legacy-masr-service` compose profile does not start. The API does not call it: routing runs in-process in the `api` container. See [MASR routing](reference/06-masr-routing.md).

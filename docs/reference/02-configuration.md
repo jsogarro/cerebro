@@ -392,7 +392,7 @@ Compose interpolates these variables from the shell or an `.env` file next to th
 | `GRAFANA_PASSWORD` | none | `docker-compose.production.yml` | Grafana admin password |
 | `JWT_PRIVATE_KEY_FILE`, `JWT_PUBLIC_KEY_FILE` | none; compose stops with an error when either is unset | `docker-compose.production.yml` | host paths of the RSA key pair, exposed to the API as compose secrets and mounted at `/run/secrets` |
 
-Both compose files also set literal environment entries that no code reads: `MASR_MAX_AGENTS` and `MASR_QUALITY_THRESHOLD` (the `masr-router` service in both files, and the production `api` service), `MASR_ENABLE_LEARNING` (the `masr-router` service in the development file, the `api` service in the production file) and `MASR_ENABLE_ROUTING` (production `api` service only). The production image starts `uvicorn` with `--workers 1`.
+The production compose file also sets literal environment entries that no code reads: `MASR_ENABLE_ROUTING`, `MASR_ENABLE_LEARNING`, `MASR_MAX_AGENTS` and `MASR_QUALITY_THRESHOLD`, all on the `api` service. The production image starts `uvicorn` with `--workers 1`.
 
 ## Example environment files
 

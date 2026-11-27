@@ -6,7 +6,7 @@ How to install the dependencies, configure the environment, run the stack, authe
 
 | Tool | Version | Source |
 |---|---|---|
-| Python | 3.11 or newer | `pyproject.toml` (`requires-python = ">=3.11"`); `.python-version` pins `3.11`; the CI test job runs 3.11, 3.12 and 3.13; the `Dockerfile` and `docker/Dockerfile.masr` use Python 3.13 |
+| Python | 3.11 or newer | `pyproject.toml` (`requires-python = ">=3.11"`); `.python-version` pins `3.11`; the CI test job runs 3.11, 3.12 and 3.13; the `Dockerfile` uses Python 3.13 |
 | uv | any recent release | `make install` runs `uv pip install`; CI installs uv 0.13.7 (`UV_VERSION` in `ci.yml`) and runs `uv pip install --system` |
 | Docker with Compose v2 | `docker compose` | `scripts/compose.sh` and the Make targets call `docker compose` |
 | Node.js | 20 | `NODE_VERSION: "20"` in `.github/workflows/ci.yml` and `FROM node:20-alpine` in `cerebro/web/Dockerfile`; `cerebro/web/package.json` declares no `engines` field |
@@ -77,20 +77,16 @@ Services in `docker-compose.yml` and their host ports:
 | `nginx` | `${NGINX_HTTP_HOST_PORT:-80}` and `${NGINX_HTTPS_HOST_PORT:-443}` | Reverse proxy from `docker/nginx/nginx.conf`: `/api/` and `/ws` go to `api:8000`; `/health` is answered by nginx itself and never reaches the API; `/docs` is served from nginx's own static root and returns 404 (FastAPI's `/docs` is not reachable through the proxy); everything else goes to `web:8080` |
 | `pgadmin` | 5050 | Profile `dev-tools` |
 | `redis-commander` | 8081 | Profile `dev-tools` |
-| `masr-router` | 9100 | Profile `legacy-masr-service` |
 
 Migrations: the `api` service uses `/entrypoint.sh` (`docker/entrypoint.sh`), which runs `alembic upgrade head`, exits with the migration's status if it fails and otherwise `exec`s the command. `make db-init` runs the same upgrade inside a running `api` container.
 
 Web workbench: the web client calls the relative base URL `/api/v1` (`cerebro/web/src/api/client.ts`), so it needs a same-origin proxy. Through Compose, open `http://localhost` (the `nginx` service, `NGINX_HTTP_HOST_PORT`). For a local dev server, run `npm install` and `npm run dev` in `cerebro/web`; `cerebro/web/vite.config.ts` proxies `/api` and `/ws` to `VITE_API_URL`, or to `http://localhost:8000` when it is unset. The Playwright config starts that dev server on port 5173 (`PLAYWRIGHT_PORT`).
 
-Optional profiles:
+Optional profile:
 
 ```bash
 ./scripts/compose.sh --profile dev-tools up -d     # pgAdmin and Redis Commander
-make legacy-masr                                   # the standalone MASR (Multi-Agent System Router) diagnostics service on port 9100
 ```
-
-`make legacy-masr` targets the `legacy-masr-service` profile, whose command module no longer exists, so it does not start. The API routes through the in-process router (see [MASR routing](reference/06-masr-routing.md)).
 
 ## Get an access token
 
@@ -196,7 +192,6 @@ Targets whose recipes reference only files and services that exist:
 | `install-pip` | `./scripts/setup-python-env.sh` |
 | `dev`, `dev-build`, `dev-logs`, `dev-stop` | `./scripts/compose.sh up -d`, `up -d --build`, `logs -f`, `down` |
 | `dev-clean` | `./scripts/compose.sh down -v --remove-orphans`, then `docker system prune -f` |
-| `legacy-masr` | `./scripts/compose.sh --profile legacy-masr-service up -d masr-router` |
 | `prod-build`, `prod-up`, `prod-down`, `prod-logs` | `./scripts/compose.sh -f docker-compose.production.yml` with `build`, `up -d`, `down`, `logs -f` |
 | `db-init` | `./scripts/compose.sh exec api alembic upgrade head` |
 | `db-migrate` | prompts for a message, then `alembic revision --autogenerate -m` inside `api` |
@@ -210,7 +205,7 @@ Targets whose recipes reference only files and services that exist:
 | `masr-health` | `python -c` that constructs `MASRouter()` from `src/ai_brain/router/masr.py` and prints `health_check()` |
 | `load-test` | `locust -f tests/load/locustfile.py --host=http://localhost:8000` (see the [testing guide](testing-guide.md#load-tests)) |
 | `k8s-namespace`, `k8s-config`, `k8s-deploy`, `k8s-status`, `k8s-logs`, `k8s-clean` | `kubectl` against `k8s/namespace.yaml`, `k8s/configmap.yaml`, `k8s/` (kustomize) and namespace `research-platform`; `k8s-logs` follows `deployment/research-api` |
-| `logs-api`, `logs-masr`, `logs-all` | `./scripts/compose.sh logs -f` for `api`, `masr-router` (with the `legacy-masr-service` profile) and all services |
+| `logs-api`, `logs-all` | `./scripts/compose.sh logs -f` for `api` and all services |
 | `clean`, `clean-docker` | delete `__pycache__`, `*.pyc` and tool caches; `docker system prune -f`, `docker volume prune -f`, `docker network prune -f` |
 | `dev-workflow`, `ci-workflow`, `quick-test`, `quick-format` | `make format lint type-check test`; `make quality test test-docker`; `pytest tests/unit -x -v`; `black src tests && ruff check --fix src tests` |
 | `docker-login`, `docker-push-dev`, `docker-push-prod` | `docker login` with `DOCKER_REGISTRY_TOKEN` and `DOCKER_REGISTRY`; `docker compose build` and `push` for the dev and production files |

@@ -127,12 +127,8 @@ Start the supporting services:
 The wrapper passes the project `.env` and then `~/.env` to Docker Compose with
 absolute paths; exported shell variables remain highest priority. Plain
 `docker compose` remains supported, but it does not load `~/.env` automatically.
-The default stack uses the FastAPI-owned in-process MASR runtime. The standalone
-port-9100 diagnostics service is legacy-only:
-
-```bash
-./scripts/compose.sh --profile legacy-masr-service up -d masr-router
-```
+MASR routing runs in-process in the `api` container; there is no separate
+router service.
 
 Adaptive Thompson routing is off by default. The scripts that evaluate it and
 produce a promotion report are described in the

@@ -51,42 +51,6 @@ services:
       retries: 12
       start_period: 30s
 
-  # MASR Router Service (AI Brain Intelligence)
-  masr-router:
-    profiles:
-      - legacy-masr-service
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.masr
-    volumes:
-      - ./src:/app/src
-    environment:
-      - REDIS_URL=redis://redis:6379/1
-      - ENVIRONMENT=development
-      - LOG_LEVEL=DEBUG
-      - MASR_PORT=9100
-      - MASR_DEFAULT_STRATEGY=balanced
-      - MASR_ENABLE_ADAPTIVE=${MASR_ENABLE_ADAPTIVE:-true}
-      - ADAPTIVE_ROUTING_ENABLED=false
-      - MASR_ENABLE_CACHING=true
-      - MASR_ENABLE_LEARNING=true
-      - MASR_QUALITY_THRESHOLD=0.85
-      - MASR_MAX_AGENTS=8
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-    ports:
-      - "9100:9100"
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - research-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9100/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
   # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
