@@ -378,10 +378,15 @@ class ExecutionPlanTopologyExecutor:
                     async with asyncio.timeout(min(remaining, task_limit)) as limit:
                         async with semaphore:
                             ledger.ensure_not_exceeded()
-                            return await self._worker_executor(worker, worker_task)
-                except TimeoutError:
+                            result = await self._worker_executor(worker, worker_task)
+                except Exception:
                     if not limit.expired():  # raised by the worker, not our limit
                         raise
+                else:
+                    # A worker that swallows the cancellation must not turn
+                    # a late result into a success.
+                    if not limit.expired():
+                        return result
             preflight_failures[worker_id] = WorkerOutcome(
                 worker_id, WorkerOutcomeStatus.TIMED_OUT, code
             )
