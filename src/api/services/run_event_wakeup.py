@@ -50,7 +50,11 @@ class RunEventWakeupSubscriber:
     def start(self) -> None:
         """Start consuming in the background. Idempotent."""
         if self._task is None or self._task.done():
-            self._task = asyncio.create_task(self._run_forever())
+            self._spawn(delay=0.0)
+
+    def _spawn(self, *, delay: float) -> None:
+        self._task = asyncio.create_task(self._run_forever(delay))
+        self._task.add_done_callback(self._restart_after_crash)
 
     async def stop(self) -> None:
         task, self._task = self._task, None
@@ -58,6 +62,14 @@ class RunEventWakeupSubscriber:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+
+    def _restart_after_crash(self, task: asyncio.Task[None]) -> None:
+        # Wakeups must outlive a bug in one message, so a crashed consumer is
+        # logged and restarted rather than ending for the life of the process.
+        if task is not self._task or task.cancelled():
+            return
+        logger.error("run_event_wakeup_crashed", exc_info=task.exception())
+        self._spawn(delay=_RECONNECT_DELAY_SECONDS)
 
     async def handle_message(self, data: bytes | str) -> bool:
         """Wake the readers of the run an envelope names; return whether it did.
@@ -81,7 +93,8 @@ class RunEventWakeupSubscriber:
         self._hub.notify(organization_id=organization_id, run_id=run_id)
         return True
 
-    async def _run_forever(self) -> None:
+    async def _run_forever(self, delay: float) -> None:
+        await asyncio.sleep(delay)
         while True:
             try:
                 async with self._redis.pubsub() as pubsub:
@@ -91,10 +104,6 @@ class RunEventWakeupSubscriber:
                             await self.handle_message(message["data"])
             except (RedisError, OSError) as error:
                 logger.warning("run_event_wakeup_redis_error", error=str(error))
-            except (RuntimeError, ValueError, TypeError, LookupError) as error:
-                # One bad message must not end wakeups for the life of the
-                # process; CancelledError still propagates.
-                logger.exception("run_event_wakeup_unexpected_error", error=str(error))
             await asyncio.sleep(_RECONNECT_DELAY_SECONDS)
 
 

@@ -265,6 +265,10 @@ async def test_a_database_outage_drops_the_message_not_the_subscription() -> Non
     assert await subscriber.handle_message(json.dumps(_envelope())) is False
 
 
+class _UnforeseenError(Exception):
+    """No handler names this type, so only a catch-all can survive it."""
+
+
 @pytest.mark.asyncio
 async def test_an_unexpected_error_does_not_end_the_subscriber(
     factory: async_sessionmaker[AsyncSession], redis_client: Any
@@ -280,7 +284,7 @@ async def test_an_unexpected_error_does_not_end_the_subscriber(
         nonlocal calls
         calls += 1
         if calls == 1:
-            raise RuntimeError("boom")
+            raise _UnforeseenError("boom")
         return await real(data)
 
     subscriber.handle_message = flaky  # type: ignore[method-assign]
