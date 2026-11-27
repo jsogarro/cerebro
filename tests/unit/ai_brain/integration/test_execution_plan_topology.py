@@ -40,6 +40,7 @@ from src.models.execution_authority import (
     ExecutionAuthorityReference,
 )
 from src.models.research_project import ResearchProject, ResearchQuery
+from src.services.model_invocation import MODEL_INVOCATION_CONTEXT_KEY
 
 
 def _plan(
@@ -170,6 +171,7 @@ async def test_a_worker_task_inherits_its_parent_s_durable_context() -> None:
     for worker_task in worker_tasks:
         context = dict(worker_task.context)
         assert isinstance(context.pop(BUDGET_LEDGER_CONTEXT_KEY), BudgetLedger)
+        context.pop(MODEL_INVOCATION_CONTEXT_KEY)
         assert context.pop("worker_scope") == expected_scopes[worker_task.id]
         assert context == {
             k: v for k, v in parent_context.items() if k != "worker_scope"
@@ -706,3 +708,79 @@ async def test_a_timeout_raised_by_the_worker_itself_is_not_a_plan_timeout() -> 
 
     with pytest.raises(TimeoutError, match="upstream socket"):
         await _run(_plan_due_in(60), execute)
+
+
+@pytest.mark.asyncio
+async def test_each_worker_calls_the_provider_under_the_plan_deadline_and_run_ledger() -> (
+    None
+):
+    from src.services.model_invocation import (
+        MODEL_INVOCATION_CONTEXT_KEY,
+        ModelInvocationContext,
+    )
+
+    plan = _plan()
+    ledger = BudgetLedger(plan.routing_decision.budget)
+    journal = object()
+    owner = ModelInvocationContext(
+        journal=journal,  # type: ignore[arg-type]
+        fencing_token=7,
+        trace_parent="a" * 32,
+        remaining_seconds=lambda: 5.0,
+    )
+    seen: list[ModelInvocationContext] = []
+
+    async def execute(worker: WorkerAssignment, task: AgentTask) -> AgentResult:
+        seen.append(task.context[MODEL_INVOCATION_CONTEXT_KEY])
+        return AgentResult(task.id, "success", {}, 1.0, 0.0)
+
+    now = plan.deadline - timedelta(seconds=100)
+    await ExecutionPlanTopologyExecutor(
+        worker_executor=execute, capability_checker=lambda _: True, clock=lambda: now
+    ).execute(
+        plan,
+        AgentTask(
+            id="root",
+            agent_type="execution_plan",
+            input_data={},
+            context={
+                BUDGET_LEDGER_CONTEXT_KEY: ledger,
+                MODEL_INVOCATION_CONTEXT_KEY: owner,
+            },
+        ),
+    )
+
+    assert len(seen) == 2
+    for ctx in seen:
+        assert ctx.ledger is ledger
+        assert (ctx.journal, ctx.fencing_token, ctx.trace_parent) == (
+            journal,
+            7,
+            "a" * 32,
+        )
+        # The owner's tighter bound wins over the plan's 100 seconds.
+        assert ctx.remaining_seconds() == 5.0
+
+
+@pytest.mark.asyncio
+async def test_a_plan_deadline_alone_bounds_the_provider_call() -> None:
+    from src.services.model_invocation import MODEL_INVOCATION_CONTEXT_KEY
+
+    plan = _plan()
+    clock_now = [plan.deadline - timedelta(seconds=50)]
+    seen: list[object] = []
+
+    async def execute(worker: WorkerAssignment, task: AgentTask) -> AgentResult:
+        seen.append(task.context[MODEL_INVOCATION_CONTEXT_KEY])
+        return AgentResult(task.id, "success", {}, 1.0, 0.0)
+
+    await ExecutionPlanTopologyExecutor(
+        worker_executor=execute,
+        capability_checker=lambda _: True,
+        clock=lambda: clock_now[0],
+    ).execute(plan, AgentTask(id="root", agent_type="execution_plan", input_data={}))
+
+    ctx = seen[0]
+    assert ctx.remaining_seconds() == pytest.approx(50)  # type: ignore[attr-defined]
+    clock_now[0] = plan.deadline + timedelta(seconds=1)
+    assert ctx.remaining_seconds() < 0  # type: ignore[attr-defined]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -33,6 +33,10 @@ from src.core.contracts import (
     ExecutionPlan,
     FallbackMode,
     WorkerAssignment,
+)
+from src.services.model_invocation import (
+    MODEL_INVOCATION_CONTEXT_KEY,
+    ModelInvocationContext,
 )
 
 from .execution_plan_observability import (
@@ -307,6 +311,7 @@ class ExecutionPlanTopologyExecutor:
         ledger = task.context.get(BUDGET_LEDGER_CONTEXT_KEY)
         if ledger is None:
             ledger = BudgetLedger(decision.budget)
+        invocation = self._invocation_context(plan, task, ledger)
         workers = {str(worker.worker_id): worker for worker in decision.workers}
         dependencies = self._dependencies(plan)
         completed: dict[str, AgentResult] = {}
@@ -368,6 +373,7 @@ class ExecutionPlanTopologyExecutor:
                 context={
                     **task.context,
                     BUDGET_LEDGER_CONTEXT_KEY: ledger,
+                    MODEL_INVOCATION_CONTEXT_KEY: invocation,
                     WORKER_SCOPE_CONTEXT_KEY: (
                         f"{plan.execution_plan_id}:{worker.worker_id}"
                     ),
@@ -440,6 +446,26 @@ class ExecutionPlanTopologyExecutor:
             outcomes=outcomes,
             blocked_worker_ids=tuple(sorted(pending)),
         )
+
+    def _invocation_context(
+        self, plan: ExecutionPlan, task: AgentTask, ledger: BudgetLedger
+    ) -> ModelInvocationContext:
+        """The owner's context with the plan deadline folded in.
+
+        A call started after the deadline is refused before it reserves, and
+        the provider request is bounded by what is left, whichever of the
+        owner's and the plan's bound is tighter.
+        """
+        supplied = task.context.get(MODEL_INVOCATION_CONTEXT_KEY)
+        base = supplied or ModelInvocationContext.for_ledger(ledger)
+        owner_remaining = base.remaining_seconds
+
+        def remaining() -> float:
+            left = (plan.deadline - self._clock()).total_seconds()
+            owner_left = owner_remaining()
+            return left if owner_left is None else min(left, owner_left)
+
+        return replace(base, ledger=ledger, remaining_seconds=remaining)
 
     def _unsupported_reason(self, plan: ExecutionPlan) -> str | None:
         decision = plan.routing_decision

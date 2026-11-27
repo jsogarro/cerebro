@@ -469,11 +469,7 @@ class LLMWorkerAgentBase(BaseAgent):
         ledger = task.context.get(BUDGET_LEDGER_CONTEXT_KEY)
         if ledger is None:
             return None
-        from src.core.config import settings
-
-        return ModelInvocationContext(
-            ledger=ledger, max_attempts=settings.MODEL_ROUTER_MAX_RETRIES
-        )
+        return ModelInvocationContext.for_ledger(ledger)
 
     async def _route_call(
         self,

@@ -170,6 +170,13 @@ class ModelInvocationContext:
     max_attempts: int = 1
     trace_parent: str | None = None
 
+    @classmethod
+    def for_ledger(cls, ledger: BudgetLedger) -> "ModelInvocationContext":
+        """A run's ledger alone, with the configured attempt cap."""
+        from src.core.config import settings
+
+        return cls(ledger=ledger, max_attempts=settings.MODEL_ROUTER_MAX_RETRIES)
+
 
 def price_digest(*parts: object) -> str:
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()
