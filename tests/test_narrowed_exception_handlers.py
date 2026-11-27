@@ -22,6 +22,7 @@ from src.auth.jwt_service import JWTService
 from src.auth.password_service import PasswordService
 from src.cli.websocket_client import CLIWebSocketClient
 from src.core import telemetry, tracing
+from src.mcp.academic_filters import AcademicSearchFilters
 from src.mcp.tools.academic_search_tool import AcademicSearchTool
 from src.middleware import auth_middleware
 from src.models.db.migrations import MigrationManager
@@ -150,7 +151,7 @@ class TestAcademicSearchBackends:
     ) -> None:
         tool.client.get.side_effect = httpx.ConnectError("down")
         search = getattr(tool, f"_search_{backend}")
-        assert await search("q", 5, {}) == []
+        assert await search("q", 5, AcademicSearchFilters()) == []
 
     @pytest.mark.parametrize("backend", ["pubmed", "arxiv", "semantic_scholar"])
     async def test_unexpected_error_propagates(
@@ -159,13 +160,13 @@ class TestAcademicSearchBackends:
         tool.client.get.side_effect = RuntimeError("bug")
         search = getattr(tool, f"_search_{backend}")
         with pytest.raises(RuntimeError, match="bug"):
-            await search("q", 5, {})
+            await search("q", 5, AcademicSearchFilters())
 
     async def test_malformed_arxiv_xml_yields_no_results(
         self, tool: AcademicSearchTool
     ) -> None:
         tool.client.get.return_value = SimpleNamespace(status_code=200, text="<oops")
-        assert await tool._search_arxiv("q", 5, {}) == []
+        assert await tool._search_arxiv("q", 5, AcademicSearchFilters()) == []
 
 
 def _request() -> Request:
