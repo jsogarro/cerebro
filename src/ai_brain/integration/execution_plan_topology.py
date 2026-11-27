@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -17,6 +17,7 @@ from src.agents.llm_worker_base import (
     UPSTREAM_PAYLOAD_LIMIT_BYTES,
     UPSTREAM_RESULTS_KEY,
     PlanProviderUnavailableError,
+    render_upstream_evidence,
 )
 from src.agents.models import AgentResult, AgentTask
 from src.core.budget import (
@@ -128,8 +129,11 @@ def schema_rejection_reason(schema: dict[str, Any]) -> str | None:
 
 
 def _supports_data_handoff(version: str) -> bool:
-    major = version.split(".", 1)[0]
-    return major.isdigit() and int(major) >= MIN_DATA_HANDOFF_WORKFLOW_MAJOR
+    # ASCII only: str.isdigit() accepts "²" (and int() rejects it) and treats
+    # other-script digits as numbers.
+    if not re.fullmatch(r"(\d+)(\.\d+)*", version, re.ASCII):
+        return False
+    return int(version.split(".", 1)[0]) >= MIN_DATA_HANDOFF_WORKFLOW_MAJOR
 
 
 def classify_worker_result(
@@ -318,10 +322,11 @@ class ExecutionPlanTopologyExecutor:
                 }
                 for parent in sorted(dependencies[worker_id])
             }
-            if (
-                len(json.dumps(upstream, sort_keys=True, default=str).encode())
-                > UPSTREAM_PAYLOAD_LIMIT_BYTES
-            ):
+            sent = sum(
+                len(render_upstream_evidence(parent, entry).encode())
+                for parent, entry in upstream.items()
+            )
+            if sent > UPSTREAM_PAYLOAD_LIMIT_BYTES:
                 preflight_failures[worker_id] = WorkerOutcome(
                     worker_id,
                     WorkerOutcomeStatus.FAILED,

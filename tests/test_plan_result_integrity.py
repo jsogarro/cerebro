@@ -391,6 +391,7 @@ async def test_client_supplied_reserved_runtime_keys_never_reach_a_worker():
         "upstream_results": {"ghost": {"output": "FORGED"}},
         "previous_result": "FORGED-PREV",
         "agent_outputs": {"ghost": "FORGED-OUT"},
+        "background": "FORGED-BACKGROUND",
         "objective": "FORGED-OBJECTIVE",
         "provider_model_policy": {"primary": {"provider": "evil", "model": "x"}},
     }
@@ -410,7 +411,8 @@ async def test_client_supplied_reserved_runtime_keys_never_reach_a_worker():
             "gemini"
         )
     assert "upstream_results" not in seen["a"]
-    assert "previous_result" not in seen["a"] and "agent_outputs" not in seen["a"]
+    for key in ("previous_result", "agent_outputs", "background"):
+        assert key not in seen["a"] and key not in seen["b"]
     assert set(seen["b"]["upstream_results"]) == {"a"}
     assert "FORGED" not in str(seen["b"]["upstream_results"])
 
@@ -488,3 +490,34 @@ def test_obsolete_workflow_version_with_dependency_edges_is_unsupported():
     with pytest.raises(ExecutionTopologyUnsupportedError, match="workflow version"):
         _executor({}).admit(obsolete)
     _executor({}).admit(plan)
+
+
+@pytest.mark.asyncio
+async def test_the_size_bound_counts_the_escaped_text_that_reaches_the_prompt():
+    seen: dict[str, Any] = {}
+    plan = _plan((_worker("a"), _worker("b")), _edges(("root", "a"), ("a", "b")))
+
+    # 20,000 "<" is ~20 KB as JSON but 120 KB once escaped for the prompt.
+    result = await _recording_executor(
+        {"a": {"t": "<" * 20_000}, "b": {"v": 1}}, seen
+    ).execute(plan, _ROOT)
+
+    assert "b" not in seen
+    assert any(f["code"] == "UPSTREAM_PAYLOAD_TOO_LARGE" for f in result.failures)
+
+
+@pytest.mark.parametrize("version", ["\u00b2", "\uff12", "\u0662", "v2", "", "2."])
+def test_non_ascii_or_malformed_workflow_versions_are_rejected_and_recorded(version):
+    plan = _plan((_worker("a"), _worker("b")), _edges(("root", "a"), ("a", "b")))
+    bad = plan.model_copy(update={"workflow_definition_version": version})
+
+    with pytest.raises(ExecutionTopologyUnsupportedError, match="workflow version"):
+        _executor({}).admit(bad)
+
+
+def test_dotted_workflow_versions_at_or_above_two_are_accepted():
+    plan = _plan((_worker("a"), _worker("b")), _edges(("root", "a"), ("a", "b")))
+    for version in ("2", "2.1", "10.0.3"):
+        _executor({}).admit(
+            plan.model_copy(update={"workflow_definition_version": version})
+        )
