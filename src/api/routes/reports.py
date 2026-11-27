@@ -292,7 +292,6 @@ async def generate_report(
             include_citations=request.include_citations,
             include_methodology=request.include_methodology,
             max_sections=None,
-            custom_css=None,
             template_name=None,
             author_name=None,
             institution=None,

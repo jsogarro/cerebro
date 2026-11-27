@@ -290,11 +290,6 @@
                 page-break-inside: avoid;
             }
         }
-        
-        /* Custom CSS injection point */
-        {% if config.custom_css %}
-        {{ config.custom_css | safe }}
-        {% endif %}
     </style>
     
     {% block extra_head %}{% endblock %}

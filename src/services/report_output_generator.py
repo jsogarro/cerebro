@@ -5,6 +5,7 @@ This module owns conversion of a structured report into concrete output formats.
 
 import asyncio
 import json
+from html import escape as esc
 
 from structlog import get_logger
 
@@ -157,11 +158,11 @@ class ReportOutputGenerator:
         return self._get_docx_exporter().export_to_docx(report)
 
     def generate_basic_html(self, report: Report) -> str:
-        """Generate basic HTML without templates."""
+        """Generate basic HTML without templates; every value is escaped."""
         html = f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>{report.title}</title>
+    <title>{esc(report.title)}</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 40px; }}
         h1 {{ color: #333; }}
@@ -171,29 +172,27 @@ class ReportOutputGenerator:
     </style>
 </head>
 <body>
-    <h1>{report.title}</h1>
+    <h1>{esc(report.title)}</h1>
 
     <div class="metadata">
-        <strong>Generated:</strong> {report.metadata.generated_at}<br>
+        <strong>Generated:</strong> {esc(str(report.metadata.generated_at))}<br>
         <strong>Quality Score:</strong> {report.metadata.quality_score:.2%}
     </div>
 """
 
         if report.executive_summary:
-            html += f"<div class='section'>{report.executive_summary}</div>"
+            html += f"<div class='section'>{esc(report.executive_summary)}</div>"
 
         for section in report.sections:
             html += (
-                f"<div class='section'><h{section.level + 1}>{section.title}"
+                f"<div class='section'><h{section.level + 1}>{esc(section.title)}"
                 f"</h{section.level + 1}>"
             )
-            html += f"<p>{section.content}</p>"
+            html += f"<p>{esc(section.content)}</p>"
 
             for subsection in section.subsections:
-                html += (
-                    f"<h{section.level + 2}>{subsection.title}</h{section.level + 2}>"
-                )
-                html += f"<p>{subsection.content}</p>"
+                html += f"<h{section.level + 2}>{esc(subsection.title)}</h{section.level + 2}>"
+                html += f"<p>{esc(subsection.content)}</p>"
 
             html += "</div>"
 
@@ -203,7 +202,7 @@ class ReportOutputGenerator:
                 formatted = citation.format_citation(
                     report.configuration.citation_style
                 )
-                html += f"<li>{formatted}</li>"
+                html += f"<li>{esc(formatted)}</li>"
             html += "</ul></div>"
 
         html += "</body></html>"

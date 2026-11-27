@@ -21,6 +21,25 @@ from src.services.report_config import ReportSettings
 
 logger = get_logger()
 
+# One pass, so no replacement is itself re-escaped.
+_LATEX_ESCAPES = {
+    "&": "\\&",
+    "%": "\\%",
+    "$": "\\$",
+    "#": "\\#",
+    "^": "\\textasciicircum{}",
+    "_": "\\_",
+    "{": "\\{",
+    "}": "\\}",
+    "~": "\\textasciitilde{}",
+    "\\": "\\textbackslash{}",
+}
+_LATEX_SPECIAL = re.compile("[" + re.escape("".join(_LATEX_ESCAPES)) + "]")
+# fullmatch, not match-with-$: "$" accepts a trailing newline.
+_SAFE_DOI = re.compile(r"10\.\d{4,9}/[^\s{}\\^]+")
+_SAFE_URL = re.compile(r"https?://[^\s{}\\^]+")
+_DOI_PREFIX = re.compile(r"\s*(?:https?://(?:dx\.)?doi\.org/|doi:\s*)", re.IGNORECASE)
+
 
 class LaTeXExportError(Exception):
     """Exception raised during LaTeX export."""
@@ -357,22 +376,38 @@ class LaTeXExporter:
         if citation.journal:
             journal_part = self._escape_latex(citation.journal)
             if citation.volume:
-                journal_part += f", \\textbf{{{citation.volume}}}"
+                journal_part += f", \\textbf{{{self._escape_latex(citation.volume)}}}"
                 if citation.issue:
-                    journal_part += f"({citation.issue})"
+                    journal_part += f"({self._escape_latex(citation.issue)})"
             if citation.pages:
-                journal_part += f", {citation.pages}"
+                journal_part += f", {self._escape_latex(citation.pages)}"
             parts.append(journal_part)
         elif citation.publisher:
             parts.append(self._escape_latex(citation.publisher))
 
-        # DOI or URL
-        if citation.doi:
-            parts.append(f"DOI: \\url{{https://doi.org/{citation.doi}}}")
-        elif citation.url:
-            parts.append(f"\\url{{{citation.url}}}")
+        link = self._format_link_latex(citation)
+        if link:
+            parts.append(link)
 
         return ". ".join(parts) + "."
+
+    def _format_link_latex(self, citation: Citation) -> str:
+        """A DOI or URL as a link when it is a plain one, else as escaped text."""
+        doi = _DOI_PREFIX.sub("", citation.doi or "", count=1).strip()
+        if _SAFE_DOI.fullmatch(doi):
+            return f"DOI: \\url{{https://doi.org/{self._url_argument(doi)}}}"
+        if citation.url and _SAFE_URL.fullmatch(citation.url):
+            return f"\\url{{{self._url_argument(citation.url)}}}"
+        text = citation.doi or citation.url
+        if not text:
+            return ""
+        prefix = "DOI: " if citation.doi else ""
+        return prefix + self._escape_latex(text)
+
+    @staticmethod
+    def _url_argument(url: str) -> str:
+        """hyperref's \\url reads \\% and \\# as literal % and #."""
+        return url.replace("%", "\\%").replace("#", "\\#")
 
     def _convert_markdown_to_latex(self, markdown_text: str) -> str:
         """Convert markdown text to LaTeX."""
@@ -468,22 +503,7 @@ class LaTeXExporter:
         if not text:
             return ""
 
-        # LaTeX special characters that need escaping
-        escape_chars = {
-            "&": "\\&",
-            "%": "\\%",
-            "$": "\\$",
-            "#": "\\#",
-            "^": "\\textasciicircum{}",
-            "_": "\\_",
-            "{": "\\{",
-            "}": "\\}",
-            "~": "\\textasciitilde{}",
-            "\\": "\\textbackslash{}",
-        }
-
-        # Single pass: sequential replaces re-escape the braces of earlier output.
-        return re.sub(r"[&%$#^_{}~\\]", lambda m: escape_chars[m.group()], text)
+        return _LATEX_SPECIAL.sub(lambda m: _LATEX_ESCAPES[m.group()], text)
 
     def _extract_abstract_from_summary(self, executive_summary: str) -> str:
         """Extract abstract content from executive summary."""

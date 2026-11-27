@@ -86,7 +86,7 @@ class TemplateRenderer:
 
         env = Environment(
             loader=FileSystemLoader(template_dir),
-            autoescape=select_autoescape(["html", "xml"]),
+            autoescape=select_autoescape(["html", "xml", "html.j2"]),
             trim_blocks=True,
             lstrip_blocks=True,
             enable_async=False,  # For simplicity, using sync templates
