@@ -130,7 +130,7 @@ class AdaptiveDecisionMetadata:
 class AgentAllocation:
     """Specification for agent allocation."""
 
-    supervisor_type: str | None
+    supervisor_type: str
     worker_count: int = 1
     worker_types: list[str] = field(default_factory=list)
     max_parallel: int = 5

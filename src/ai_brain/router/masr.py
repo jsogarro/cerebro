@@ -1516,11 +1516,9 @@ class MASRouter:
 
         # Base allocation by collaboration mode
         if collaboration_mode == CollaborationMode.FAST_PATH:
-            # One registered worker and no supervisor: the compiled plan
-            # requires exactly one worker and rejects a supervisor type
-            # without a supervisor node.
+            # One registered worker; the compiled plan requires exactly one.
             return AgentAllocation(
-                supervisor_type=None,
+                supervisor_type=primary_supervisor,  # Placeholder (not used)
                 worker_count=1,
                 worker_types=[
                     self._FAST_PATH_WORKERS[

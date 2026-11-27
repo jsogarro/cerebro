@@ -176,8 +176,7 @@ class RoutingDecisionTranslator:
         """
 
         # Determine supervisor type from agent allocation
-        # A fast-path allocation has no supervisor; "general" maps by domain.
-        supervisor_type = routing_decision.agent_allocation.supervisor_type or "general"
+        supervisor_type = routing_decision.agent_allocation.supervisor_type
 
         # Map to our supervisor types if needed
         if supervisor_type in [

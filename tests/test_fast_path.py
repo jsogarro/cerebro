@@ -253,7 +253,6 @@ class TestFastPathWorker:
         )
         assert allocation.worker_types == [worker]
         assert allocation.worker_count == 1
-        assert allocation.supervisor_type is None
         assert worker in AGENT_KEYS
 
     @pytest.mark.parametrize("domain", ["service", "multimodal"])

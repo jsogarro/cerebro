@@ -42,7 +42,7 @@ def _binding(proposal) -> ExecutionAuthorityBinding:
         collaboration_mode=ENTRY.routing_policy.collaboration_mode,
         domains=tuple(d.value for d in proposal.complexity_analysis.domains),
         supervisor_id=None,
-        supervisor_type=None,
+        supervisor_type=None,  # single-worker modes have no supervisor node
         workers=(
             WorkerAssignment(
                 worker_id="worker-1",
@@ -118,3 +118,15 @@ async def test_queries_the_catalogue_cannot_serve_are_rejected_before_dispatch(q
 
     with pytest.raises((ValueError, ExecutionTopologyUnsupportedError)):
         _topology().admit(ExecutionPlanCompiler().compile(proposal, _binding(proposal)))
+
+
+@pytest.mark.asyncio
+async def test_a_binding_that_claims_a_supervisor_for_the_fast_path_is_rejected():
+    proposal = await _route("What is photosynthesis?")
+    binding = _binding(proposal)
+    claimed = ExecutionAuthorityBinding(
+        **{**binding.__dict__, "supervisor_type": "research"}
+    )
+
+    with pytest.raises(ValueError, match="supervisor does not match"):
+        ExecutionPlanCompiler().compile(proposal, claimed)

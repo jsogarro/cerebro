@@ -36,7 +36,14 @@ class ExecutionPlanCompiler:
             worker.worker_type for worker in binding.workers
         ):
             raise ValueError("MASR proposal worker types do not match authority")
-        if allocation.supervisor_type != binding.supervisor_type:
+        # Single-worker modes have no supervisor node; the allocation's
+        # supervisor type is a placeholder there and the plan rejects one.
+        expected_supervisor = (
+            None
+            if mode in {CollaborationMode.FAST_PATH, CollaborationMode.DIRECT}
+            else allocation.supervisor_type
+        )
+        if expected_supervisor != binding.supervisor_type:
             raise ValueError("MASR proposal supervisor does not match authority")
         proposal_domains = tuple(
             getattr(domain, "value", domain)
