@@ -26,6 +26,9 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "temporalio"
         update-types: ["version-update:semver-major"]
+      # passlib 1.7.4 hashes a >72-byte secret when it loads bcrypt; bcrypt 5 rejects it
+      - dependency-name: "bcrypt"
+        update-types: ["version-update:semver-major"]
 
   # Docker base images
   - package-ecosystem: "docker"
