@@ -228,7 +228,7 @@ docker compose logs api | grep ERROR
 
 ## Health checks
 
-`/health` checks nothing but the process; `/ready` returns 503 with the failing check marked `unavailable` when Postgres or Redis does not answer within 2 seconds. The routes and their bodies are in [HTTP API](reference/03-http-api.md#health-and-metrics), and the per-agent health routes need a token.
+`/health` checks nothing but the process; `/ready` returns 503 with the failing check marked `unavailable` when Postgres, Redis, the audit logger or the JWT signing keys are unavailable (each probe has a 2-second timeout). The routes and their bodies are in [HTTP API](reference/03-http-api.md#health-and-metrics), and the per-agent health routes need a token.
 
 ```bash
 curl http://localhost:8000/ready

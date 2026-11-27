@@ -88,7 +88,7 @@ def test_default_services_have_real_process_or_endpoint_healthchecks() -> None:
     expected_checks = {
         "postgres": ("pg_isready", "research_db"),
         "redis": ("redis-cli", "ping"),
-        "api": ("curl", "http://localhost:8000/health"),
+        "api": ("curl", "http://localhost:8000/ready"),
         "web": ("wget", "http://127.0.0.1:8080/"),
         "nginx": ("wget", "http://localhost/health"),
     }
@@ -102,6 +102,25 @@ def test_default_services_have_real_process_or_endpoint_healthchecks() -> None:
             assert fragment in check_text, (
                 f"{service_name} healthcheck {check_text!r} does not prove {fragment!r}"
             )
+
+
+def test_production_api_healthcheck_targets_readiness() -> None:
+    compose = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.production.yml").read_text(encoding="utf-8")
+    )
+    check = _command_text(compose["services"]["api"]["healthcheck"]["test"])
+    assert "http://localhost:8000/ready" in check
+
+
+def test_nginx_proxies_health_and_ready_to_the_api() -> None:
+    """The CLI talks to nginx; a static or SPA-fallback answer hides API state."""
+
+    content = NGINX_PATH.read_text(encoding="utf-8")
+    for path in ("/health", "/ready"):
+        block = re.search(rf"location\s+=?\s*{path}\s*\{{(.*?)\}}", content, re.DOTALL)
+        assert block, f"nginx has no {path} location"
+        assert "proxy_pass http://research_api" in block.group(1)
+        assert "return" not in block.group(1)
 
 
 def test_api_uses_the_migration_entrypoint_and_explicit_uvicorn_command() -> None:

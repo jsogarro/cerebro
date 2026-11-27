@@ -86,7 +86,7 @@ The domain routers add `get_current_token` as a router-level or route-level depe
 | Method | Path | Purpose | Success status | Notable errors |
 |---|---|---|---|---|
 | `GET` | `/health` | Returns `{"status": "healthy", "service": "research-platform-api"}`. | 200 | none |
-| `GET` | `/ready` | Probes the database (`SELECT 1`) and Redis (`PING`), each with a 2-second timeout. Returns `{"status": "ready" \| "not_ready", "service", "checks": {"database", "redis"}}`, each check `ok` or `unavailable`. | 200 | 503 when either check is `unavailable` |
+| `GET` | `/ready` | Probes the database (`SELECT 1`), Redis (`PING`), the audit logger (its flush task is running) and the JWT signing keys (the shared `JWTService` loads), each with a 2-second timeout. Returns `{"status": "ready" \| "not_ready", "service", "checks": {"database", "redis", "audit_logger", "jwt_keys"}}`, each check `ok` or `unavailable`. | 200 | 503 when any check is `unavailable` |
 | `GET` | `/live` | Returns `{"status": "alive"}`. | 200 | none |
 | `GET` | `/metrics` | Prometheus exposition from `prometheus_client.make_asgi_app()`. Requires a bearer token. | 200 | 401 |
 | `GET` | `/ws/health` | WebSocket service statistics; see [Fixed responses](#fixed-responses). | 200 | none |

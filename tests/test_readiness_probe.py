@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.routes import health
+from src.middleware.auth_middleware import AuthenticationServiceUnavailableError
 
 
 class _Session:
@@ -42,6 +43,14 @@ class _Redis:
         self.closed = True
 
 
+class _Task:
+    def __init__(self, done: bool) -> None:
+        self._done = done
+
+    def done(self) -> bool:
+        return self._done
+
+
 @pytest.fixture
 def probe(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     """Return ``call(db_error, redis_error)`` hitting /ready on the real app."""
@@ -50,8 +59,21 @@ def probe(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     redis_clients: list[_Redis] = []
 
     def call(
-        db_error: Exception | None = None, redis_error: Exception | None = None
+        db_error: Exception | None = None,
+        redis_error: Exception | None = None,
+        audit_running: bool = True,
+        jwt_error: Exception | None = None,
     ) -> Any:
+        app.state.audit_logger = SimpleNamespace(
+            flush_task=_Task(done=not audit_running)
+        )
+
+        async def get_jwt_service() -> object:
+            if jwt_error:
+                raise jwt_error
+            return object()
+
+        monkeypatch.setattr(health, "get_jwt_service", get_jwt_service)
         monkeypatch.setattr(
             health, "get_session_factory", lambda: lambda: _Session(db_error)
         )
@@ -67,26 +89,54 @@ def probe(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
         return response, redis_clients
 
     yield call
+    del app.state.audit_logger
 
 
 def test_ready_when_both_dependencies_answer(probe: Any) -> None:
     response, clients = probe()
     assert response.status_code == 200
-    assert response.json()["checks"] == {"database": "ok", "redis": "ok"}
+    assert response.json()["checks"] == {
+        "database": "ok",
+        "redis": "ok",
+        "audit_logger": "ok",
+        "jwt_keys": "ok",
+    }
     assert clients[0].closed
 
 
 def test_database_failure_is_503(probe: Any) -> None:
     response, _ = probe(db_error=ConnectionError("db down"))
     assert response.status_code == 503
-    assert response.json()["checks"] == {"database": "unavailable", "redis": "ok"}
+    assert response.json()["checks"] == {
+        "database": "unavailable",
+        "redis": "ok",
+        "audit_logger": "ok",
+        "jwt_keys": "ok",
+    }
 
 
 def test_redis_failure_is_503(probe: Any) -> None:
     response, clients = probe(redis_error=ConnectionError("redis down"))
     assert response.status_code == 503
-    assert response.json()["checks"] == {"database": "ok", "redis": "unavailable"}
+    assert response.json()["checks"] == {
+        "database": "ok",
+        "redis": "unavailable",
+        "audit_logger": "ok",
+        "jwt_keys": "ok",
+    }
     assert clients[0].closed
+
+
+def test_stopped_audit_logger_is_503(probe: Any) -> None:
+    response, _ = probe(audit_running=False)
+    assert response.status_code == 503
+    assert response.json()["checks"]["audit_logger"] == "unavailable"
+
+
+def test_unloadable_jwt_keys_are_503(probe: Any) -> None:
+    response, _ = probe(jwt_error=AuthenticationServiceUnavailableError())
+    assert response.status_code == 503
+    assert response.json()["checks"]["jwt_keys"] == "unavailable"
 
 
 def test_uninitialised_database_is_503_not_500(
