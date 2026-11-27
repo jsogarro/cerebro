@@ -308,7 +308,10 @@ async def test_claims_of_another_artifact_are_not_counted(
 ) -> None:
     async with factory() as session:
         await seed_artifact(
-            session, organization_id=ORG, artifact_id="artifact-2", content_sha256="b" * 64
+            session,
+            organization_id=ORG,
+            artifact_id="artifact-2",
+            content_sha256="b" * 64,
         )
         claims = ClaimSupportRepository(session)
         for artifact, claim, reason in (

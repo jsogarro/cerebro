@@ -324,8 +324,12 @@ def test_a_denied_lookup_is_not_coverage() -> None:
 
 def test_a_denied_lookup_beside_an_examined_claim_is_a_coverage_gap() -> None:
     result = _coverage(
-        _ctx(_claims(ClaimView("d", "unsupported", "capability_denied"),
-                     ClaimView("x", "supported", None)))
+        _ctx(
+            _claims(
+                ClaimView("d", "unsupported", "capability_denied"),
+                ClaimView("x", "supported", None),
+            )
+        )
     )
 
     assert result.error_code == "claim_coverage_gap"
@@ -333,8 +337,12 @@ def test_a_denied_lookup_beside_an_examined_claim_is_a_coverage_gap() -> None:
 
 def test_a_failed_retrieval_makes_the_evaluation_an_error_not_coverage() -> None:
     result = _coverage(
-        _ctx(_claims(ClaimView("f", "unsupported", "retrieval_failed"),
-                     ClaimView("x", "supported", None)))
+        _ctx(
+            _claims(
+                ClaimView("f", "unsupported", "retrieval_failed"),
+                ClaimView("x", "supported", None),
+            )
+        )
     )
 
     assert (result.status, result.error_code) == (

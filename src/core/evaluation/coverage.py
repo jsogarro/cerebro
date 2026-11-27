@@ -16,8 +16,10 @@ from collections.abc import Sequence
 from src.core.contracts import AbsentEvidenceReason, EvaluationResult, EvaluationStatus
 from src.core.evaluation.registry import ClaimView, EvaluationContext
 
-
-_UNEXAMINED = {AbsentEvidenceReason.NOT_ATTEMPTED, AbsentEvidenceReason.CAPABILITY_DENIED}
+_UNEXAMINED = {
+    AbsentEvidenceReason.NOT_ATTEMPTED,
+    AbsentEvidenceReason.CAPABILITY_DENIED,
+}
 
 
 def _is_not_attempted(claim: ClaimView) -> bool:

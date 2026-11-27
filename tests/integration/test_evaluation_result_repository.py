@@ -272,9 +272,7 @@ async def test_another_tenant_holding_the_same_result_id_cannot_block_the_owner(
         task_id="task-b",
         attempt_id="attempt-b",
     )
-    await repo.record_evaluation(
-        _result(run_id="run-b"), organization_id=OTHER_ORG
-    )
+    await repo.record_evaluation(_result(run_id="run-b"), organization_id=OTHER_ORG)
 
     mine = await repo.record_evaluation(_result(), organization_id=ORG)
 
