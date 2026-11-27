@@ -77,7 +77,7 @@ pytest tests/security -v
 
 **Regression.** `tests/regression/test_golden_dataset.py` validates `tests/fixtures/golden_dataset.json` (at least 50 cases) and scores agent outputs through `src/services/evaluation_regression.py`. CI runs them first with `pytest -o addopts='' tests/regression -q`.
 
-**Architecture.** `tests/architecture/test_module_reachability.py` builds a static import graph from `src.api.main`, `src.cli.main`, `src.mcp.server` and `src.evals.pilot_runner` (the cost pilot) and fails on a module under `src/` that none of them reach, apart from the entries in its `KNOWN_UNREACHABLE` set. `tests/architecture/test_settings_read_sites.py` fails on a setting in `src/core/config.py` that nothing reads, apart from `KNOWN_UNREAD`. Both sets can only shrink: an entry that has become reachable or read also fails.
+**Architecture.** `tests/architecture/test_module_reachability.py` builds a static import graph from `src.api.main`, `src.cli.main` and `src.evals.pilot_runner` (the cost pilot) and fails on a module under `src/` that none of them reach, apart from the entries in its `KNOWN_UNREACHABLE` set. `tests/architecture/test_settings_read_sites.py` fails on a setting in `src/core/config.py` that nothing reads, apart from `KNOWN_UNREAD`. Both sets can only shrink: an entry that has become reachable or read also fails.
 
 **Collection guards.** `tests/test_collection_is_not_silently_empty.py` fails when a test module collects no tests, and `tests/test_dev_extra_covers_test_deps.py` fails when a module that a test passes to `pytest.importorskip` is not installed by the `dev` extra.
 

@@ -49,14 +49,9 @@ MUST_COLLECT: tuple[tuple[str, int, str | None], ...] = (
     # exactly the distinction this file is about — a correct guard skips tests,
     # a broken one aborts collection.
     ("tests/test_mcp_tools.py", 18, None),
-    # Module-level importorskip("fastmcp"). That is the *correct* form and not
-    # the bug above, but the consequence is the same shape: without the
-    # dependency this module collects nothing at all. So the floor is asserted
-    # only when the dependency is actually present — otherwise this guard would
-    # fail for a reason that is not a defect, and a guard that cries wolf gets
-    # deleted. The honest cost is stated rather than hidden: when fastmcp is
-    # absent these tests are silently not run, and nothing here can change that.
-    ("tests/test_mcp_integration.py", 1, "fastmcp"),
+    # Previously module-skipped behind importorskip("fastmcp"); now runs
+    # directly against the four in-process research tools without fastmcp.
+    ("tests/test_mcp_integration.py", 5, None),
 )
 
 

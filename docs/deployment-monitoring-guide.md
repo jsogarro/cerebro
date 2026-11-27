@@ -10,7 +10,7 @@ This guide covers the deployment artifacts that exist in this repository: one Do
 | Container entrypoint | `docker/entrypoint.sh` | Runs `alembic upgrade head`, then starts the command |
 | Database init script | `docker/init.sql` | Extensions, schemas and types for a fresh Postgres container |
 | Reverse proxy config | `docker/nginx/nginx.conf` | Routes `/api/` and `/ws` to the API and `/` to the web container; answers `/health` itself |
-| Development stack | `docker-compose.yml` | API, MCP server, Postgres, Redis, nginx, web, optional tools |
+| Development stack | `docker-compose.yml` | API, Postgres, Redis, nginx, web, optional tools |
 | Production stack | `docker-compose.production.yml` | The same services with limits, secrets, Prometheus and Grafana |
 | Kubernetes manifests | `k8s/` | Namespace, service account, config map, external secrets, deployment, services, ingress, autoscaler, network policy, Kustomize file |
 | CD workflow | `.github/workflows/cd.yml` | Deploys to GKE with Kustomize; the Kustomize file does not build (see [Kubernetes](#kubernetes)) |
@@ -26,7 +26,7 @@ This guide covers the deployment artifacts that exist in this repository: one Do
 |---|---|---|
 | `base` | `gcc`, `g++`, `curl`, `git`, `uv` | none |
 | `development` | `pip install -e ".[dev,mcp]"`, `src/`, `tests/`, `alembic/`, entrypoint | `uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload` |
-| `builder` | `pip install -e .` and `src/` | none |
+| `builder` | `scripts/install-locked.sh --extra stats` and `src/` | none |
 | `production` | Site-packages, `alembic`, `uvicorn`, `src/`, `alembic/` copied from `builder`; runs as the non-root user `app` | `uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 1` |
 
 The `production` stage declares a healthcheck that runs `curl -f http://localhost:8000/health` every 30 seconds (timeout 3 seconds, start period 40 seconds, 3 retries).

@@ -251,20 +251,20 @@ async def test_an_invalid_filter_never_reaches_the_client_or_the_network() -> No
     assert http.requests == []
 
 
-async def test_the_client_forwards_filters_to_the_tool() -> None:
-    from unittest.mock import AsyncMock
+async def test_default_tool_set_forwards_filters_to_the_tool() -> None:
+    from src.agents.integrations.mcp_tool_specs import ResearchToolSet
 
-    from src.mcp.client import MCPClient
+    tool, http = _tool(ATOM.format(entries=_entry("in", "2020-06-01T00:00:00Z")))
+    integration = MCPIntegration(
+        mcp_client=ResearchToolSet(academic_search=tool), enable_fallback=False
+    )
 
-    client = MCPClient.__new__(MCPClient)
-    client.server = AsyncMock()
+    result = await integration.search_academic_sources(
+        "q", ["arxiv"], 5, {"year_start": 2020}, identity=_IDENTITY
+    )
 
-    await client.search_academic("q", ["arxiv"], 5, {"year_start": 2020})
-
-    client.server.execute_tool.assert_awaited_once_with(
-        "search_academic",
-        query="q",
-        databases=["arxiv"],
-        max_results=5,
-        filters={"year_start": 2020},
+    assert result["success"] is True
+    assert (
+        "submittedDate:[202001010000 TO 999912312359]"
+        in (http.requests[0][1]["search_query"])
     )

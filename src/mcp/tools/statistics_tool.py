@@ -11,107 +11,29 @@ import plotly.graph_objects as go
 from scipy import stats
 from structlog import get_logger
 
-from src.mcp.base import BaseMCPTool, ToolMetadata, ToolParameter
-
 logger = get_logger()
 
 
-class StatisticsTool(BaseMCPTool):
-    """
-    MCP tool for statistical analysis and visualization.
-
-    Supports descriptive statistics, hypothesis testing, and plotting.
-    """
+class StatisticsTool:
+    """Descriptive statistics, hypothesis testing, correlation, and plotting."""
 
     def __init__(self, config: dict[str, Any] | None = None):
-        """Initialize statistics tool."""
-        super().__init__(config)
-
-    def _build_metadata(self) -> ToolMetadata:
-        """Build tool metadata."""
-        return ToolMetadata(
-            name="statistics_analyzer",
-            description="Perform statistical analysis and generate visualizations",
-            version="1.0.0",
-            parameters=[
-                ToolParameter(
-                    name="operation",
-                    type="string",
-                    description="Operation to perform (descriptive, t_test, correlation, plot)",
-                    required=True,
-                ),
-                ToolParameter(
-                    name="data",
-                    type="array",
-                    description="Data for analysis",
-                    required=False,
-                ),
-                ToolParameter(
-                    name="group1",
-                    type="array",
-                    description="First group for comparison",
-                    required=False,
-                ),
-                ToolParameter(
-                    name="group2",
-                    type="array",
-                    description="Second group for comparison",
-                    required=False,
-                ),
-                ToolParameter(
-                    name="x",
-                    type="array",
-                    description="X values for correlation",
-                    required=False,
-                ),
-                ToolParameter(
-                    name="y",
-                    type="array",
-                    description="Y values for correlation",
-                    required=False,
-                ),
-                ToolParameter(
-                    name="plot_type",
-                    type="string",
-                    description="Type of plot (histogram, box, scatter)",
-                    required=False,
-                    default="histogram",
-                ),
-            ],
-            tags=["statistics", "analysis", "visualization", "hypothesis"],
-        )
+        self.config = config or {}
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        """
-        Execute statistical operation.
+        operation = kwargs.get("operation", "")
 
-        Args:
-            **kwargs: Operation parameters
-
-        Returns:
-            Analysis results
-        """
-        try:
-            operation = kwargs.get("operation", "")
-
-            if operation == "descriptive":
-                return self._descriptive_statistics(kwargs.get("data", []))
-            elif operation == "t_test":
-                return self._t_test(kwargs.get("group1", []), kwargs.get("group2", []))
-            elif operation == "correlation":
-                return self._correlation_analysis(
-                    kwargs.get("x", []), kwargs.get("y", [])
-                )
-            elif operation == "plot":
-                return self._generate_plot(
-                    kwargs.get("data", []), kwargs.get("plot_type", "histogram")
-                )
-            else:
-                return {"success": False, "error": f"Unknown operation: {operation}"}
-
-        except Exception as e:
-            logger.error(f"Statistical operation failed: {e!s}")
-            return {"success": False, "error": str(e)}
+        if operation == "descriptive":
+            return self._descriptive_statistics(kwargs.get("data", []))
+        if operation == "t_test":
+            return self._t_test(kwargs.get("group1", []), kwargs.get("group2", []))
+        if operation == "correlation":
+            return self._correlation_analysis(kwargs.get("x", []), kwargs.get("y", []))
+        if operation == "plot":
+            return self._generate_plot(
+                kwargs.get("data", []), kwargs.get("plot_type", "histogram")
+            )
+        return {"success": False, "error": f"Unknown operation: {operation}"}
 
     def _descriptive_statistics(self, data: list[float]) -> dict[str, Any]:
         """Calculate descriptive statistics."""

@@ -18,8 +18,8 @@ import scipy  # noqa: F401  (ImportError here is a failure, not a skip)
 
 from src.agents.comparative_analysis_agent import ComparativeAnalysisAgent
 from src.agents.integrations.mcp_integration import MCPIntegration
+from src.agents.integrations.mcp_tool_specs import ResearchToolSet
 from src.agents.models import AgentTask
-from src.mcp.client import MCPClient
 
 CRITERIA = ["cost", "speed"]
 GOOD = {
@@ -28,8 +28,8 @@ GOOD = {
 }
 
 
-def _agent(client: MCPClient | None = None) -> ComparativeAnalysisAgent:
-    integration = MCPIntegration(mcp_client=client or MCPClient())
+def _agent(tools: ResearchToolSet | None = None) -> ComparativeAnalysisAgent:
+    integration = MCPIntegration(mcp_client=tools)
     return ComparativeAnalysisAgent(config={"mcp_integration": integration})
 
 
@@ -44,7 +44,7 @@ def _input(comparison_data: Any) -> dict[str, Any]:
 @pytest.mark.asyncio
 async def test_variables_kwarg_is_rejected_at_the_tool_boundary() -> None:
     """Pins the old behaviour: criterion NAMES sent as ``variables`` are refused."""
-    integration = MCPIntegration(mcp_client=MCPClient(), enable_fallback=False)
+    integration = MCPIntegration(enable_fallback=False)
 
     result = await integration.analyze_statistics(
         operation="correlation", variables=CRITERIA
@@ -67,16 +67,17 @@ async def test_correlation_reaches_the_tool_with_two_numeric_series() -> None:
 
 @pytest.mark.asyncio
 async def test_a_degraded_correlation_does_not_reach_the_output() -> None:
-    client = MCPClient()
+    tools = ResearchToolSet()
+    real_execute = tools.statistics.execute
 
-    async def _down(operation: str, **kwargs: Any) -> dict[str, Any]:
-        if operation == "correlation":
+    async def _down(**kwargs: Any) -> dict[str, Any]:
+        if kwargs.get("operation") == "correlation":
             raise RuntimeError("statistics tool unreachable")
-        return await MCPClient.analyze_statistics(client, operation, **kwargs)
+        return await real_execute(**kwargs)
 
-    client.analyze_statistics = _down  # type: ignore[method-assign]
+    tools.statistics.execute = _down
 
-    result = await _agent(client)._perform_statistical_comparison(_input(GOOD))
+    result = await _agent(tools)._perform_statistical_comparison(_input(GOOD))
 
     assert "correlation_analysis" not in result["tests_performed"]
     assert result["correlation_analysis"] == {}

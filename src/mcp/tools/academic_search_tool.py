@@ -12,7 +12,6 @@ import httpx
 from structlog import get_logger
 
 from src.mcp.academic_filters import AcademicSearchFilters
-from src.mcp.base import BaseMCPTool, ToolMetadata, ToolParameter
 
 logger = get_logger()
 
@@ -30,145 +29,79 @@ def _compact(record: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in record.items() if v is not None}
 
 
-class AcademicSearchTool(BaseMCPTool):
-    """
-    MCP tool for searching academic databases.
-
-    Supports PubMed, arXiv, and Semantic Scholar searches.
-    """
+class AcademicSearchTool:
+    """Search PubMed, arXiv, and Semantic Scholar."""
 
     def __init__(self, config: dict[str, Any] | None = None):
-        """Initialize academic search tool."""
-        super().__init__(config)
+        self.config = config or {}
         self.client = httpx.AsyncClient(timeout=30.0)
 
-        # API endpoints
         self.pubmed_base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
         self.arxiv_base = "https://export.arxiv.org/api/query"
         self.semantic_scholar_base = "https://api.semanticscholar.org/graph/v1"
 
-    def _build_metadata(self) -> ToolMetadata:
-        """Build tool metadata."""
-        return ToolMetadata(
-            name="search_academic",
-            description="Search academic databases for research papers",
-            version="1.0.0",
-            parameters=[
-                ToolParameter(
-                    name="query",
-                    type="string",
-                    description="Search query",
-                    required=True,
-                ),
-                ToolParameter(
-                    name="databases",
-                    type="array",
-                    description="List of databases to search (pubmed, arxiv, semantic_scholar)",
-                    required=False,
-                    default=["arxiv"],
-                ),
-                ToolParameter(
-                    name="max_results",
-                    type="integer",
-                    description="Maximum number of results",
-                    required=False,
-                    default=10,
-                ),
-                ToolParameter(
-                    name="filters",
-                    type="object",
-                    description="Additional filters (year_start, year_end, categories)",
-                    required=False,
-                    default={},
-                ),
-            ],
-            examples=[
-                {
-                    "query": "machine learning healthcare",
-                    "databases": ["pubmed", "arxiv"],
-                    "max_results": 20,
-                }
-            ],
-            tags=["academic", "search", "research", "papers"],
-        )
-
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        """
-        Execute academic search.
+        query = kwargs.get("query", "")
+        databases = kwargs.get("databases", ["arxiv"])
+        max_results = kwargs.get("max_results", 10)
 
-        Args:
-            **kwargs: Search parameters
+        if not query:
+            return {"success": False, "error": "Query is required"}
 
-        Returns:
-            Search results
-        """
+        valid_databases = ["pubmed", "arxiv", "semantic_scholar"]
+        invalid_dbs = [db for db in databases if db not in valid_databases]
+        if invalid_dbs:
+            return {"success": False, "error": f"Invalid databases: {invalid_dbs}"}
+
         try:
-            query = kwargs.get("query", "")
-            databases = kwargs.get("databases", ["arxiv"])
-            max_results = kwargs.get("max_results", 10)
+            filters = AcademicSearchFilters.model_validate(
+                kwargs.get("filters") or {}
+            ).require_supported_by(databases)
+        except ValueError as error:
+            return {"success": False, "error": f"Invalid filters: {error}"}
 
-            if not query:
-                return {"success": False, "error": "Query is required"}
+        all_results = []
+        sources_used = []
 
-            valid_databases = ["pubmed", "arxiv", "semantic_scholar"]
-            invalid_dbs = [db for db in databases if db not in valid_databases]
-            if invalid_dbs:
-                return {"success": False, "error": f"Invalid databases: {invalid_dbs}"}
-
-            try:
-                filters = AcademicSearchFilters.model_validate(
-                    kwargs.get("filters") or {}
-                ).require_supported_by(databases)
-            except ValueError as error:
-                return {"success": False, "error": f"Invalid filters: {error}"}
-
-            # Search each database
-            all_results = []
-            sources_used = []
-
-            for db in databases:
-                if db == "pubmed":
-                    results = await self._search_pubmed(query, max_results, filters)
-                elif db == "arxiv":
-                    results = await self._search_arxiv(query, max_results, filters)
-                elif db == "semantic_scholar":
-                    results = await self._search_semantic_scholar(
-                        query, max_results, filters
-                    )
-                else:
-                    continue
-
-                all_results.extend(results)
-                sources_used.append(db)
-
-            # Providers' own date handling is approximate (arXiv filters on
-            # submission date, PubMed on several), so the bound is re-checked here.
-            kept: list[dict[str, Any]] = []
-            excluded = {"out_of_range": 0, "unknown_year": 0}
-            for r in all_results:
-                if filters.admits(r.get("year")):
-                    kept.append(r)
-                else:
-                    excluded[
-                        "unknown_year" if r.get("year") is None else "out_of_range"
-                    ] += 1
-            payload: dict[str, Any] = {
-                "success": True,
-                "results": kept,
-                "query": query,
-                "total": len(kept),
-                "filters_applied": filters.applied(),
-                "excluded": excluded,
-            }
-            if len(databases) == 1:
-                payload["source"] = databases[0]
+        for db in databases:
+            if db == "pubmed":
+                results = await self._search_pubmed(query, max_results, filters)
+            elif db == "arxiv":
+                results = await self._search_arxiv(query, max_results, filters)
+            elif db == "semantic_scholar":
+                results = await self._search_semantic_scholar(
+                    query, max_results, filters
+                )
             else:
-                payload["sources"] = sources_used
-            return payload
+                continue
 
-        except Exception as e:
-            logger.error(f"Academic search failed: {e!s}")
-            return {"success": False, "error": str(e)}
+            all_results.extend(results)
+            sources_used.append(db)
+
+        # Providers' own date handling is approximate (arXiv filters on
+        # submission date, PubMed on several), so the bound is re-checked here.
+        kept: list[dict[str, Any]] = []
+        excluded = {"out_of_range": 0, "unknown_year": 0}
+        for r in all_results:
+            if filters.admits(r.get("year")):
+                kept.append(r)
+            else:
+                excluded[
+                    "unknown_year" if r.get("year") is None else "out_of_range"
+                ] += 1
+        payload: dict[str, Any] = {
+            "success": True,
+            "results": kept,
+            "query": query,
+            "total": len(kept),
+            "filters_applied": filters.applied(),
+            "excluded": excluded,
+        }
+        if len(databases) == 1:
+            payload["source"] = databases[0]
+        else:
+            payload["sources"] = sources_used
+        return payload
 
     async def _search_pubmed(
         self, query: str, max_results: int, filters: AcademicSearchFilters

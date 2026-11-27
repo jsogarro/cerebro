@@ -9,92 +9,31 @@ from typing import Any
 import httpx
 from structlog import get_logger
 
-from src.mcp.base import BaseMCPTool, ToolMetadata, ToolParameter
-
 logger = get_logger()
 
 
-class CitationTool(BaseMCPTool):
-    """
-    MCP tool for citation formatting and management.
-
-    Supports APA, MLA, Chicago citation styles and DOI resolution.
-    """
+class CitationTool:
+    """Format APA, MLA, Chicago, or BibTeX citations and resolve DOIs."""
 
     def __init__(self, config: dict[str, Any] | None = None):
-        """Initialize citation tool."""
-        super().__init__(config)
+        self.config = config or {}
         self.client = httpx.AsyncClient(timeout=30.0)
         self.crossref_base = "https://api.crossref.org/works"
 
-    def _build_metadata(self) -> ToolMetadata:
-        """Build tool metadata."""
-        return ToolMetadata(
-            name="citation_formatter",
-            description="Format citations and resolve DOIs",
-            version="1.0.0",
-            parameters=[
-                ToolParameter(
-                    name="sources",
-                    type="array",
-                    description="List of sources to format",
-                    required=False,
-                ),
-                ToolParameter(
-                    name="style",
-                    type="string",
-                    description="Citation style (APA, MLA, Chicago)",
-                    required=False,
-                    default="APA",
-                ),
-                ToolParameter(
-                    name="doi",
-                    type="string",
-                    description="DOI to resolve",
-                    required=False,
-                ),
-                ToolParameter(
-                    name="format",
-                    type="string",
-                    description="Output format (text, bibtex)",
-                    required=False,
-                    default="text",
-                ),
-            ],
-            tags=["citation", "formatting", "doi", "bibliography"],
-        )
-
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
-        """
-        Execute citation operation.
+        if "doi" in kwargs:
+            return await self._resolve_doi(kwargs["doi"], kwargs.get("style", "APA"))
 
-        Args:
-            **kwargs: Citation parameters
+        sources = kwargs.get("sources", [])
+        style = kwargs.get("style", "APA")
+        output_format = kwargs.get("format", "text")
 
-        Returns:
-            Formatted citations or resolved DOI
-        """
-        try:
-            if "doi" in kwargs:
-                return await self._resolve_doi(
-                    kwargs["doi"], kwargs.get("style", "APA")
-                )
+        if not sources:
+            return {"success": False, "error": "No sources provided"}
 
-            sources = kwargs.get("sources", [])
-            style = kwargs.get("style", "APA")
-            output_format = kwargs.get("format", "text")
-
-            if not sources:
-                return {"success": False, "error": "No sources provided"}
-
-            if output_format == "bibtex":
-                return self._format_bibtex(sources)
-            else:
-                return self._format_citations(sources, style)
-
-        except Exception as e:
-            logger.error(f"Citation operation failed: {e!s}")
-            return {"success": False, "error": str(e)}
+        if output_format == "bibtex":
+            return self._format_bibtex(sources)
+        return self._format_citations(sources, style)
 
     def _format_citations(
         self, sources: list[dict[str, Any]], style: str
@@ -264,7 +203,7 @@ class CitationTool(BaseMCPTool):
                 "doi": doi,
             }
 
-        except Exception as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.error(f"DOI resolution failed: {e!s}")
             return {"success": False, "error": str(e)}
 

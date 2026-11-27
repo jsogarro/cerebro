@@ -123,7 +123,7 @@ When enabled (the default), `MASRSupervisorBridge._execute_plan_worker` builds, 
 
 Output trust is declared `external_untrusted`. A failed call returns `success=false`, `degraded=true` and the outcome's `error_code` and `retry`; with `enable_fallback=False` the stand-in payload is empty rather than invented. The default input trust is `user_supplied`.
 
-`MCPClient` constructs its own `MCPServer` in the same process and registers `AcademicSearchTool`, `CitationTool`, `StatisticsTool` and `KnowledgeGraphTool` on it. No compose service runs an MCP server.
+`MCPIntegration` dispatches directly to `AcademicSearchTool`, `CitationTool`, `StatisticsTool` and `KnowledgeGraphTool` through `ResearchToolSet` (constructed lazily inside the boundary handlers). No standalone MCP server process or compose service exists.
 
 Bridge construction: `DirectExecutionService` creates its bridge with its `session_factory`, so the path has a durable store there. `TalkHierSessionService`, `MASRRoutingService` and `SupervisorCoordinationService` construct `MASRSupervisorBridge(component_registry=...)` with neither a session factory nor an audit store; they never call `execute_execution_plan`, the method that reaches `_execute_plan_worker`. `AgentFactory.resolve_agent` also builds an `MCPIntegration` when an agent config contains `mcp.enabled`, using an in-memory store; no code under `src/` sets that key.
 
@@ -164,9 +164,9 @@ Trust labels (`TrustClassification`) are ordered `trusted_control`, `application
 
 > **Not wired.** `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`, and `src/core/contracts/citation.py` have no importer under `src/` outside their own group; only tests exercise them. (`src/core/acquisition/pdf_text.py` is imported by `extract_child.py`, the document ingestion service, the document repository and the critique panel.) See [not wired](15-not-wired.md).
 
-## MCP server
+## Research tools
 
-`src/mcp/server.py` defines `MCPServer`, a wrapper over FastMCP (the optional `fastmcp` dependency, imported when a server is constructed). `register_tool` adds a `BaseMCPTool` to an internal `ToolRegistry` and exposes it on the FastMCP instance; `execute_tool` calls the tool through `BaseMCPTool.__call__`, which validates parameters and logs. The four tool classes in `src/mcp/tools/` are `AcademicSearchTool` (`search_academic`), `CitationTool` (`citation_formatter`), `StatisticsTool` (`statistics_analyzer`) and `KnowledgeGraphTool` (`knowledge_graph`).
+The four tool classes in `src/mcp/tools/` are `AcademicSearchTool`, `CitationTool`, `StatisticsTool` and `KnowledgeGraphTool`. `src/agents/integrations/mcp_tool_specs.py` binds each one to its boundary `ToolSpec` (`mcp.academic_search`, `mcp.format_citations`, `mcp.analyze_statistics`, `mcp.build_knowledge_graph`), enforcing closed input schemas, capability checks, deadlines, redaction, and audit logging.
 
 ## Source map
 
@@ -186,5 +186,5 @@ Trust labels (`TrustClassification`) are ordered `trusted_control`, `application
 - `src/ai_brain/integration/masr_supervisor_bridge.py`: MCP path wiring
 - `src/core/acquisition/`: snapshots, sources, search evidence, resolution, unused fetch and PDF modules
 - `src/core/claims/`: materiality, resolution, recording, unused citation validators
-- `src/mcp/`: MCP server, client, base class, tools
+- `src/mcp/`: research tools and academic search filters
 - `src/repositories/capability_repository.py`, `tool_invocation_repository.py`, `artifact_repository.py`, `evidence_repository.py`, `claim_support_repository.py`: persistence
