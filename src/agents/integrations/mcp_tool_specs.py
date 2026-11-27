@@ -48,10 +48,11 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from src.core.contracts.capabilities import SensitivityClass
 from src.core.tools import ToolCallContext, ToolSpec
+from src.mcp.academic_filters import AcademicSearchFilters
 from src.security.content_sanitizer import ContentSanitizer
 
 TOOL_ACADEMIC_SEARCH: Final[str] = "mcp.academic_search"
@@ -118,10 +119,19 @@ class AcademicSearchInput(_ClosedInput):
     max_results: int = 20
     filters: dict[str, JsonValue] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def _filters_are_supported(self) -> AcademicSearchInput:
+        AcademicSearchFilters.model_validate(self.filters).require_supported_by(
+            self.databases
+        )
+        return self
+
 
 class AcademicSearchOutput(_PermissiveOutput):
     sources: list[dict[str, JsonValue]] = Field(default_factory=list)
     total_found: int = 0
+    filters_applied: dict[str, JsonValue] = Field(default_factory=dict)
+    excluded: dict[str, int] = Field(default_factory=dict)
     databases_searched: list[str] = Field(default_factory=list)
     search_strategy: str = ""
 
@@ -229,6 +239,7 @@ def build_specs(
                 query=params.query,
                 databases=params.databases,
                 max_results=params.max_results,
+                filters=params.filters,
             ),
             operation="academic search",
         )
@@ -237,6 +248,8 @@ def build_specs(
         return {
             "sources": sources,
             "total_found": len(sources),
+            "filters_applied": result.get("filters_applied", {}),
+            "excluded": result.get("excluded", {}),
             "databases_searched": databases,
             "search_strategy": (
                 f"Multi-database search across {', '.join(databases)}"

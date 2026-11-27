@@ -507,6 +507,7 @@ class SourceAcquisitionService:
         source_type: SourceType,
         content: bytes,
         media_type: str = "text/plain; charset=utf-8",
+        metadata: Mapping[str, JsonValue] | None = None,
     ) -> Evidence | None:
         """Record a source a mediated tool already returned, as run-owned evidence.
 
@@ -524,6 +525,10 @@ class SourceAcquisitionService:
         Ids derive from the invocation, the source, and its digest, so
         re-recording a replayed invocation finds the row already there and
         returns ``None`` instead of writing a second one.
+
+        ``metadata`` is the provider's bibliographic record. It is kept on the
+        snapshot artifact under its own key, so it cannot shadow a system field
+        and does not change the content digest the evidence id derives from.
 
         Raises:
             ValueError: ``content`` is empty.
@@ -573,6 +578,7 @@ class SourceAcquisitionService:
                     "tool_invocation_id": invocation.tool_invocation_id,
                     "tool_name": invocation.tool_name,
                     "tool_version": invocation.tool_version,
+                    **({"bibliography": dict(metadata)} if metadata else {}),
                 },
                 self._secret_provider,
             ),

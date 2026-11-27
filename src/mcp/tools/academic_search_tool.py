@@ -4,15 +4,30 @@ Academic Search Tool for MCP.
 Provides search capabilities across multiple academic databases.
 """
 
+import re
 from typing import Any
 from xml.etree import ElementTree as ET
 
 import httpx
 from structlog import get_logger
 
+from src.mcp.academic_filters import AcademicSearchFilters
 from src.mcp.base import BaseMCPTool, ToolMetadata, ToolParameter
 
 logger = get_logger()
+
+
+def _year(value: Any) -> int | None:
+    """The four-digit year a provider reported, or ``None`` when it did not."""
+
+    match = re.match(r"\s*(\d{4})", str(value or ""))
+    return int(match.group(1)) if match else None
+
+
+def _compact(record: dict[str, Any]) -> dict[str, Any]:
+    """Drop unknown identity fields so absence is absence, not an empty string."""
+
+    return {k: v for k, v in record.items() if v is not None}
 
 
 class AcademicSearchTool(BaseMCPTool):
@@ -29,7 +44,7 @@ class AcademicSearchTool(BaseMCPTool):
 
         # API endpoints
         self.pubmed_base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-        self.arxiv_base = "http://export.arxiv.org/api/query"
+        self.arxiv_base = "https://export.arxiv.org/api/query"
         self.semantic_scholar_base = "https://api.semanticscholar.org/graph/v1"
 
     def _build_metadata(self) -> ToolMetadata:
@@ -91,7 +106,6 @@ class AcademicSearchTool(BaseMCPTool):
             query = kwargs.get("query", "")
             databases = kwargs.get("databases", ["arxiv"])
             max_results = kwargs.get("max_results", 10)
-            filters = kwargs.get("filters", {})
 
             if not query:
                 return {"success": False, "error": "Query is required"}
@@ -100,6 +114,13 @@ class AcademicSearchTool(BaseMCPTool):
             invalid_dbs = [db for db in databases if db not in valid_databases]
             if invalid_dbs:
                 return {"success": False, "error": f"Invalid databases: {invalid_dbs}"}
+
+            try:
+                filters = AcademicSearchFilters.model_validate(
+                    kwargs.get("filters") or {}
+                ).require_supported_by(databases)
+            except ValueError as error:
+                return {"success": False, "error": f"Invalid filters: {error}"}
 
             # Search each database
             all_results = []
@@ -120,29 +141,37 @@ class AcademicSearchTool(BaseMCPTool):
                 all_results.extend(results)
                 sources_used.append(db)
 
+            # Providers' own date handling is approximate (arXiv filters on
+            # submission date, PubMed on several), so the bound is re-checked here.
+            kept: list[dict[str, Any]] = []
+            excluded = {"out_of_range": 0, "unknown_year": 0}
+            for r in all_results:
+                if filters.admits(r.get("year")):
+                    kept.append(r)
+                else:
+                    excluded[
+                        "unknown_year" if r.get("year") is None else "out_of_range"
+                    ] += 1
+            payload: dict[str, Any] = {
+                "success": True,
+                "results": kept,
+                "query": query,
+                "total": len(kept),
+                "filters_applied": filters.applied(),
+                "excluded": excluded,
+            }
             if len(databases) == 1:
-                return {
-                    "success": True,
-                    "results": all_results,
-                    "source": databases[0],
-                    "query": query,
-                    "total": len(all_results),
-                }
+                payload["source"] = databases[0]
             else:
-                return {
-                    "success": True,
-                    "results": all_results,
-                    "sources": sources_used,
-                    "query": query,
-                    "total": len(all_results),
-                }
+                payload["sources"] = sources_used
+            return payload
 
         except Exception as e:
             logger.error(f"Academic search failed: {e!s}")
             return {"success": False, "error": str(e)}
 
     async def _search_pubmed(
-        self, query: str, max_results: int, filters: dict[str, Any]
+        self, query: str, max_results: int, filters: AcademicSearchFilters
     ) -> list[dict[str, Any]]:
         """
         Search PubMed database.
@@ -150,17 +179,18 @@ class AcademicSearchTool(BaseMCPTool):
         Args:
             query: Search query
             max_results: Maximum results
-            filters: Search filters
+            filters: Validated search filters
 
         Returns:
             List of results
         """
         try:
             search_query = query
-            if filters.get("year_start"):
-                search_query += f" AND {filters['year_start']}[pdat]"
-            if filters.get("year_end"):
-                search_query += f" : {filters['year_end']}[pdat]"
+            if filters.bounded:
+                # PubMed date ranges need both ends; 1000/3000 are open-ended.
+                start = filters.year_start or 1000
+                end = filters.year_end or 3000
+                search_query += f" AND {start}:{end}[pdat]"
 
             # Search for IDs
             search_url = f"{self.pubmed_base}/esearch.fcgi"
@@ -200,24 +230,31 @@ class AcademicSearchTool(BaseMCPTool):
             for pmid in id_list:
                 if pmid in summary_data.get("result", {}):
                     article = summary_data["result"][pmid]
+                    doi = next(
+                        (
+                            i.get("value")
+                            for i in article.get("articleids", [])
+                            if i.get("idtype") == "doi"
+                        ),
+                        None,
+                    )
                     results.append(
-                        {
-                            "id": pmid,
-                            "title": article.get("title", ""),
-                            "authors": [
-                                author.get("name", "")
-                                for author in article.get("authors", [])
-                            ],
-                            "abstract": article.get("abstract", ""),
-                            "year": (
-                                article.get("pubdate", "").split()[0]
-                                if article.get("pubdate")
-                                else ""
-                            ),
-                            "journal": article.get("source", ""),
-                            "doi": article.get("doi", ""),
-                            "source": "pubmed",
-                        }
+                        _compact(
+                            {
+                                "id": pmid,
+                                "title": article.get("title", ""),
+                                "authors": [
+                                    author.get("name", "")
+                                    for author in article.get("authors", [])
+                                ],
+                                "abstract": article.get("abstract", ""),
+                                "year": _year(article.get("pubdate")),
+                                "journal": article.get("source", ""),
+                                "doi": doi,
+                                "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+                                "source": "pubmed",
+                            }
+                        )
                     )
 
             return results
@@ -227,7 +264,7 @@ class AcademicSearchTool(BaseMCPTool):
             return []
 
     async def _search_arxiv(
-        self, query: str, max_results: int, filters: dict[str, Any]
+        self, query: str, max_results: int, filters: AcademicSearchFilters
     ) -> list[dict[str, Any]]:
         """
         Search arXiv database.
@@ -235,7 +272,7 @@ class AcademicSearchTool(BaseMCPTool):
         Args:
             query: Search query
             max_results: Maximum results
-            filters: Search filters
+            filters: Validated search filters
 
         Returns:
             List of results
@@ -243,9 +280,13 @@ class AcademicSearchTool(BaseMCPTool):
         try:
             search_query = f"all:{query}"
 
-            if filters.get("categories"):
-                cat_query = " OR ".join([f"cat:{cat}" for cat in filters["categories"]])
+            if filters.categories:
+                cat_query = " OR ".join(f"cat:{cat}" for cat in filters.categories)
                 search_query += f" AND ({cat_query})"
+            if filters.bounded:
+                start = filters.year_start or 1900
+                end = filters.year_end or 9999
+                search_query += f" AND submittedDate:[{start}01010000 TO {end}12312359]"
 
             params: dict[str, str | int] = {
                 "search_query": search_query,
@@ -261,7 +302,10 @@ class AcademicSearchTool(BaseMCPTool):
                 return []
 
             root = ET.fromstring(response.text)
-            ns = {"atom": "http://www.w3.org/2005/Atom"}
+            ns = {
+                "atom": "http://www.w3.org/2005/Atom",
+                "arxiv": "http://arxiv.org/schemas/atom",
+            }
 
             results = []
             for entry in root.findall("atom:entry", ns):
@@ -282,11 +326,7 @@ class AcademicSearchTool(BaseMCPTool):
 
                 # Extract publication date
                 published = entry.find("atom:published", ns)
-                year = (
-                    published.text[:4]
-                    if published is not None and published.text is not None
-                    else ""
-                )
+                year = _year(published.text if published is not None else None)
 
                 title_elem = entry.find("atom:title", ns)
                 title_text = (
@@ -303,21 +343,25 @@ class AcademicSearchTool(BaseMCPTool):
                 )
 
                 url_text = (
-                    entry_id.text
+                    entry_id.text.replace("http://", "https://", 1)
                     if entry_id is not None and entry_id.text is not None
                     else ""
                 )
+                doi_elem = entry.find("arxiv:doi", ns)
 
                 results.append(
-                    {
-                        "id": arxiv_id,
-                        "title": title_text,
-                        "authors": authors,
-                        "abstract": abstract_text,
-                        "year": year,
-                        "url": url_text,
-                        "source": "arxiv",
-                    }
+                    _compact(
+                        {
+                            "id": arxiv_id,
+                            "title": title_text,
+                            "authors": authors,
+                            "abstract": abstract_text,
+                            "year": year,
+                            "url": url_text,
+                            "doi": doi_elem.text if doi_elem is not None else None,
+                            "source": "arxiv",
+                        }
+                    )
                 )
 
             return results
@@ -327,7 +371,7 @@ class AcademicSearchTool(BaseMCPTool):
             return []
 
     async def _search_semantic_scholar(
-        self, query: str, max_results: int, filters: dict[str, Any]
+        self, query: str, max_results: int, filters: AcademicSearchFilters
     ) -> list[dict[str, Any]]:
         """
         Search Semantic Scholar database.
@@ -335,7 +379,7 @@ class AcademicSearchTool(BaseMCPTool):
         Args:
             query: Search query
             max_results: Maximum results
-            filters: Search filters
+            filters: Validated search filters
 
         Returns:
             List of results
@@ -346,18 +390,17 @@ class AcademicSearchTool(BaseMCPTool):
             params: dict[str, str | int] = {
                 "query": query,
                 "limit": max_results,
-                "fields": "paperId,title,abstract,authors,year,venue,citationCount",
+                "fields": (
+                    "paperId,title,abstract,authors,year,venue,citationCount,url,"
+                    "externalIds"
+                ),
             }
 
-            if filters.get("year_start") or filters.get("year_end"):
-                year_filter = ""
-                if filters.get("year_start"):
-                    year_filter = f"{filters['year_start']}-"
-                if filters.get("year_end"):
-                    year_filter += str(filters["year_end"])
-                else:
-                    year_filter += "2024"
-                params["year"] = year_filter
+            if filters.bounded:
+                # "2020-2022", "2020-" and "-2022" are the provider's range forms.
+                params["year"] = f"{filters.year_start or ''}-{filters.year_end or ''}"
+                if filters.year_start == filters.year_end:
+                    params["year"] = str(filters.year_start)
 
             response = await self.client.get(search_url, params=params)
             if response.status_code != 200:
@@ -369,19 +412,23 @@ class AcademicSearchTool(BaseMCPTool):
 
             for paper in data.get("data", []):
                 results.append(
-                    {
-                        "id": paper.get("paperId", ""),
-                        "title": paper.get("title", ""),
-                        "authors": [
-                            author.get("name", "")
-                            for author in paper.get("authors", [])
-                        ],
-                        "abstract": paper.get("abstract", ""),
-                        "year": str(paper.get("year", "")),
-                        "venue": paper.get("venue", ""),
-                        "citations": paper.get("citationCount", 0),
-                        "source": "semantic_scholar",
-                    }
+                    _compact(
+                        {
+                            "id": paper.get("paperId", ""),
+                            "title": paper.get("title", ""),
+                            "authors": [
+                                author.get("name", "")
+                                for author in paper.get("authors", [])
+                            ],
+                            "abstract": paper.get("abstract", ""),
+                            "year": _year(paper.get("year")),
+                            "venue": paper.get("venue", ""),
+                            "citations": paper.get("citationCount", 0),
+                            "url": paper.get("url"),
+                            "doi": (paper.get("externalIds") or {}).get("DOI"),
+                            "source": "semantic_scholar",
+                        }
+                    )
                 )
 
             return results

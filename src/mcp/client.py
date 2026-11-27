@@ -54,7 +54,11 @@ class MCPClient:
         logger.info(f"Registered {len(tools)} default tools")
 
     async def search_academic(
-        self, query: str, databases: list[str] | None = None, max_results: int = 10
+        self,
+        query: str,
+        databases: list[str] | None = None,
+        max_results: int = 10,
+        filters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Search academic databases.
@@ -63,6 +67,7 @@ class MCPClient:
             query: Search query
             databases: List of databases
             max_results: Maximum results
+            filters: year_start / year_end / categories; validated by the tool
 
         Returns:
             Search results
@@ -70,7 +75,11 @@ class MCPClient:
         if databases is None:
             databases = ["arxiv"]
         return await self.server.execute_tool(
-            "search_academic", query=query, databases=databases, max_results=max_results
+            "search_academic",
+            query=query,
+            databases=databases,
+            max_results=max_results,
+            filters=filters or {},
         )
 
     async def format_citations(
