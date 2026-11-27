@@ -1,6 +1,6 @@
 # CLI and web clients
 
-Two clients talk to the HTTP API: the `research-cli` command-line tool in `src/cli/` and the React workbench in `cerebro/web/`. Both authenticate with a bearer token and neither has a sign-in flow of its own. The workflows, runs, run detail and memory pages call routes the API does not mount.
+Two clients talk to the HTTP API: the `research-cli` command-line tool in `src/cli/` and the React workbench in `cerebro/web/`. Both authenticate with a bearer token. The CLI takes it from `RESEARCH_AUTH_TOKEN`; the workbench has a `/login` page that posts to `POST /api/v1/auth/login` and stores the access token, and every `/app` route redirects to `/login` without one. The login page has no second-factor step, and the access token is not refreshed: a `401` clears it and returns the browser to `/login`. The workflows, runs, run detail and memory pages call routes the API does not mount.
 
 ## Summary
 
@@ -147,7 +147,7 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 
 ### Pages
 
-> **Not wired.** The workflows, runs, run detail and memory pages call routes the API does not mount. The API mounts `GET /api/v1/workflows` (the catalogue listing) but no `/api/v1/runs` list, create or detail route, no `/api/v1/runs/{id}/cancel`, no `/api/v1/memory/nodes` and no `/api/v1/agents/{id}/logs`. The only run route it mounts is `GET /api/v1/runs/{run_id}/events`, which streams server-sent events rather than returning a JSON collection. The dashboard, QA, costs and benchmarks pages never call the API: the dashboard holds its figures in the component, and the QA, costs and benchmarks clients return fixed values with the real call commented out. The settings page has inputs and a switch with no handlers.
+> **Not wired.** The workflows, runs, run detail and memory pages call routes the API does not mount. The API mounts `GET /api/v1/workflows` (the catalogue listing) but no `/api/v1/runs` list, create or detail route, no `/api/v1/runs/{id}/cancel`, no `/api/v1/memory/nodes` and no `/api/v1/agents/{id}/logs`. The only run route it mounts is `GET /api/v1/runs/{run_id}/events`, which streams server-sent events rather than returning a JSON collection. The dashboard, QA, costs and benchmarks pages never call the API and show a "not available" notice instead of figures. The memory page stays reachable at `/app/memory` but has no sidebar link; no sidebar link to agent logs exists either. The settings page has a switch with no handler.
 
 | Route | Page | Backend calls | Backed |
 |---|---|---|---|
@@ -156,18 +156,19 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 | `/app/workflows` | `Workflows` | `GET /api/v1/workflows`; `POST /api/v1/runs` from the run form | Partly. `GET /api/v1/workflows` is mounted; `POST /api/v1/runs` is not, so the page cannot start a run. |
 | `/app/runs` | `Runs` | `GET /api/v1/runs`; `POST /api/v1/runs/{id}/cancel` | No. The page shows an unavailable notice. |
 | `/app/runs/:id` | `RunDetail` | `GET /api/v1/runs/{id}`, `/tasks`, `/events`, `/evidence`, `/artifacts`, `/evaluations` | No. Only `/events` (streams) and `/evidence` are mounted. |
-| `/app/dashboard` | `Dashboard` | none | static; fixed values in the component |
+| `/login` | `Login` | `POST /api/v1/auth/login` | Yes |
+| `/app/dashboard` | `Dashboard` | none | not available notice |
 | `/app/research`, `/app/research/:id` | `Research` | `GET` and `POST /api/v1/research/projects`; `GET /api/v1/research/projects/{id}`; WebSocket `/ws` | Yes |
 | `/app/agents` | `Agents` | `GET /api/v1/agents`; `GET /api/v1/agents/{id}/logs` | Partly: the list is mounted, the logs route is not |
 | `/app/memory` | `Memory` | `GET /api/v1/memory/nodes` | No |
-| `/app/qa` | `QA` | none | static; fixed values |
-| `/app/costs` | `Costs` | none | static; fixed values |
-| `/app/benchmarks` | `Benchmarks` | none | static; fixed values |
+| `/app/qa` | `QA` | none | not available notice |
+| `/app/costs` | `Costs` | none | not available notice |
+| `/app/benchmarks` | `Benchmarks` | none | not available notice |
 | `/app/settings` | `Settings` | none | static |
 
 ### End-to-end tests
 
-`cerebro/web/tests/e2e/` holds Playwright specs written in TypeScript: accessibility (`a11y-axe`, `a11y-keyboard`, `dark-mode-axe`, `wave6-accessibility`), layout and theme (`responsive-walkthrough`, `theme-tokens`, `landing`) and workbench behaviour (`runs`, `run-detail`, `workflows`, `workbench-ui`, `workbench-contracts`, `user-journey`, `api-contract`, `golden-run`). Run them from `cerebro/web` with `npm run test:e2e`. `playwright.config.ts` runs one Chromium project, starts `npm run dev` on `127.0.0.1:5173` (override with `PLAYWRIGHT_HOST` and `PLAYWRIGHT_PORT`), points the dev server at `PLAYWRIGHT_BACKEND_URL` (then `VITE_API_URL`, then `http://127.0.0.1:8000`), and retries twice when `CI` is set. The `user-journey`, `api-contract`, `wave6-accessibility` and `workbench-ui` specs intercept API calls with `page.route`. `golden-run.spec.ts` skips itself unless `PLAYWRIGHT_REAL_BACKEND=1`.
+`cerebro/web/tests/e2e/` holds Playwright specs written in TypeScript: accessibility (`a11y-axe`, `a11y-keyboard`, `dark-mode-axe`, `wave6-accessibility`), layout and theme (`responsive-walkthrough`, `theme-tokens`, `landing`) sign-in and the route guard (`sign-in`) and workbench behaviour (`runs`, `run-detail`, `workflows`, `workbench-ui`, `workbench-contracts`, `user-journey`, `api-contract`, `golden-run`). Run them from `cerebro/web` with `npm run test:e2e`. `playwright.config.ts` runs one Chromium project, starts `npm run dev` on `127.0.0.1:5173` (override with `PLAYWRIGHT_HOST` and `PLAYWRIGHT_PORT`), points the dev server at `PLAYWRIGHT_BACKEND_URL` (then `VITE_API_URL`, then `http://127.0.0.1:8000`), and retries twice when `CI` is set. The `user-journey`, `api-contract`, `wave6-accessibility` and `workbench-ui` specs intercept API calls with `page.route`. A global setup writes a signed-in browser state that every spec uses except `sign-in.spec.ts`, which starts signed out. `golden-run.spec.ts` skips itself unless `PLAYWRIGHT_REAL_BACKEND=1`.
 
 ## Source map
 
@@ -182,7 +183,7 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 - `.env.cli.example`: example CLI environment file
 - `src/research_platform/__init__.py`: the `research-platform` entry point stub
 - `cerebro/web/src/router/index.tsx`: route table
-- `cerebro/web/src/api/`: API clients (`client.ts`, `auth.ts`, `websocket.ts`, `research.ts`, `agents.ts`, `runs.ts`, `workflows.ts`, `workbench.ts` (run and workflow contract types), `memory.ts`, `qa.ts`, `costs.ts`, `benchmarks.ts`)
+- `cerebro/web/src/api/`: API clients (`client.ts`, `auth.ts`, `websocket.ts`, `research.ts`, `agents.ts`, `runs.ts`, `workflows.ts`, `workbench.ts` (run and workflow contract types), `session.ts` (login), `memory.ts`)
 - `cerebro/web/src/pages/`: page components
 - `cerebro/web/tests/e2e/`, `cerebro/web/playwright.config.ts`: end-to-end suite
 - `cerebro/web/Dockerfile`, `cerebro/web/nginx.conf`: web image

@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { toast } from '@/hooks/use-toast';
-import { getAccessToken } from './auth';
+import { getAccessToken, setAccessToken } from './auth';
 
 declare module 'axios' {
     interface AxiosRequestConfig {
@@ -31,6 +31,12 @@ apiClient.interceptors.response.use(
     (error) => {
         if (axios.isAxiosError(error) && error.config?.handleErrorLocally) {
             return Promise.reject(error);
+        }
+
+        // The access token expired or was revoked: sign in again rather than fail every call.
+        if (error.response?.status === 401 && getAccessToken()) {
+            setAccessToken(null);
+            window.location.assign('/login');
         }
 
         // Global error handling
