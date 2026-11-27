@@ -43,10 +43,6 @@ REPOSITORY_PROMPT_PLATFORM_MODULES = [
     SRC_DIR / "prompts" / "versioning.py",
 ]
 MCP_MODULES = [
-    SRC_DIR / "mcp" / "base.py",
-    SRC_DIR / "mcp" / "client.py",
-    SRC_DIR / "mcp" / "registry.py",
-    SRC_DIR / "mcp" / "server.py",
     SRC_DIR / "mcp" / "tools" / "academic_search_tool.py",
     SRC_DIR / "mcp" / "tools" / "citation_tool.py",
     SRC_DIR / "mcp" / "tools" / "knowledge_graph_tool.py",
