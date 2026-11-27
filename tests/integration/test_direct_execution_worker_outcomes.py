@@ -278,9 +278,7 @@ async def test_a_worker_whose_provider_call_fails_fails_every_record(
         run_id="outcome-terminal-failure",
     )
 
-    payload = _assert_failed_everywhere(
-        await _records(session_factory, h.run_id), h
-    )
+    payload = _assert_failed_everywhere(await _records(session_factory, h.run_id), h)
     assert h.status.failure_code == "WORKER_FAILED"
     assert payload["failure_code"] == "WORKER_FAILED"
     assert [(f["worker_id"], f["status"]) for f in payload["failures"]] == [
@@ -301,9 +299,7 @@ async def test_schema_invalid_output_is_invalid_output_not_success(
         run_id="outcome-invalid-output",
     )
 
-    payload = _assert_failed_everywhere(
-        await _records(session_factory, h.run_id), h
-    )
+    payload = _assert_failed_everywhere(await _records(session_factory, h.run_id), h)
     (failure,) = payload["failures"]
     assert failure["status"] == "invalid_output"
     assert failure["code"] == "OUTPUT_SCHEMA_VIOLATION"
@@ -351,9 +347,7 @@ async def test_an_empty_domain_output_at_zero_confidence_is_not_success(
         run_id="outcome-zero-confidence",
     )
 
-    payload = _assert_failed_everywhere(
-        await _records(session_factory, h.run_id), h
-    )
+    payload = _assert_failed_everywhere(await _records(session_factory, h.run_id), h)
     assert [f["code"] for f in payload["failures"]] == ["ZERO_CONFIDENCE"]
     await h.service.close()
 
