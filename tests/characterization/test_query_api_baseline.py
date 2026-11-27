@@ -8,7 +8,10 @@ import pytest
 from fastapi import BackgroundTasks, HTTPException
 
 from src.api.routes import query_api
-from src.api.services.direct_execution_service import ExecutionStatus
+from src.api.services.direct_execution_service import (
+    ExecutionStatus,
+    ResumeUnsupportedError,
+)
 from src.middleware.tenant_context import TenantContext
 
 # These characterization tests now run as an authenticated tenant, because
@@ -54,7 +57,9 @@ class _QueryService:
 
     async def resume_execution(self, project_id, *, organization_id=None):
         self.organizations.append(organization_id)
-        return "resumed-1" if project_id == UUID(int=1) else None
+        if project_id == UUID(int=1):
+            raise ResumeUnsupportedError(project_id)
+        return None
 
 
 @pytest.mark.asyncio
@@ -168,17 +173,15 @@ async def test_execution_status_results_and_resume_pin_legacy_error_details():
 
     status = await query_api.get_execution_status("execution-1", service, TENANT)
     results = await query_api.get_execution_results("execution-1", service, TENANT)
-    resumed = await query_api.resume_execution(str(UUID(int=1)), service, TENANT)
 
     assert status["status"] == "running"
     assert status["current_phase"] == "masr_routing"
     assert results == {"output": "legacy-result"}
-    assert resumed == {
-        "execution_id": "resumed-1",
-        "project_id": str(UUID(int=1)),
-        "status": "resumed",
-        "message": "Execution resumed from checkpoint",
-    }
+
+    with pytest.raises(HTTPException) as unsupported:
+        await query_api.resume_execution(str(UUID(int=1)), service, TENANT)
+    assert unsupported.value.status_code == 409
+    assert unsupported.value.detail["code"] == "RESUME_UNSUPPORTED"
 
     with pytest.raises(HTTPException, match="Invalid project_id format") as invalid:
         await query_api.resume_execution("not-a-uuid", service, TENANT)

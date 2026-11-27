@@ -36,6 +36,7 @@ from ...core.pii_redactor import redact_pii
 from ...middleware.tenant_context import TenantContext, get_tenant_context
 from ...models.execution_authority import ExecutionAuthorityReference
 from ...models.research_project import ResearchDepth, ResearchQuery
+from ..services.direct_execution_service import ResumeUnsupportedError
 from ..services.execution_authority_resolver import ExecutionAuthorityError
 from ..services.masr_routing_service import MASRRoutingService
 from ..services.research_kernel import (
@@ -542,7 +543,14 @@ async def get_execution_results(
         ) from e
 
 
-@router.post("/execution/{project_id}/resume")
+@router.post(
+    "/execution/{project_id}/resume",
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "description": "RESUME_UNSUPPORTED: resume is not supported; start a new run."
+        }
+    },
+)
 async def resume_execution(
     project_id: str,
     execution_service: ApplicationResearchKernel | ResearchExecutionBackend = (
@@ -551,15 +559,13 @@ async def resume_execution(
     tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
     """
-    Resume execution from the latest checkpoint for a project.
+    Refuse to resume a project's execution: a checkpoint is a diagnostic
+    snapshot, not resumable state. An interrupted run is failed
+    (``PROCESS_INTERRUPTED``); start a new run to try again.
 
-    This endpoint loads the most recent recoverable checkpoint for the project
-    and resumes execution from that point. Returns the execution ID if successful.
-
-    Scoped to the caller's tenant: another organization's project is reported
-    as having no recoverable checkpoint, exactly like a project that does not
-    exist, and the resumed execution is owned by the caller's organization so
-    the status and results reads can find it.
+    Scoped to the caller's tenant: another organization's project reads as
+    not found, exactly like a project that does not exist. Any project the
+    caller can see gets ``409`` with code ``RESUME_UNSUPPORTED``.
     """
     try:
         execution_service = _resolved_research_kernel(execution_service)
@@ -572,24 +578,21 @@ async def resume_execution(
                 detail=f"Invalid project_id format: {project_id}",
             ) from ve
 
-        execution_id = await resume_kernel_execution(
-            execution_service,
-            project_uuid,
-            organization_id=tenant_context.organization_id,
-        )
-
-        if not execution_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No recoverable checkpoint found for project {project_id}",
+        try:
+            await resume_kernel_execution(
+                execution_service,
+                project_uuid,
+                organization_id=tenant_context.organization_id,
             )
-
-        return {
-            "execution_id": execution_id,
-            "project_id": project_id,
-            "status": "resumed",
-            "message": "Execution resumed from checkpoint",
-        }
+        except ResumeUnsupportedError as refusal:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": refusal.code, "message": str(refusal)},
+            ) from refusal
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project {project_id} not found",
+        )
 
     except HTTPException:
         raise

@@ -226,7 +226,7 @@ Mounted at `/api/v1/query`; `get_current_token` is a router-level dependency. Ro
 | `POST` | `/synthesize` | Same flow with synthesis options (`synthesis_focus`, `narrative_style`, `citation_style`). | 200 | 500 (including authority errors, which this route wraps) |
 | `GET` | `/execution/{execution_id}/status` | Status of an execution in the caller's organization. | 200 | 404, 500 |
 | `GET` | `/execution/{execution_id}/results` | Results of an execution in the caller's organization: `final_output` when completed, `{"error": "Execution failed", "details": [...]}` when failed, otherwise `{"status", "progress"}`. | 200 | 404, 500 |
-| `POST` | `/execution/{project_id}/resume` | Resume from the latest recoverable checkpoint. | 200 | 400 invalid UUID, 404, 500 |
+| `POST` | `/execution/{project_id}/resume` | Refuse to resume: a checkpoint is a diagnostic snapshot. Start a new run instead. | none | 400 invalid UUID, 404 project not in the caller's organization, 409 `RESUME_UNSUPPORTED`, 500 |
 | `POST` | `/literature` | Convenience wrapper over `/research` (`query` of at least 10 characters, `max_sources` 10-200, `depth` default `comprehensive`). It builds the request without an `authority_reference`. | none | 422 `EXECUTION_AUTHORITY_REQUIRED`, 500 |
 | `POST` | `/methodology` | Convenience wrapper over `/research` (`research_type`: `quantitative`, `qualitative`, `mixed`). It builds the request without an `authority_reference`. | none | 422 `EXECUTION_AUTHORITY_REQUIRED`, 500 |
 | `POST` | `/comparison` | Convenience wrapper over `/research` (`comparison_focus`: `approaches`, `theories`, `methods`, `findings`). It builds the request without an `authority_reference`. | none | 422 `EXECUTION_AUTHORITY_REQUIRED`, 500 |
