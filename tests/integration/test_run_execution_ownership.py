@@ -532,7 +532,7 @@ async def test_the_heartbeat_keeps_a_lease_alive_and_stops_when_it_is_lost(
             break
     assert token is not None
     await asyncio.wait_for(beat, 5)
-    await asyncio.sleep(0)
+    await asyncio.wait([work], timeout=5)
 
     assert status._lease_lost and work.cancelled()
 
