@@ -33,6 +33,7 @@ from src.core.budget import (
     BudgetLedger,
     ReportedUsage,
 )
+from src.core.tracing import end_model_attempt, start_model_attempt
 
 logger = get_logger()
 
@@ -305,18 +306,48 @@ async def _attempt(
             ledger.release(reservation)
         raise
 
+    span = start_model_attempt(
+        ctx.trace_parent,
+        {"call_id": call_id, "attempt": n, "estimated_tokens": estimated_tokens},
+    )
     response: Any = None
     try:
         response = await call(remaining)
-    except UnbilledTransportError:
+    except UnbilledTransportError as exc:
+        end_model_attempt(span, metadata={"outcome": type(exc).__name__})
         await _settle(ctx, call_id, reservation, ReportedUsage(0, Decimal(0)), marked)
         raise
-    except BaseException:
+    except BaseException as exc:
+        end_model_attempt(span, metadata={"outcome": type(exc).__name__})
         await asyncio.shield(_settle(ctx, call_id, reservation, None, marked))
         raise
     result = normalize_response(response, attempts=n)
+    end_model_attempt(span, **_span_update(result))
     await asyncio.shield(_settle(ctx, call_id, reservation, _usage(result), marked))
     return result
+
+
+def _span_update(result: ModelCallResult) -> dict[str, Any]:
+    """Metadata and usage only: never content, request text or provider error prose."""
+    update: dict[str, Any] = {
+        "model": result.model,
+        "metadata": {
+            "outcome": result.status.value,
+            "provider": result.provider,
+            "finish_reason": result.finish_reason,
+            "usage_certainty": result.usage_certainty.value,
+            "request_id": result.request_id,
+        },
+    }
+    if result.usage_certainty is UsageCertainty.REPORTED:
+        update["usage_details"] = {
+            "input": result.prompt_tokens,
+            "output": result.completion_tokens,
+            "total": result.total_tokens,
+        }
+        if result.cost_usd is not None:
+            update["cost_details"] = {"total": float(result.cost_usd)}
+    return update
 
 
 def _check_live(ctx: ModelInvocationContext) -> float | None:

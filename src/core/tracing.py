@@ -305,6 +305,43 @@ def trace_provider_call(
                 )
 
 
+def start_model_attempt(
+    trace_parent: str | None, metadata: dict[str, Any]
+) -> LangfuseGeneration | None:
+    """Open one ``generation`` observation for a real provider attempt.
+
+    ``trace_parent`` is a Langfuse trace id. Returns None, and never raises,
+    when there is no parent, tracing is off, or the backend fails.
+    """
+    if trace_parent is None:
+        return None
+    try:
+        client = get_langfuse_client()
+        if client is None:
+            return None
+        return client.start_observation(  # type: ignore[no-any-return]
+            trace_context={"trace_id": trace_parent},
+            name="model_call",
+            as_type="generation",
+            metadata=metadata,
+        )
+    except Exception as e:
+        logger.warning("langfuse_attempt_start_failed", error_type=type(e).__name__)
+        return None
+
+
+def end_model_attempt(observation: LangfuseGeneration | None, **update: Any) -> None:
+    """Record an attempt's metadata/usage and end its observation; never raises."""
+    if observation is None:
+        return
+    try:
+        if update:
+            observation.update(**update)
+        observation.end()
+    except Exception as e:
+        logger.warning("langfuse_attempt_end_failed", error_type=type(e).__name__)
+
+
 def record_provider_metrics(
     observation: LangfuseGeneration | None,
     *,
