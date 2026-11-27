@@ -95,7 +95,7 @@ def _plan(
         routing_policy_id="policy-1",
         routing_policy_version="1",
         compiled_at=now,
-        deadline=now + timedelta(minutes=5),
+        deadline=datetime.now(UTC) + timedelta(minutes=5),
         amendment=amendment,
         routing_decision=RoutingDecision(
             routing_decision_id="decision-1",
