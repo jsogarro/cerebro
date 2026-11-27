@@ -9,8 +9,18 @@ import pytest
 import redis.asyncio as redis
 from jose import JWTError, jwt
 
-from src.auth.jwt_service import JWTService, JWTServiceUnavailable
+from src.auth.jwt_service import JWTService, JWTServiceUnavailable, RefreshIdentity
 from src.auth.models import TokenPair, TokenPayload
+
+
+def _identity(organization_id: str = "org-1") -> RefreshIdentity:
+    return RefreshIdentity(
+        user_id="test-user-123",
+        email="test@example.com",
+        organization_id=organization_id,
+        roles=["user"],
+        permissions=[],
+    )
 
 
 @pytest.fixture
@@ -126,7 +136,9 @@ class TestJWTService:
         ]
 
         new_pair = await jwt_service.refresh_tokens(
-            initial_pair.refresh_token, device_id="device-123"
+            initial_pair.refresh_token,
+            identity=_identity("org-789"),
+            device_id="device-123",
         )
 
         access_payload = jwt.decode(
@@ -252,7 +264,9 @@ class TestJWTService:
 
         # Refresh tokens
         new_pair = await jwt_service.refresh_tokens(
-            initial_pair.refresh_token, device_id="device-123"
+            initial_pair.refresh_token,
+            identity=_identity(),
+            device_id="device-123",
         )
 
         assert isinstance(new_pair, TokenPair)
@@ -273,7 +287,9 @@ class TestJWTService:
         redis_mock.getdel.return_value = None
 
         with pytest.raises(JWTError, match="Refresh token not found or expired"):
-            await jwt_service.refresh_tokens(token_pair.refresh_token)
+            await jwt_service.refresh_tokens(
+                token_pair.refresh_token, identity=_identity()
+            )
 
         redis_mock.getdel.assert_awaited_once()
         redis_mock.delete.assert_not_called()
@@ -287,7 +303,9 @@ class TestJWTService:
 
         with pytest.raises(JWTError, match="Device mismatch"):
             await jwt_service.refresh_tokens(
-                token_pair.refresh_token, device_id="different-device"
+                token_pair.refresh_token,
+                identity=_identity(),
+                device_id="different-device",
             )
 
     @pytest.mark.asyncio
@@ -460,10 +478,9 @@ class TestJWTService:
         )
 
 
-class TestRefreshKeepsEmail:
+class TestRefreshUsesTheSuppliedIdentity:
     @pytest.mark.asyncio
-    async def test_refreshed_access_token_keeps_the_user_email(self):
-        """The refresh token carries no email, so the server-side record must."""
+    async def test_refreshed_tokens_carry_the_identity_not_the_old_claims(self):
         store: dict[str, str] = {}
         redis_fake = AsyncMock(spec=redis.Redis)
         redis_fake.exists = AsyncMock(return_value=0)
@@ -473,13 +490,45 @@ class TestRefreshKeepsEmail:
         )
         redis_fake.getdel = AsyncMock(side_effect=lambda key: store.pop(key, None))
         service = JWTService(redis_client=redis_fake)
-
         pair = await service.generate_token_pair(
-            user_id="u1", email="user@example.com", device_id="d1"
+            user_id="test-user-123",
+            email="old@example.com",
+            roles=["admin"],
+            permissions=["*"],
+            device_id="d1",
+            organization_id="old-org",
         )
-        new_pair = await service.refresh_tokens(pair.refresh_token, device_id="d1")
+
+        identity = RefreshIdentity(
+            user_id="test-user-123",
+            email="new@example.com",
+            organization_id="new-org",
+            roles=["user"],
+            permissions=[],
+        )
+        new_pair = await service.refresh_tokens(
+            pair.refresh_token, identity=identity, device_id="d1"
+        )
 
         access = jwt.decode(
             new_pair.access_token, service.public_key, algorithms=[service.algorithm]
         )
-        assert access["email"] == "user@example.com"
+        assert (access["email"], access["organization_id"]) == (
+            "new@example.com",
+            "new-org",
+        )
+        assert (access["roles"], access["permissions"]) == (["user"], [])
+
+    @pytest.mark.asyncio
+    async def test_identity_for_another_user_is_refused_before_the_token_is_spent(
+        self, jwt_service, redis_mock
+    ):
+        pair = await jwt_service.generate_token_pair(
+            user_id="test-user-123", email="a@example.com"
+        )
+        other = RefreshIdentity("someone-else", "b@example.com", "org", ["user"], [])
+
+        with pytest.raises(JWTError, match="Identity does not match"):
+            await jwt_service.refresh_tokens(pair.refresh_token, identity=other)
+
+        redis_mock.getdel.assert_not_awaited()

@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 import src.api.auth.auth_router as auth_router
 from src.api.main import app
+from src.auth.jwt_service import RefreshIdentity
 from src.auth.models import PasswordResetConfirm, PasswordResetRequest, TokenPair
 from src.auth.password_service import PasswordService
 from src.middleware.auth_middleware import PUBLIC_ROUTE_ALLOWLIST
@@ -204,7 +205,14 @@ def test_refresh_is_public_and_works_without_access_bearer() -> None:
         refresh_tokens=AsyncMock(return_value=expected),
     )
     # Refresh re-reads the token's user and refuses missing or inactive ones.
-    active_user = SimpleNamespace(is_active=True)
+    active_user = SimpleNamespace(
+        id="user-1",
+        email="u@example.com",
+        is_active=True,
+        organization_id="org-1",
+        role=None,
+        is_superuser=False,
+    )
     session = SimpleNamespace(
         execute=AsyncMock(
             return_value=SimpleNamespace(scalar_one_or_none=lambda: active_user)
@@ -232,5 +240,13 @@ def test_refresh_is_public_and_works_without_access_bearer() -> None:
     assert response.status_code == 200
     assert response.json() == expected.model_dump()
     service.refresh_tokens.assert_awaited_once_with(
-        refresh_token="stored-refresh-token", device_id=None
+        "stored-refresh-token",
+        identity=RefreshIdentity(
+            user_id="user-1",
+            email="u@example.com",
+            organization_id="org-1",
+            roles=["user"],
+            permissions=[],
+        ),
+        device_id=None,
     )

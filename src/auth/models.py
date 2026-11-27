@@ -74,6 +74,18 @@ class LoginRequest(BaseModel):
     email: EmailStr = Field(..., description="User email address")
     password: str = Field(..., min_length=12, description="User password")
     device_id: str | None = Field(None, description="Device fingerprint")
+    remember_me: bool = Field(
+        default=False,
+        description="Deprecated: extended sessions are not supported; true is rejected",
+    )
+
+    @field_validator("remember_me")
+    @classmethod
+    def reject_extended_session(cls, v: bool) -> bool:
+        # Silently treating true as false would break the caller's expectation.
+        if v:
+            raise ValueError("remember_me is not supported")
+        return v
 
     @field_validator("password")
     @classmethod

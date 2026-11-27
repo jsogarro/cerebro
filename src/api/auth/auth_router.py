@@ -19,7 +19,11 @@ from src.api.middleware.rate_limiter import (
     RedisRateLimitStore,
     ResilientRateLimitStore,
 )
-from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
+from src.auth.jwt_service import (
+    JWTService,
+    JWTServiceUnavailableError,
+    RefreshIdentity,
+)
 from src.auth.models import (
     AuthResponse,
     ChangePasswordRequest,
@@ -56,9 +60,18 @@ security = HTTPBearer()
 
 
 # Dependencies
-async def get_password_service() -> AsyncIterator[PasswordService]:
-    """Yield a password service whose Redis client is closed after the request."""
-    redis_client = await redis.from_url(settings.REDIS_URL)
+async def get_password_service(
+    jwt_service: JWTService = Depends(get_jwt_service),
+) -> AsyncIterator[PasswordService]:
+    """Yield a password service over the app's shared Redis client.
+
+    Only a client this request opened itself is closed here; the shared one
+    outlives every request.
+    """
+    shared = jwt_service.redis_client
+    redis_client = (
+        shared if shared is not None else await redis.from_url(settings.REDIS_URL)
+    )
     try:
         yield PasswordService(
             redis_client=redis_client,
@@ -68,7 +81,8 @@ async def get_password_service() -> AsyncIterator[PasswordService]:
             check_breaches=settings.CHECK_PASSWORD_BREACHES,
         )
     finally:
-        await redis_client.close()
+        if shared is None:
+            await redis_client.close()
 
 
 _login_throttle: LoginThrottle | None = None
@@ -110,6 +124,39 @@ def provisioned_organization_id(user: User) -> UUID:
         user.organization_id = uuid4()
         logger.info("Provisioned tenant organization for user", user_id=str(user.id))
     return user.organization_id
+
+
+def _claims_for(user: User) -> tuple[list[str], list[str]]:
+    """Roles and permissions an account carries in its tokens."""
+    roles = [user.role] if user.role else ["user"]
+    if user.is_superuser:
+        return [*roles, "admin"], ["*"]
+    return roles, []
+
+
+async def _current_identity(db: AsyncSession, user_id: str) -> RefreshIdentity:
+    """Resolve the claims a refresh may mint, from storage.
+
+    A storage failure is unavailability, never a reason to mint from what the
+    old token said. Refresh does not provision an organization: an account
+    without one has lost its tenant and must sign in again.
+    """
+    try:
+        user = await UserRepository(db).get(user_id)
+    except Exception as exc:
+        raise JWTServiceUnavailableError("Account store unavailable") from exc
+    if user is None or not user.is_active or user.organization_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        )
+    roles, permissions = _claims_for(user)
+    return RefreshIdentity(
+        user_id=str(user.id),
+        email=user.email,
+        organization_id=str(user.organization_id),
+        roles=roles,
+        permissions=permissions,
+    )
 
 
 @router.post(
@@ -289,14 +336,7 @@ async def login(
     # Generate device ID if not provided
     device_id = request.device_id or f"web_{uuid4().hex[:8]}"
 
-    # Determine roles and permissions
-    roles = [user.role] if user.role else ["user"]
-    if user.is_superuser:
-        roles.append("admin")
-
-    permissions = []
-    if user.is_superuser:
-        permissions = ["*"]  # All permissions
+    roles, permissions = _claims_for(user)
 
     # Generate tokens
     tokens = await jwt_service.generate_token_pair(
@@ -334,16 +374,9 @@ async def refresh_tokens(
         refresh_payload = await jwt_service.validate_token(
             request.refresh_token, token_type="refresh"
         )
-        user = await UserRepository(db).get(refresh_payload.sub)
-        if user is None or not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid refresh token",
-            )
-
-        # Refresh tokens
+        identity = await _current_identity(db, refresh_payload.sub)
         new_tokens = await jwt_service.refresh_tokens(
-            refresh_token=request.refresh_token, device_id=request.device_id
+            request.refresh_token, identity=identity, device_id=request.device_id
         )
 
         logger.info("Tokens refreshed successfully")
@@ -352,13 +385,13 @@ async def refresh_tokens(
     except HTTPException:
         raise
     except JWTServiceUnavailableError as e:
-        logger.warning("Token refresh service unavailable", error=str(e))
+        logger.warning("Token refresh service unavailable", error=type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Authentication service unavailable",
         ) from e
     except Exception as e:
-        logger.warning("Token refresh failed", error=str(e))
+        logger.warning("Token refresh failed", error=type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
         ) from e
