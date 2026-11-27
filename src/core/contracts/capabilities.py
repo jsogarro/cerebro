@@ -85,6 +85,7 @@ class CapabilityDenialReason(StrEnum):
     SENSITIVITY_MISMATCH = "sensitivity_mismatch"
     INPUT_TRUST_EXCEEDS_GRANT = "input_trust_exceeds_grant"
     APPROVAL_MISSING = "approval_missing"
+    APPROVAL_UNAVAILABLE = "approval_unavailable"
     APPROVAL_EXPIRED = "approval_expired"
     APPROVAL_FINGERPRINT_MISMATCH = "approval_fingerprint_mismatch"
 
