@@ -2045,7 +2045,9 @@ class DirectExecutionService:
         if authority_reference is not None and isinstance(
             self.execution_authority_resolver, PersistedExecutionAuthorityResolver
         ):
-            await self.execution_authority_resolver.load_authority(authority_reference)
+            await self.execution_authority_resolver.load_authority(
+                authority_reference, organization_id=organization_id
+            )
         binding = self._resolve_execution_authority(
             authority_reference, organization_id=organization_id
         )

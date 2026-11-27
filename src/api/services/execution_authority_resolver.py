@@ -273,31 +273,50 @@ class PersistedExecutionAuthorityResolver:
         """Populate the in-process cache without touching persistence."""
         self._bindings[(binding.authority_id, binding.authority_version)] = binding
 
-    async def load_authority(self, reference: ExecutionAuthorityReference) -> None:
-        """Cache the referenced authority from its snapshot if it is not cached.
+    async def load_authority(
+        self,
+        reference: ExecutionAuthorityReference,
+        *,
+        organization_id: str | None = None,
+    ) -> None:
+        """Cache the referenced authority from the database if it is not cached.
 
-        Tenant scoping still happens in :meth:`resolve`, so loading another
-        tenant's row here exposes nothing.
+        An authority the caller's tenant registered is preferred; otherwise the
+        snapshot of an already-admitted run (another replica's) is used.
+        Tenant scoping still happens in :meth:`resolve`.
         """
         key = (reference.authority_id, reference.authority_version)
         if key in self._bindings or self._session_factory is None:
             return
+        from src.repositories.execution_authority_repository import (
+            ExecutionAuthorityRepository,
+        )
         from src.repositories.run_config_snapshot_repository import (
             RunConfigSnapshotRepository,
         )
 
         async with self._session_factory() as session:
-            snapshots = await RunConfigSnapshotRepository(session).find_by_authority(
-                authority_id=reference.authority_id,
-                authority_version=reference.authority_version,
-            )
-        if snapshots:
-            snapshot = snapshots[0]
+            row: Any = None
+            if organization_id is not None:
+                row = await ExecutionAuthorityRepository(session).get(
+                    authority_id=reference.authority_id,
+                    authority_version=reference.authority_version,
+                    organization_id=organization_id,
+                )
+            if row is None:
+                snapshots = await RunConfigSnapshotRepository(
+                    session
+                ).find_by_authority(
+                    authority_id=reference.authority_id,
+                    authority_version=reference.authority_version,
+                )
+                row = snapshots[0] if snapshots else None
+        if row is not None:
             self.cache_binding(
                 deserialize_execution_authority_binding(
-                    snapshot.configuration,
-                    authority_id=snapshot.authority_id,
-                    authority_version=snapshot.authority_version,
+                    row.configuration,
+                    authority_id=row.authority_id,
+                    authority_version=row.authority_version,
                     clock=self._clock,
                     plan_id_factory=self._plan_id_factory,
                 )

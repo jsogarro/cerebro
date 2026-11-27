@@ -181,7 +181,7 @@ async def test_cancelled_workflow_task_records_its_cancellation(
 async def test_admission_loads_an_authority_the_cache_has_not_seen() -> None:
     resolver = PersistedExecutionAuthorityResolver()
 
-    async def load_authority(reference) -> None:
+    async def load_authority(reference, *, organization_id=None) -> None:
         resolver.cache_binding(_binding())
 
     resolver.load_authority = load_authority  # type: ignore[method-assign]

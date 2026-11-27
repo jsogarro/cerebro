@@ -265,7 +265,7 @@ async def test_agent_precheck_lets_the_durable_resolver_load_a_new_authority() -
     loaded: list[str] = []
     resolver = PersistedExecutionAuthorityResolver()
 
-    async def load_authority(reference) -> None:
+    async def load_authority(reference, *, organization_id=None) -> None:
         loaded.append(reference.authority_id)
 
     resolver.load_authority = load_authority  # type: ignore[method-assign]
@@ -279,6 +279,7 @@ async def test_agent_precheck_lets_the_durable_resolver_load_a_new_authority() -
     await agent_api._load_agent_execution_authority(
         kernel,  # type: ignore[arg-type]
         ExecutionAuthorityReference(authority_id="a", authority_version="1"),
+        "org-1",
     )
 
     assert loaded == ["a"]

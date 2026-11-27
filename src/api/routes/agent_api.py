@@ -87,6 +87,7 @@ def _resolved_agent_operations(
 async def _load_agent_execution_authority(
     execution_service: ApplicationResearchKernel | AgentExecutionBackend,
     reference: ExecutionAuthorityReference | None,
+    organization_id: str,
 ) -> None:
     """Let the durable resolver see an authority written after startup."""
 
@@ -99,7 +100,7 @@ async def _load_agent_execution_authority(
     if reference is not None and isinstance(
         resolver, PersistedExecutionAuthorityResolver
     ):
-        await resolver.load_authority(reference)
+        await resolver.load_authority(reference, organization_id=organization_id)
 
 
 def _require_agent_execution_authority(
@@ -273,7 +274,9 @@ async def execute_agent(
         )
 
         await _load_agent_execution_authority(
-            execution_service, request.authority_reference
+            execution_service,
+            request.authority_reference,
+            tenant_context.organization_id,
         )
         _require_agent_execution_authority(
             execution_service,
@@ -332,7 +335,9 @@ async def execute_chain_of_agents(
         )
 
         await _load_agent_execution_authority(
-            execution_service, request.authority_reference
+            execution_service,
+            request.authority_reference,
+            tenant_context.organization_id,
         )
         _require_agent_execution_authority(
             execution_service,
@@ -388,7 +393,9 @@ async def execute_mixture_of_agents(
         )
 
         await _load_agent_execution_authority(
-            execution_service, request.authority_reference
+            execution_service,
+            request.authority_reference,
+            tenant_context.organization_id,
         )
         _require_agent_execution_authority(
             execution_service,
