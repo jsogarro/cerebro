@@ -200,3 +200,14 @@ async def test_restore_and_hard_delete_respect_the_tenant_boundary(
 
     assert await repo.restore(project.id, organization_id=mine) is not None
     assert await repo.hard_delete(project.id, organization_id=mine) is True
+
+
+@pytest.mark.asyncio
+async def test_restore_and_hard_delete_cannot_omit_the_organization(
+    session: AsyncSession,
+) -> None:
+    repo = _repo(session)
+    with pytest.raises(TypeError):
+        await repo.restore(uuid4())  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        await repo.hard_delete(uuid4())  # type: ignore[call-arg]

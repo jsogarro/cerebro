@@ -127,10 +127,25 @@ async def test_gdpr_erase_does_not_claim_memory_purged_when_none_attached() -> N
     from src.models.db.user import User
     from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 
+    from src.models.db.audit_log import AuditEventType
+
     class _Jwt:
         async def revoke_all_user_tokens(self, user_id: str) -> None:
             return None
 
+    class _Audit:
+        def __init__(self) -> None:
+            self.events: list[dict] = []
+            self.flushed = False
+
+        async def log_event(self, **event):
+            self.events.append(event)
+            return "id"
+
+        async def flush_buffer(self) -> None:
+            self.flushed = True
+
+    audit = _Audit()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         for model in (
@@ -150,6 +165,7 @@ async def test_gdpr_erase_does_not_claim_memory_purged_when_none_attached() -> N
             user_id,
             db=session,
             memory_system=None,
+            audit_logger=audit,  # type: ignore[arg-type]
             current_user=SimpleNamespace(id=user_id, is_superuser=False),  # type: ignore[arg-type]
             jwt_service=_Jwt(),  # type: ignore[arg-type]
         )
@@ -157,6 +173,12 @@ async def test_gdpr_erase_does_not_claim_memory_purged_when_none_attached() -> N
 
     assert body["memory_purged"] is False
     assert body["deleted"]["memory"] is None
+    assert body["not_erased"]["memory"].startswith("not_configured")
+    assert set(body["not_erased"]) == {"memory", "audit_logs", "agent_runs"}
+    (event,) = audit.events
+    assert event["event_type"] == AuditEventType.ACCOUNT_DELETED
+    assert event["user_id"] == user_id
+    assert audit.flushed
 
 
 @pytest.mark.asyncio
