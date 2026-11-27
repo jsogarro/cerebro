@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.core.config import settings
-from src.core.provider_readiness import configured_providers
+from src.core.provider_readiness import observed_provider_state
 from src.middleware.auth_middleware import get_jwt_service
 from src.models.db.session import get_session_factory
 
@@ -76,8 +76,8 @@ async def readiness_check(request: Request) -> JSONResponse:
     ready = all(v == "ok" for v in checks.values())
     # Informational: readiness never probes a provider (a probe spends tokens) and
     # a provider outage must not take the pod out of rotation.
-    checks["providers"] = (
-        "unknown" if any(configured_providers().values()) else "unconfigured"
+    checks["providers"] = observed_provider_state(
+        getattr(request.app.state, "gemini_service", None)
     )
     return JSONResponse(
         status_code=status.HTTP_200_OK

@@ -1,5 +1,7 @@
 """Which model providers are configured, without contacting any of them."""
 
+from typing import Any
+
 from src.core.config import settings
 
 
@@ -19,3 +21,17 @@ def provider_readiness() -> dict[str, bool | None]:
         name: None if configured else False
         for name, configured in configured_providers().items()
     }
+
+
+def observed_provider_state(gemini_service: Any | None) -> str:
+    """Gemini's circuit state, the only breaker a provider keeps, else ``unknown``.
+
+    ``unconfigured`` when no provider is enabled. Other configured providers have
+    no observed state, so they never move this value.
+    """
+    configured = configured_providers()
+    if not any(configured.values()):
+        return "unconfigured"
+    if gemini_service is None or not configured["gemini"]:
+        return "unknown"
+    return str(gemini_service.circuit.state)
