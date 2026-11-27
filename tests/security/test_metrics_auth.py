@@ -50,7 +50,9 @@ def client(jwt_service: JWTService) -> Iterator[TestClient]:
 
 async def _token(service: JWTService, **kwargs: object) -> str:
     pair = await service.generate_token_pair(
-        user_id="svc", email="svc@example.com", **kwargs  # type: ignore[arg-type]
+        user_id="svc",
+        email="svc@example.com",
+        **kwargs,  # type: ignore[arg-type]
     )
     return pair.access_token
 
@@ -129,7 +131,7 @@ def test_enable_metrics_controls_the_mount(flag: str, mounted: bool) -> None:
         "from src.api.main import app;"
         "print('MOUNTED' if any(getattr(r, 'path', '') == '/metrics' for r in app.routes) else 'ABSENT')"
     )
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [sys.executable, "-c", code],
         cwd=REPO_ROOT,
         env={**os.environ, "ENABLE_METRICS": flag, "PYTHONPATH": str(REPO_ROOT)},
@@ -138,4 +140,6 @@ def test_enable_metrics_controls_the_mount(flag: str, mounted: bool) -> None:
         timeout=120,
         check=True,
     )
-    assert result.stdout.strip().splitlines()[-1] == ("MOUNTED" if mounted else "ABSENT")
+    assert result.stdout.strip().splitlines()[-1] == (
+        "MOUNTED" if mounted else "ABSENT"
+    )
