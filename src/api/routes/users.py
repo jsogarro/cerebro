@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.ai_brain.memory.multi_tier_memory import MultiTierMemorySystem
 from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
 from src.middleware.auth_middleware import get_current_active_user, get_jwt_service
+from src.models.db.audit_log import AuditEventType
 from src.models.db.generated_report import GeneratedReport
 from src.models.db.research_project import ResearchProject
 from src.models.db.research_result import ResearchResult
@@ -20,6 +22,9 @@ from src.models.db.similarity_check import EgressEvent
 from src.models.db.uploaded_document import UploadedDocument, UsageLedger
 from src.models.db.user import User
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint
+from src.security.audit_logger import AuditLogger, AuditPersistenceError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -33,11 +38,26 @@ async def get_memory_system(request: Request) -> MultiTierMemorySystem | None:
     return None
 
 
+async def get_audit_logger(request: Request) -> AuditLogger | None:
+    """Return the app-level audit logger when one is attached."""
+
+    audit_logger = getattr(request.app.state, "audit_logger", None)
+    return audit_logger if isinstance(audit_logger, AuditLogger) else None
+
+
+# Stores that hold the user's identifier but are not touched by this route.
+_RETAINED = {
+    "audit_logs": "retained: the audit trail keeps denormalized username/email and the subject id; user_id is nulled",
+    "agent_runs": "retained: run records keep requested_by",
+}
+
+
 @router.delete("/{user_id}/gdpr")
 async def delete_user_gdpr(
     user_id: UUID,
     db: AsyncSession = Depends(get_session),
     memory_system: MultiTierMemorySystem | None = Depends(get_memory_system),
+    audit_logger: AuditLogger | None = Depends(get_audit_logger),
     current_user: User = Depends(get_current_active_user),
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> dict[str, Any]:
@@ -106,8 +126,34 @@ async def delete_user_gdpr(
         else None
     )
 
+    # Record the erasure only once it is durable, so the audit trail never
+    # reports a deletion that rolled back. An audit failure after the commit
+    # must not turn a completed erasure into an error response.
+    await db.commit()
+    audit_recorded = False
+    if audit_logger is not None:
+        await audit_logger.log_event(
+            event_type=AuditEventType.ACCOUNT_DELETED,
+            action="account_deleted",
+            user_id=user_id,
+            resource_type="user",
+            resource_id=user_id_text,
+            metadata={"erased_by": str(current_user.id)},
+        )
+        try:
+            await audit_logger.flush_buffer()
+            audit_recorded = True
+        except AuditPersistenceError:
+            logger.exception("ACCOUNT_DELETED audit event not persisted")
+
+    not_erased = dict(_RETAINED)
+    if memory_system is None:
+        not_erased["memory"] = "not_configured: no memory backend is attached"
+
     return {
         "user_id": user_id_text,
+        "not_erased": not_erased,
+        "audit_recorded": audit_recorded,
         "memory_purged": memory_system is not None,
         "deleted": {
             # SQLAlchemy 2.x: Result.rowcount is valid for DELETE/UPDATE; mypy stub gap.
@@ -124,4 +170,4 @@ async def delete_user_gdpr(
     }
 
 
-__all__ = ["get_memory_system", "router"]
+__all__ = ["get_audit_logger", "get_memory_system", "router"]

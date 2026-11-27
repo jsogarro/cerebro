@@ -328,6 +328,7 @@ async def test_gdpr_erasure_removes_documents_and_ledger_rows(
             memory_system=None,
             current_user=SimpleNamespace(id=USER_A, is_superuser=False),  # type: ignore[arg-type]
             jwt_service=_Jwt(),  # type: ignore[arg-type]
+            audit_logger=None,
         )
         await session.commit()
 

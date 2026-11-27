@@ -127,7 +127,8 @@ Tokens carry `roles` and `permissions` lists (see [Auth endpoints](#auth-endpoin
 
 1. Revoke every token of the user (`revoke_all_user_tokens`). If the token store is unavailable the route returns `503` and deletes nothing.
 2. Delete, in order, the user's `generated_reports` (rows owned by the user or attached to the user's projects; `report_formats` follow through the database cascade), `research_results` and `workflow_checkpoints` of the user's projects, the user's `research_projects` and the `users` row.
-3. Return `{"user_id", "deleted": {users, research_projects, generated_reports, research_results, workflow_checkpoints, memory}}` with row counts.
+3. Commit, then emit an `ACCOUNT_DELETED` audit event (feeds the `account_deletions` count of the GDPR compliance report) when `app.state.audit_logger` is attached.
+4. Return `{"user_id", "deleted": {...counts, memory}, "not_erased": {...}, "audit_recorded"}`. `audit_recorded` is false when no audit logger is attached or the event could not be persisted; the erasure is already committed, so that failure is logged rather than returned as an error. `not_erased` names every store the route does not erase: `audit_logs` and `agent_runs` are retained (the audit trail keeps denormalized username/email and the subject id), and `memory` is reported `not_configured` when no memory backend is attached.
 
 > **Not wired.** `MultiTierMemorySystem.purge_user_data` is called only when `app.state.memory_system` is a `MultiTierMemorySystem` (`get_memory_system`). Nothing in `src` assigns `app.state.memory_system`, so no memory is purged: the response carries `memory_purged: false` and `deleted.memory: null`.
 

@@ -239,14 +239,16 @@ class BaseRepository(Generic[ModelType]):
         return True
 
     async def hard_delete(
-        self, id: str | UUID, organization_id: str | UUID | None = None
+        self, id: str | UUID, *, organization_id: str | UUID | None
     ) -> bool:
         """
         Permanently delete entity.
 
         Args:
             id: Entity ID
-            organization_id: Tenant organization boundary
+            organization_id: Tenant organization boundary. Required so a caller
+                cannot cross tenants by omission; ``None`` is accepted only by
+                repositories that set ``allows_unscoped_access``.
 
         Returns:
             True if deleted, False if not found
@@ -257,7 +259,8 @@ class BaseRepository(Generic[ModelType]):
         self,
         id: str | UUID,
         restored_by: str | None = None,
-        organization_id: str | UUID | None = None,
+        *,
+        organization_id: str | UUID | None,
     ) -> ModelType | None:
         """
         Restore soft-deleted entity.
