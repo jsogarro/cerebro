@@ -1,7 +1,7 @@
 """Rewrite tenant policies, FORCE row-level security, add maintenance policies.
 
 Revision ID: f1c8a4d7e2b6
-Revises: b8e3f1a5c7d9
+Revises: c4d7a2e9f1b6
 Create Date: 2026-11-27
 
 Three changes to the 21 tenant tables, all PostgreSQL only:
@@ -25,7 +25,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "f1c8a4d7e2b6"
-down_revision: str | Sequence[str] | None = "b8e3f1a5c7d9"
+down_revision: str | Sequence[str] | None = "c4d7a2e9f1b6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
