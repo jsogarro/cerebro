@@ -22,6 +22,7 @@ class TestReportResponseModels:
         mock_report.page_count = 5
         mock_report.quality_score = 0.85
         mock_report.confidence_score = 0.78
+        mock_report.configuration = {}
         mock_report.created_at.isoformat.return_value = "2024-01-01T00:00:00Z"
         mock_report.generation_time_seconds = 45.0
 
