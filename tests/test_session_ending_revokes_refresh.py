@@ -101,6 +101,7 @@ async def auth_env() -> AsyncIterator[dict[str, Any]]:
         username="owner",
         hashed_password="placeholder",
         is_active=True,
+        organization_id=uuid.UUID(ORG),
     )
     user.update_password(PASSWORD)
     session.add(user)

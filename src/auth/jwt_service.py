@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -27,12 +28,15 @@ from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 logger = structlog.get_logger(__name__)
 
 
-def _stored_email(refresh_data: Any) -> str:
-    """Email saved with the refresh record; the refresh token itself carries none."""
-    if not isinstance(refresh_data, str | bytes):
-        return ""
-    record = deserialize_from_cache(refresh_data)
-    return record.get("email") or "" if isinstance(record, dict) else ""
+@dataclass(frozen=True)
+class RefreshIdentity:
+    """The account's current claims, resolved from storage by the caller."""
+
+    user_id: str
+    email: str
+    organization_id: str
+    roles: list[str]
+    permissions: list[str]
 
 
 class JWTServiceUnavailableError(RuntimeError):
@@ -329,7 +333,6 @@ class JWTService:
                 "user_id": user_id,
                 "device_id": device_id,
                 "organization_id": organization_id,
-                "email": email,
                 "created_at": now.isoformat(),
             }
             stored = await self.redis_client.setex(
@@ -447,13 +450,19 @@ class JWTService:
     async def refresh_tokens(
         self,
         refresh_token: str,
+        *,
+        identity: RefreshIdentity,
         device_id: str | None = None,
     ) -> TokenPair:
         """
         Refresh token pair using refresh token.
 
+        The refresh token proves the session; ``identity`` supplies the claims,
+        so nothing granted at login survives the account losing it.
+
         Args:
             refresh_token: Valid refresh token
+            identity: Current account claims for the token's own user
             device_id: Device fingerprint for validation
 
         Returns:
@@ -468,31 +477,31 @@ class JWTService:
         if device_id and refresh_payload.device_id != device_id:
             raise JWTError("Device mismatch")
 
-        refresh_data = None
+        if identity.user_id != refresh_payload.sub:
+            raise JWTError("Identity does not match refresh token")
+
         if self.redis_client:
             refresh_key = f"{self.refresh_token_prefix}{refresh_payload.jti}"
             try:
                 # GETDEL makes refresh-token rotation a single-use operation
                 # even when two callers race on the same refresh token.
-                refresh_data = await self.redis_client.getdel(refresh_key)
+                consumed = await self.redis_client.getdel(refresh_key)
             except Exception as exc:
                 logger.error("Refresh token store unavailable", error=str(exc))
                 raise JWTServiceUnavailableError(
                     "Refresh token store unavailable"
                 ) from exc
 
-            if not refresh_data:
+            if not consumed:
                 raise JWTError("Refresh token not found or expired")
 
-        user_id = refresh_payload.sub
-
         return await self.generate_token_pair(
-            user_id=user_id,
-            email=_stored_email(refresh_data),
-            roles=refresh_payload.roles,
-            permissions=refresh_payload.permissions,
+            user_id=identity.user_id,
+            email=identity.email,
+            roles=identity.roles,
+            permissions=identity.permissions,
             device_id=device_id or refresh_payload.device_id,
-            organization_id=refresh_payload.organization_id,
+            organization_id=identity.organization_id,
         )
 
     async def revoke_token(self, token: str) -> bool:
