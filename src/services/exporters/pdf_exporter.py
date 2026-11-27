@@ -507,23 +507,13 @@ class PDFExporter:
         Returns:
             Dictionary with PDF information
         """
-        try:
-            info = {
-                "size_bytes": len(pdf_bytes),
-                "size_kb": round(len(pdf_bytes) / 1024, 2),
-                "size_mb": round(len(pdf_bytes) / (1024 * 1024), 2),
-                "format": "PDF",
-                "version": "PDF-1.4+",  # WeasyPrint typically generates PDF 1.4+
-            }
-
-            # Try to extract more detailed information if possible
-            # This would require additional PDF libraries like PyPDF2
-
-            return info
-
-        except Exception as e:
-            logger.warning(f"Could not extract PDF info: {e}")
-            return {"size_bytes": len(pdf_bytes), "format": "PDF", "error": str(e)}
+        return {
+            "size_bytes": len(pdf_bytes),
+            "size_kb": round(len(pdf_bytes) / 1024, 2),
+            "size_mb": round(len(pdf_bytes) / (1024 * 1024), 2),
+            "format": "PDF",
+            "version": "PDF-1.4+",  # WeasyPrint typically generates PDF 1.4+
+        }
 
 
 def create_pdf_exporter(settings: ReportSettings | None = None) -> PDFExporter:

@@ -111,29 +111,25 @@ class DOCXExporter:
         normal_font.name = "Calibri"
         normal_font.size = Pt(11)
 
-        try:
-            # Title style
-            if "Report Title" not in [s.name for s in styles]:
-                title_style = styles.add_style("Report Title", WD_STYLE_TYPE.PARAGRAPH)
-                title_font = title_style.font
-                title_font.name = "Calibri"
-                title_font.size = Pt(18)
-                title_font.bold = True
-                title_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                title_style.paragraph_format.space_after = Pt(12)
+        # Title style
+        if "Report Title" not in [s.name for s in styles]:
+            title_style = styles.add_style("Report Title", WD_STYLE_TYPE.PARAGRAPH)
+            title_font = title_style.font
+            title_font.name = "Calibri"
+            title_font.size = Pt(18)
+            title_font.bold = True
+            title_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            title_style.paragraph_format.space_after = Pt(12)
 
-            # Heading styles are already available
+        # Heading styles are already available
 
-            # Custom metadata style
-            if "Metadata" not in [s.name for s in styles]:
-                metadata_style = styles.add_style("Metadata", WD_STYLE_TYPE.PARAGRAPH)
-                metadata_font = metadata_style.font
-                metadata_font.name = "Calibri"
-                metadata_font.size = Pt(10)
-                metadata_font.italic = True
-
-        except Exception as e:
-            logger.warning(f"Could not create custom styles: {e}")
+        # Custom metadata style
+        if "Metadata" not in [s.name for s in styles]:
+            metadata_style = styles.add_style("Metadata", WD_STYLE_TYPE.PARAGRAPH)
+            metadata_font = metadata_style.font
+            metadata_font.name = "Calibri"
+            metadata_font.size = Pt(10)
+            metadata_font.italic = True
 
     def _add_title_page(self, doc: DocxDocument, report: Report) -> None:
         """Add title page to document."""

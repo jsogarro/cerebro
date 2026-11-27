@@ -12,6 +12,7 @@ from typing import Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from redis import asyncio as aioredis
+from redis.exceptions import RedisError
 from structlog import get_logger
 from tenacity import (
     retry,
@@ -214,7 +215,7 @@ class GeminiService:
                     result = deserialize_from_cache(cached)
                     if isinstance(result, dict):
                         return result
-        except Exception as e:
+        except (RedisError, OSError, ValueError) as e:
             logger.warning("gemini_cache_read_failed", error=str(e))
 
         return None
@@ -236,7 +237,7 @@ class GeminiService:
                     ex=self.config.cache_ttl,
                 )
                 logger.debug("gemini_cache_write_completed", cache_key=cache_key)
-        except Exception as e:
+        except (RedisError, OSError, TypeError) as e:
             logger.warning("gemini_cache_write_failed", error=str(e))
 
     def _parse_json_response(self, response: str) -> dict[str, Any]:

@@ -400,7 +400,7 @@ class ReportGenerator:
 
                 logger.info(f"Saved {format} report to {file_path}")
 
-            except Exception as e:
+            except (OSError, UnicodeError) as e:
                 logger.error(f"Failed to save {format} report: {e}")
 
     def _build_download_urls(

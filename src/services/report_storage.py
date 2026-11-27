@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy.exc import SQLAlchemyError
 from structlog import get_logger
 
 from src.models.db.generated_report import GeneratedReport, ReportFormat
@@ -376,7 +377,7 @@ class ReportStorageService:
         try:
             content = report_format.get_content()
             return content, report_format.mime_type
-        except Exception as e:
+        except FileNotFoundError as e:
             logger.error(
                 f"Failed to retrieve content for {report_id}/{format_type}: {e}"
             )
@@ -536,7 +537,7 @@ class ReportStorageService:
             )
             storage_usage = self._calculate_storage_usage(storage_paths)
             stats.update(storage_usage)
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Failed to calculate storage usage: {e}")
             stats.update(
                 {
@@ -706,7 +707,7 @@ class ReportStorageService:
                     # No hash to verify, assume valid if file exists
                     integrity_results["formats_valid"] += 1
 
-            except Exception as e:
+            except (SQLAlchemyError, OSError, ValueError) as e:
                 integrity_results["errors"].append(f"{format_obj.format_type}: {e!s}")
 
         # Determine overall status

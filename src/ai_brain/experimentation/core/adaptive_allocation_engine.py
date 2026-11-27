@@ -636,7 +636,7 @@ class AdaptiveAllocationEngine:
                     )
                     updated_experiments.append(experiment_id)
 
-            except Exception as e:
+            except (ArithmeticError, ValueError, KeyError, IndexError) as e:
                 logger.error(f"Failed to update allocation for {experiment_id}: {e}")
 
         return updated_experiments
