@@ -184,6 +184,7 @@ jobs:
       # TeX hardening tests cannot pass by not running.
       - name: Run exporter hardening tests with required engines
         env:
+          CEREBRO_REQUIRED_LINUX_MODULES: tests/unit/test_exporter_output_hardening.py
           CEREBRO_REQUIRE_WEASYPRINT: "1"
           CEREBRO_REQUIRE_PDFLATEX: "1"
         run: |
