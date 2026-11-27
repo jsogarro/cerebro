@@ -439,3 +439,18 @@ async def test_a_refused_checkpoint_does_not_fail_the_run(
         mock_repo_instance.create_checkpoint.side_effect = CheckpointIdentityError("x")
         mock_repo_cls.return_value = mock_repo_instance
         await execution_service_with_checkpoint._checkpoint(execution_status, "p")
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_project_id_still_raises(execution_service_with_checkpoint):
+    execution_status = ExecutionStatus(
+        execution_id="exec-bad",
+        project_id="not-a-uuid",
+        organization_id=ORG,
+        status="running",
+        progress_percentage=1.0,
+        current_phase="p",
+    )
+
+    with pytest.raises(ValueError):
+        await execution_service_with_checkpoint._checkpoint(execution_status, "p")

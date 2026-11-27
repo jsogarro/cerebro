@@ -165,7 +165,6 @@ class ToolCallIdentity:
     attempt_id: str
     organization_id: str | None = None
     bound: bool = True
-    worker_scope: str | None = None
     """Whether a caller actually supplied this identity.
 
     ``False`` means it was synthesized. It is carried into the returned payload
@@ -173,6 +172,8 @@ class ToolCallIdentity:
     identity are precisely the ones whose records an audit would otherwise
     read as complete.
     """
+    worker_scope: str | None = None
+    """``<execution_plan_id>:<worker_id>`` of the admitted worker, if any."""
 
     @property
     def durable(self) -> bool:

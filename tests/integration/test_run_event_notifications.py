@@ -246,3 +246,61 @@ async def test_the_subscriber_resubscribes_after_the_connection_drops(
         assert flaky.attempts >= 2
     finally:
         await subscriber.stop()
+
+
+class _DownFactory:
+    def __call__(self) -> Any:
+        raise OSError("database unreachable")
+
+
+@pytest.mark.asyncio
+async def test_a_database_outage_drops_the_message_not_the_subscription() -> None:
+    subscriber = RunEventWakeupSubscriber(
+        redis_client=None,  # type: ignore[arg-type]
+        session_factory=_DownFactory(),  # type: ignore[arg-type]
+        stream_hub=RunStreamHub(),
+    )
+    import json
+
+    assert await subscriber.handle_message(json.dumps(_envelope())) is False
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_error_does_not_end_the_subscriber(
+    factory: async_sessionmaker[AsyncSession], redis_client: Any
+) -> None:
+    hub = RunStreamHub()
+    subscriber = RunEventWakeupSubscriber(
+        redis_client=redis_client, session_factory=factory, stream_hub=hub
+    )
+    real = subscriber.handle_message
+    calls = 0
+
+    async def flaky(data: Any) -> bool:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("boom")
+        return await real(data)
+
+    subscriber.handle_message = flaky  # type: ignore[method-assign]
+    publisher = EventPublisher()
+    publisher.redis_client = redis_client
+
+    subscriber.start()
+    try:
+        async with hub.subscribe(organization_id=ORG_A, run_id=RUN) as owner:
+            for _ in range(30):
+                await publisher.publish_run_event(
+                    run_id=RUN,
+                    event_type="run.admitted",
+                    payload={},
+                    event_id="e-1",
+                    sequence=1,
+                    idempotency_key="k-1",
+                )
+                if await _woken(owner, 0.25):
+                    break
+            assert owner.is_set()
+    finally:
+        await subscriber.stop()

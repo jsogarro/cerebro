@@ -229,4 +229,83 @@ async def test_statistics_count_only_the_callers_tenant(
     own = await repository.get_checkpoint_statistics(organization_id=ORG_A)
 
     assert other["total_checkpoints"] == 0
+    assert other["recoverable_checkpoints"] == 0
+    assert other["error_checkpoints"] == 0
+    assert other["automatic_checkpoints"] == 0
+    assert other["type_distribution"] == {}
+    assert other["phase_distribution"] == {}
     assert own["total_checkpoints"] == 1
+    assert own["recoverable_checkpoints"] == 1
+
+
+FULL = {"status": "running", "progress_percentage": 40.0, "current_phase": "x"}
+
+
+def _service(test_engine: AsyncEngine):
+    from unittest.mock import AsyncMock
+
+    from src.api.services.direct_execution_service import DirectExecutionService
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    return factory, DirectExecutionService(
+        masr_router=AsyncMock(),
+        supervisor_bridge=AsyncMock(),
+        supervisor_factory=AsyncMock(),
+        event_publisher=AsyncMock(),
+        session_factory=factory,
+    )
+
+
+async def _checkpoint_run(factory, world, run_id: str) -> None:
+    async with factory() as session:
+        await CheckpointRepository(session).create_checkpoint(
+            workflow_id=f"wf-{run_id}",
+            project_id=world["project_a"],
+            checkpoint_data=FULL,
+            phase="p",
+            run_id=run_id,
+            organization_id=ORG_A,
+        )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_execution_keeps_the_run_its_checkpoint_belongs_to(
+    test_engine: AsyncEngine, world: dict[str, uuid.UUID]
+) -> None:
+    factory, service = _service(test_engine)
+    await _checkpoint_run(factory, world, "run-a1")
+    await _checkpoint_run(factory, world, "run-a2")
+
+    execution_id = await service.resume_execution(
+        world["project_a"], organization_id=str(ORG_A)
+    )
+
+    assert execution_id == "wf-run-a2"
+    assert service.active_executions[execution_id].run_id == "run-a2"
+
+
+@pytest.mark.asyncio
+async def test_a_checkpoint_whose_pins_disagree_with_its_run_is_not_resumed(
+    test_engine: AsyncEngine, world: dict[str, uuid.UUID]
+) -> None:
+    from sqlalchemy import text
+
+    factory, service = _service(test_engine)
+    await _checkpoint_run(factory, world, "run-a1")
+    async with factory() as session:
+        await session.execute(
+            text(
+                "UPDATE agent_runs SET workflow_definition_version = '2' "
+                "WHERE run_id = 'run-a1'"
+            )
+        )
+        await session.commit()
+
+    assert (
+        await service.resume_execution(world["project_a"], organization_id=str(ORG_A))
+        is None
+    )
+    assert service.active_executions == {}

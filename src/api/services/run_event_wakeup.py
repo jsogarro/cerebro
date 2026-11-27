@@ -72,7 +72,7 @@ class RunEventWakeupSubscriber:
         try:
             async with self._session_factory() as session:
                 organization_id = await get_run_organization_id(session, run_id)
-        except SQLAlchemyError as error:
+        except (SQLAlchemyError, OSError) as error:
             logger.warning("run_event_wakeup_lookup_failed", error=str(error))
             return False
         if organization_id is None:
@@ -91,6 +91,10 @@ class RunEventWakeupSubscriber:
                             await self.handle_message(message["data"])
             except (RedisError, OSError) as error:
                 logger.warning("run_event_wakeup_redis_error", error=str(error))
+            except (RuntimeError, ValueError, TypeError, LookupError) as error:
+                # One bad message must not end wakeups for the life of the
+                # process; CancelledError still propagates.
+                logger.exception("run_event_wakeup_unexpected_error", error=str(error))
             await asyncio.sleep(_RECONNECT_DELAY_SECONDS)
 
 

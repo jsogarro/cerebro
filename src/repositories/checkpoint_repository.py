@@ -164,8 +164,9 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
         Args:
             project_id: Project ID
             organization_id: Tenant the caller acts for
-            run_id: Restrict to this run's checkpoints; ``None`` also admits
-                checkpoints written before runs were linked
+            run_id: Restrict to this run's checkpoints; ``None`` admits every
+                run's checkpoints of the project, and those written before
+                runs were linked
 
         Returns:
             Best recovery checkpoint or None
@@ -259,6 +260,33 @@ class CheckpointRepository(BaseRepository[WorkflowCheckpoint]):
             recovery_metadata=recovery_metadata,
             is_recoverable=True,
         )
+
+    async def identity_matches_run(
+        self, checkpoint: WorkflowCheckpoint, *, organization_id: UUID | str
+    ) -> bool:
+        """Whether a checkpoint's recorded run pins still match its durable run.
+
+        A checkpoint with no run is a legacy diagnostic and matches trivially.
+        One that names a run must find that run in the organization with the
+        same workflow and routing pins it was written under.
+        """
+        if checkpoint.run_id is None:
+            return True
+        run = await self.session.scalar(
+            select(AgentRun).where(
+                AgentRun.run_id == checkpoint.run_id,
+                AgentRun.organization_id == normalize_organization_id(organization_id),
+            )
+        )
+        recorded = (checkpoint.recovery_metadata or {}).get("identity")
+        return run is not None and recorded == {
+            "organization_id": str(run.organization_id),
+            "run_id": run.run_id,
+            "workflow_definition_id": run.workflow_definition_id,
+            "workflow_definition_version": run.workflow_definition_version,
+            "routing_policy_id": run.routing_policy_id,
+            "routing_policy_version": run.routing_policy_version,
+        }
 
     async def list_checkpoints(
         self,

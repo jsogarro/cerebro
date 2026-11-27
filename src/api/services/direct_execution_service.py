@@ -45,7 +45,10 @@ from src.core.telemetry import count_tokens, telemetry_enabled
 from src.models.db.run_event import EVENT_ENVELOPE_VERSION
 from src.repositories.artifact_repository import ArtifactRepository
 from src.repositories.capability_repository import CapabilityRepository
-from src.repositories.checkpoint_repository import CheckpointRepository
+from src.repositories.checkpoint_repository import (
+    CheckpointIdentityError,
+    CheckpointRepository,
+)
 from src.repositories.claim_support_repository import ClaimSupportRepository
 from src.repositories.research_repository import ResearchRepository
 from src.repositories.run_config_snapshot_repository import (
@@ -633,7 +636,14 @@ class DirectExecutionService:
                     phase=phase,
                 )
 
-        except (SQLAlchemyError, OSError, ValueError) as e:
+        except CheckpointIdentityError as e:
+            logger.error(
+                "checkpoint_identity_refused",
+                execution_id=execution_status.execution_id,
+                phase=phase,
+                error=str(e),
+            )
+        except (SQLAlchemyError, OSError) as e:
             logger.warning(
                 "Failed to create checkpoint (degrading gracefully)",
                 execution_id=execution_status.execution_id,
@@ -2775,6 +2785,16 @@ class DirectExecutionService:
                 )
                 return None
 
+            if not await repository.identity_matches_run(
+                checkpoint, organization_id=organization_id
+            ):
+                logger.error(
+                    "Resume refused: checkpoint identity disagrees with its run",
+                    checkpoint_id=str(checkpoint.id),
+                    run_id=checkpoint.run_id,
+                )
+                return None
+
             # Restore checkpoint data
             restored_data = await repository.restore_from_checkpoint(
                 checkpoint.id, organization_id=organization_id
@@ -2808,6 +2828,7 @@ class DirectExecutionService:
                 errors=checkpoint_data.get("errors", []),
                 warnings=checkpoint_data.get("warnings", []),
                 retry_count=checkpoint_data.get("retry_count", 0),
+                run_id=checkpoint.run_id,
             )
 
             # Register in active executions
