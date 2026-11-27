@@ -20,7 +20,7 @@ Callers authenticate with RS256-signed JWTs issued by the `/api/v1/auth` routes 
 | User data erasure | Active | `DELETE /api/v1/users/{user_id}/gdpr` | `src/api/routes/users.py` (`delete_user_gdpr`) |
 | Memory-tier purge during erasure | Not wired | `app.state.memory_system` | `src/api/routes/users.py` (`get_memory_system`) |
 | Superuser dependency | Active | `require_superuser()` on the `/admin` router | `src/middleware/auth_middleware.py`, `src/api/routes/admin_security.py` |
-| MFA, OAuth, session limits, breach-check setting | Not wired | settings only | `src/core/config.py` (`Settings`) |
+| MFA, session lifetime, breach-check setting | Not wired | settings only | `src/core/config.py` (`Settings`) |
 
 ## Request authentication
 
@@ -133,7 +133,7 @@ Tokens carry `roles` and `permissions` lists (see [Auth endpoints](#auth-endpoin
 
 ## Settings with no effect
 
-> **Not wired.** These settings are declared in `src/core/config.py` (`Settings`) and read nowhere in `src`: `ENABLE_MFA`, `MFA_ISSUER`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET_KEY`, `SESSION_EXPIRE_HOURS`, `MAX_SESSIONS_PER_USER`, `JWT_ALGORITHM`, `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_PERIOD`. There are no MFA or OAuth routes, no session-count limit and no session lifetime other than the token lifetimes.
+> **Not wired.** These settings are declared in `src/core/config.py` (`Settings`) and read nowhere in `src`: `ENABLE_MFA`, `MFA_ISSUER`, `SESSION_SECRET_KEY`, `SESSION_EXPIRE_HOURS`, `JWT_ALGORITHM`, `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_PERIOD`. There are no MFA or OAuth login routes, no session-count limit and no session lifetime other than the token lifetimes.
 
 `SECRET_KEY` is validated at startup (at least 32 characters; the placeholder value is rejected when `ENVIRONMENT` is `production`) and is not used for token signing, which uses the RSA key pair.
 

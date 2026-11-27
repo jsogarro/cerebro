@@ -140,13 +140,6 @@ class Settings(BaseSettings):
     # Session Configuration
     SESSION_SECRET_KEY: str | None = None
     SESSION_EXPIRE_HOURS: int = 24
-    MAX_SESSIONS_PER_USER: int = 5
-
-    # OAuth2 Providers (for future use)
-    GOOGLE_CLIENT_ID: str | None = None
-    GOOGLE_CLIENT_SECRET: str | None = None
-    GITHUB_CLIENT_ID: str | None = None
-    GITHUB_CLIENT_SECRET: str | None = None
 
     # Security Settings
     RATE_LIMIT_REQUESTS: int = 100

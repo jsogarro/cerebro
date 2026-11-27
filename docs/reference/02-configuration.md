@@ -213,11 +213,6 @@ The table lists 96 rows: 95 fields of `Settings` and `OTEL_EXPORTER_OTLP_ENDPOIN
 | `CHECK_PASSWORD_BREACHES` | `true` | Authentication, sessions and OAuth |
 | `SESSION_SECRET_KEY` | unset | Authentication, sessions and OAuth |
 | `SESSION_EXPIRE_HOURS` | `24` | Authentication, sessions and OAuth |
-| `MAX_SESSIONS_PER_USER` | `5` | Authentication, sessions and OAuth |
-| `GOOGLE_CLIENT_ID` | unset | Authentication, sessions and OAuth |
-| `GOOGLE_CLIENT_SECRET` | unset | Authentication, sessions and OAuth |
-| `GITHUB_CLIENT_ID` | unset | Authentication, sessions and OAuth |
-| `GITHUB_CLIENT_SECRET` | unset | Authentication, sessions and OAuth |
 | `RATE_LIMIT_REQUESTS` | `100` | Authentication, sessions and OAuth |
 | `RATE_LIMIT_PERIOD` | `60` | Authentication, sessions and OAuth |
 | `ENABLE_MFA` | `false` | Authentication, sessions and OAuth |
