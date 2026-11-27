@@ -29,7 +29,9 @@ RUN = "run-a"
 
 @pytest_asyncio.fixture(name="factory")
 async def factory_fixture(test_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
     async with factory() as session:
         await seed_run_task_attempt(session, organization_id=ORG_A, run_id=RUN)
         await session.commit()

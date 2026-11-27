@@ -171,7 +171,9 @@ async def test_a_worker_task_inherits_its_parent_s_durable_context() -> None:
         context = dict(worker_task.context)
         assert isinstance(context.pop(BUDGET_LEDGER_CONTEXT_KEY), BudgetLedger)
         assert context.pop("worker_scope") == expected_scopes[worker_task.id]
-        assert context == {k: v for k, v in parent_context.items() if k != "worker_scope"}
+        assert context == {
+            k: v for k, v in parent_context.items() if k != "worker_scope"
+        }
 
 
 @pytest.mark.asyncio

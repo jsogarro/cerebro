@@ -392,7 +392,9 @@ async def test_checkpoint_passes_the_executions_organization(
         mock_repo_cls.return_value = mock_repo_instance
         await execution_service_with_checkpoint._checkpoint(execution_status, "p")
 
-    assert mock_repo_instance.create_checkpoint.call_args.kwargs["organization_id"] == ORG
+    assert (
+        mock_repo_instance.create_checkpoint.call_args.kwargs["organization_id"] == ORG
+    )
 
 
 @pytest.mark.asyncio

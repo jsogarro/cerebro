@@ -43,7 +43,9 @@ def _project(org: uuid.UUID) -> ResearchProject:
 
 @pytest_asyncio.fixture(name="world")
 async def world_fixture(test_engine: AsyncEngine) -> dict[str, uuid.UUID]:
-    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
     async with factory() as session:
         project_a, project_b = _project(ORG_A), _project(ORG_B)
         session.add_all([project_a, project_b])
@@ -71,7 +73,9 @@ async def world_fixture(test_engine: AsyncEngine) -> dict[str, uuid.UUID]:
 async def session_fixture(
     test_engine: AsyncEngine, world: dict[str, uuid.UUID]
 ) -> AsyncSession:
-    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
     async with factory() as session:
         yield session
 
@@ -153,7 +157,9 @@ async def test_another_tenant_reads_nothing_through_any_lookup(
         await repository.restore_from_checkpoint(checkpoint.id, organization_id=ORG_B)
         is None
     )
-    assert await repository.cleanup_old("wf-1", keep_count=0, organization_id=ORG_B) == 0
+    assert (
+        await repository.cleanup_old("wf-1", keep_count=0, organization_id=ORG_B) == 0
+    )
     owner = await repository.restore_from_checkpoint(
         checkpoint.id, organization_id=ORG_A
     )

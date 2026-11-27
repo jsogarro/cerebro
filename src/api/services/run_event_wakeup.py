@@ -24,7 +24,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
 from src.api.websocket.run_stream import RunStreamHub, run_stream_hub
-
 from src.repositories.tenant_scope import get_run_organization_id
 
 logger = get_logger()
