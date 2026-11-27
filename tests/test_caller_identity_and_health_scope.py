@@ -119,6 +119,7 @@ async def test_gdpr_erase_does_not_claim_memory_purged_when_none_attached() -> N
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
     from src.api.routes import users
+    from src.models.db.audit_log import AuditEventType
     from src.models.db.generated_report import GeneratedReport
     from src.models.db.research_project import ResearchProject
     from src.models.db.research_result import ResearchResult
@@ -126,8 +127,6 @@ async def test_gdpr_erase_does_not_claim_memory_purged_when_none_attached() -> N
     from src.models.db.uploaded_document import UploadedDocument, UsageLedger
     from src.models.db.user import User
     from src.models.db.workflow_checkpoint import WorkflowCheckpoint
-
-    from src.models.db.audit_log import AuditEventType
 
     class _Jwt:
         async def revoke_all_user_tokens(self, user_id: str) -> None:
