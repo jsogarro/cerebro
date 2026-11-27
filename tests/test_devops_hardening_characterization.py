@@ -143,6 +143,7 @@ class TestCIWorkflowInvariants:
             "validate-docker",
             "validate-k8s",
             "frontend-ci",
+            "linux-sandbox",
         }
 
     def test_security_job_invokes_bandit(self, ci: dict[str, Any]) -> None:

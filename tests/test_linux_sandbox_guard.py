@@ -19,7 +19,7 @@ GUARD_CONFTEST = (
     "    pytest_sessionfinish, pytest_terminal_summary)\n"
 )
 IMPORTORSKIP = (
-    'import pytest\npytest.importorskip("no_such_module_xyz")\ndef test_a(): ...\n'
+    'import pytest\nMISSING = "no_such_module_xyz"\npytest.importorskip(MISSING)\ndef test_a(): ...\n'
 )
 MODULE_SKIP = textwrap.dedent(
     """
