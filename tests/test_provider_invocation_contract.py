@@ -486,6 +486,91 @@ class TestWorkerUsesTheWrapper:
         assert "max_retries" not in router_cls.call_args.args[0]
 
 
+class TestCancelledRunSpendsOnceAndStaysStopped:
+    """The research fixture: a run cancelled mid-call under one shared budget."""
+
+    async def test_a_cancelled_call_settles_once_and_the_runs_next_call_is_refused(
+        self,
+    ) -> None:
+        journal, ledger = _Journal(), _ledger()
+        ctx = ModelInvocationContext(ledger=ledger, journal=journal)
+        first = _Provider(asyncio.CancelledError())
+        with pytest.raises(asyncio.CancelledError):
+            await _invoke(ctx, first)
+        second = _Provider(_response())
+        with pytest.raises(BudgetExceededError):
+            await _invoke(ctx, second)
+        assert first.calls == 1 and second.calls == 0
+        assert journal.names == ["reserve", "mark", "settle_unknown"]
+        assert ledger.unknown_usage_calls == 1
+
+    async def test_cancelling_during_settlement_still_settles_exactly_once(
+        self,
+    ) -> None:
+        journal, ledger = _Journal(), _ledger()
+        gate = asyncio.Event()
+        original = journal.settle_unknown
+
+        async def slow_settle(call_id: str, **kwargs: Any) -> bool:
+            await gate.wait()
+            return await original(call_id, **kwargs)
+
+        journal.settle_unknown = slow_settle  # type: ignore[method-assign]
+        ctx = ModelInvocationContext(ledger=ledger, journal=journal)
+        task = asyncio.ensure_future(_invoke(ctx, _Provider(asyncio.CancelledError())))
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        task.cancel()
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0)
+        assert journal.names.count("settle_unknown") == 1
+        assert ledger.unknown_usage_calls == 1
+
+    async def test_cancelling_during_an_unbilled_settlement_still_settles_once(
+        self,
+    ) -> None:
+        journal, ledger = _Journal(), _ledger()
+        gate = asyncio.Event()
+        original = journal.settle_known
+
+        async def slow_settle(call_id: str, **kwargs: Any) -> bool:
+            await gate.wait()
+            return await original(call_id, **kwargs)
+
+        journal.settle_known = slow_settle  # type: ignore[method-assign]
+        ctx = ModelInvocationContext(ledger=ledger, journal=journal)
+        task = asyncio.ensure_future(
+            _invoke(ctx, _Provider(UnbilledTransportError("down")))
+        )
+        for _ in range(5):
+            await asyncio.sleep(0)
+        task.cancel()
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0)
+        assert journal.names.count("settle_known") == 1
+
+    async def test_two_workers_of_one_run_share_the_stopped_budget(self) -> None:
+        ledger, journal = _ledger(), _Journal()
+        ctx = ModelInvocationContext(ledger=ledger, journal=journal)
+        cancelled = TestWorkerUsesTheWrapper._route(_response())
+        cancelled.router.route_and_generate.side_effect = asyncio.CancelledError()
+        with pytest.raises(asyncio.CancelledError):
+            await TestWorkerUsesTheWrapper()._generate(
+                TestWorkerUsesTheWrapper._task(ctx), cancelled
+            )
+        later = TestWorkerUsesTheWrapper._route(_response())
+        with pytest.raises(BudgetExceededError):
+            await TestWorkerUsesTheWrapper()._generate(
+                TestWorkerUsesTheWrapper._task(ctx), later
+            )
+        later.router.route_and_generate.assert_not_called()
+        assert journal.names.count("settle_unknown") == 1
+
+
 class _Shape(BaseModel):
     a: int
 

@@ -52,6 +52,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
+import httpx
 from structlog import get_logger
 
 from src.core.pii_redactor import redact_pii
@@ -303,6 +304,57 @@ def trace_provider_call(
                     provider=provider,
                     model=model,
                 )
+
+
+# What a Langfuse/OpenTelemetry span call can raise when the backend or SDK
+# state is bad; a model call must not fail for these. Anything else is a bug.
+_ATTEMPT_TELEMETRY_ERRORS = (
+    httpx.HTTPError,
+    OSError,
+    ValueError,
+    AttributeError,
+    RuntimeError,
+)
+
+
+def start_model_attempt(
+    trace_parent: str | None, metadata: dict[str, Any]
+) -> LangfuseGeneration | None:
+    """Open one ``generation`` observation for a real provider attempt.
+
+    ``trace_parent`` is a Langfuse trace id. Returns None when there is no
+    parent, tracing is off, or the backend or SDK state fails.
+    """
+    if trace_parent is None:
+        return None
+    try:
+        client = get_langfuse_client()
+        if client is None:
+            return None
+        return client.start_observation(  # type: ignore[no-any-return]
+            trace_context={"trace_id": trace_parent},
+            name="model_call",
+            as_type="generation",
+            metadata=metadata,
+        )
+    except _ATTEMPT_TELEMETRY_ERRORS as e:
+        logger.warning("langfuse_attempt_start_failed", error_type=type(e).__name__)
+        return None
+
+
+def end_model_attempt(observation: LangfuseGeneration | None, **update: Any) -> None:
+    """Record an attempt's metadata/usage and end its observation.
+
+    A backend or SDK-state failure is logged, not raised.
+    """
+    if observation is None:
+        return
+    try:
+        if update:
+            observation.update(**update)
+        observation.end()
+    except _ATTEMPT_TELEMETRY_ERRORS as e:
+        logger.warning("langfuse_attempt_end_failed", error_type=type(e).__name__)
 
 
 def record_provider_metrics(

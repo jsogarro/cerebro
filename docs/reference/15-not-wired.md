@@ -18,6 +18,7 @@ This page lists code and settings present in the repository that no production p
 | Settings with no effect | Not wired | none | `src/core/config.py` (`Settings`) |
 | Unbacked web pages | Not wired | none | `cerebro/web/src/api/` |
 | Row-level security for execution-service sessions | Not wired | none | `src/api/services/direct_execution_service.py` |
+| Model-call journal owner | Not wired | none | `src/repositories/model_call_reservation_repository.py`, `src/services/model_invocation.py` |
 
 ## Multi-tier memory
 
@@ -107,6 +108,12 @@ Tests that exercise them live in `tests/unit/core/claims/`. `src/core/acquisitio
 
 The web workbench pages for runs, run detail and memory, and the run form on the workflows page, call API routes that are not mounted (`GET /api/v1/workflows` is) and its dashboard, QA, costs and benchmarks pages show fixed values. The page-by-page table is in [CLI and web clients](13-cli-and-web-clients.md).
 
+## Model-call journal owner
+
+> **Not wired.** `ModelCallReservationRepository` has no `JournalOwner` implementation and no production caller, so no `ModelInvocationContext` built in production carries a `journal`, `guard`, `fencing_token` or `trace_parent`. Production research calls are governed by the run's ledger and the plan deadline only (`ExecutionPlanTopologyExecutor` supplies both to every worker), so a crash after dispatch leaves no durable record of the call and `model_call_reservations` stays empty. `DirectExecutionService` does not put a `ModelInvocationContext` in the plan task's context, and it does not reconcile interrupted runs against the journal.
+
+With no `trace_parent` supplied, `invoke_model` opens no provider span even with `LANGFUSE_ENABLED=true`. Contract: [model invocation and journal contract](16-model-invocation-contract.md).
+
 ## Source map
 
 - `src/ai_brain/memory/`: the four memory managers and `MultiTierMemorySystem`
@@ -119,6 +126,7 @@ The web workbench pages for runs, run detail and memory, and the run form on the
 - `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`, `src/core/contracts/citation.py`: citation modules (the rest of `src/core/claims/` is the live claim-support path)
 - `tests/architecture/test_module_reachability.py`: import-graph test that lists the modules no entry point reaches
 - `src/api/services/direct_execution_service.py`: the dead execution attributes
+- `src/repositories/model_call_reservation_repository.py`: the journal with no owner
 
 ## Row-level security for execution-service sessions
 

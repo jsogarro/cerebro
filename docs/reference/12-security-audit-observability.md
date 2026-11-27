@@ -23,7 +23,9 @@ The API records an audit trail of requests, sets browser security headers on eve
 | Langfuse tracing | Off by default | `LANGFUSE_ENABLED` | `src/core/tracing.py` |
 | Context-compaction telemetry | Off by default | `ENABLE_CONTEXT_COMPACTION_TELEMETRY` | `src/core/telemetry.py` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Not wired | none | `src/core/config.py` (`Settings`) |
-| Tracing verification script | Active | `python scripts/verify_tracing.py` | `scripts/verify_tracing.py` |
+| Tracing verification script | Active | `invoke_model` also opens a `model_call` generation per real provider attempt under a caller-supplied trace id (`ModelInvocationContext.trace_parent`) through `start_model_attempt` and `end_model_attempt`. It records metadata and usage, never prompt, response or error text, and a failing backend changes no result or cost. No production owner supplies a trace id yet ([not wired](15-not-wired.md#model-call-journal-owner)).
+
+`python scripts/verify_tracing.py` | `scripts/verify_tracing.py` |
 | Sanitizer probe script | Active | `python scripts/red_team_security_probe.py` | `scripts/red_team_security_probe.py` |
 
 ## Audit trail

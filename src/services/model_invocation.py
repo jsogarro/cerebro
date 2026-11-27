@@ -33,6 +33,7 @@ from src.core.budget import (
     BudgetLedger,
     ReportedUsage,
 )
+from src.core.tracing import end_model_attempt, start_model_attempt
 
 logger = get_logger()
 
@@ -168,6 +169,13 @@ class ModelInvocationContext:
     attempt_ref: str | None = None
     max_attempts: int = 1
     trace_parent: str | None = None
+
+    @classmethod
+    def for_ledger(cls, ledger: BudgetLedger) -> "ModelInvocationContext":
+        """A run's ledger alone, with the configured attempt cap."""
+        from src.core.config import settings
+
+        return cls(ledger=ledger, max_attempts=settings.MODEL_ROUTER_MAX_RETRIES)
 
 
 def price_digest(*parts: object) -> str:
@@ -305,18 +313,58 @@ async def _attempt(
             ledger.release(reservation)
         raise
 
-    response: Any = None
+    span = start_model_attempt(
+        ctx.trace_parent,
+        {"call_id": call_id, "attempt": n, "estimated_tokens": estimated_tokens},
+    )
     try:
         response = await call(remaining)
-    except UnbilledTransportError:
-        await _settle(ctx, call_id, reservation, ReportedUsage(0, Decimal(0)), marked)
+    except UnbilledTransportError as exc:
+        end_model_attempt(span, metadata={"outcome": type(exc).__name__})
+        await asyncio.shield(
+            _settle(ctx, call_id, reservation, ReportedUsage(0, Decimal(0)), marked)
+        )
         raise
-    except BaseException:
+    except BaseException as exc:
+        end_model_attempt(span, metadata={"outcome": type(exc).__name__})
         await asyncio.shield(_settle(ctx, call_id, reservation, None, marked))
         raise
-    result = normalize_response(response, attempts=n)
-    await asyncio.shield(_settle(ctx, call_id, reservation, _usage(result), marked))
+    try:
+        result = normalize_response(response, attempts=n)
+        usage = _usage(result)
+    except Exception as exc:
+        # The provider answered, so the call may have been billed: a response
+        # we cannot read is unknown spend, never free.
+        end_model_attempt(span, metadata={"outcome": type(exc).__name__})
+        await asyncio.shield(_settle(ctx, call_id, reservation, None, marked))
+        raise
+    end_model_attempt(span, **_span_update(result))
+    await asyncio.shield(_settle(ctx, call_id, reservation, usage, marked))
     return result
+
+
+def _span_update(result: ModelCallResult) -> dict[str, Any]:
+    """Metadata and usage only: never content, request text or provider error prose."""
+    update: dict[str, Any] = {
+        "model": result.model,
+        "metadata": {
+            "outcome": result.status.value,
+            "provider": result.provider,
+            "finish_reason": result.finish_reason,
+            "usage_certainty": result.usage_certainty.value,
+            "request_id": result.request_id,
+        },
+    }
+    if result.usage_certainty is UsageCertainty.REPORTED:
+        counts = {
+            "input": result.prompt_tokens,
+            "output": result.completion_tokens,
+            "total": result.total_tokens,
+        }
+        update["usage_details"] = {k: v for k, v in counts.items() if v is not None}
+        if result.cost_usd is not None:
+            update["cost_details"] = {"total": float(result.cost_usd)}
+    return update
 
 
 def _check_live(ctx: ModelInvocationContext) -> float | None:
