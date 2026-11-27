@@ -52,8 +52,36 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
         _skipped_sandbox_tests.append(report.nodeid)
 
 
+# A module skipped at collection (importorskip, allow_module_level) never runs,
+# so its tests carry no marker for the check above. The required Linux job
+# names its modules here; any listed module that is skipped or never collected
+# fails the session. Unset, the guard is inert.
+_REQUIRED_ENV = "CEREBRO_REQUIRED_LINUX_MODULES"
+_collected_modules: set[str] = set()
+_skipped_modules: list[str] = []
+
+
+def _required_modules() -> set[str]:
+    raw = os.environ.get(_REQUIRED_ENV, "")
+    return {m.strip() for m in raw.split(",") if m.strip()}
+
+
+def pytest_collectreport(report: pytest.CollectReport) -> None:
+    if report.nodeid not in _required_modules():
+        return
+    if report.skipped:
+        _skipped_modules.append(report.nodeid)
+    else:
+        _collected_modules.add(report.nodeid)
+
+
+def _missing_modules() -> list[str]:
+    return sorted(_required_modules() - _collected_modules - set(_skipped_modules))
+
+
 def _guard_tripped() -> bool:
-    return bool(os.environ.get("CI") and _skipped_sandbox_tests)
+    marked = bool(os.environ.get("CI") and _skipped_sandbox_tests)
+    return marked or bool(_skipped_modules) or bool(_missing_modules())
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:
@@ -64,9 +92,15 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
 
 def pytest_terminal_summary(terminalreporter: Any) -> None:
     if _guard_tripped():
-        terminalreporter.section(f"{_SANDBOX_MARKER} tests skipped in CI", red=True)
+        terminalreporter.section(
+            "required Linux sandbox controls did not run", red=True
+        )
         for nodeid in _skipped_sandbox_tests:
-            terminalreporter.line(nodeid)
+            terminalreporter.line(f"skipped test: {nodeid}")
+        for nodeid in _skipped_modules:
+            terminalreporter.line(f"skipped module: {nodeid}")
+        for nodeid in _missing_modules():
+            terminalreporter.line(f"not collected: {nodeid}")
 
 
 @pytest.fixture(autouse=True)

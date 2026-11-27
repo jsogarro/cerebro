@@ -106,7 +106,14 @@ jobs:
           REDIS_URL: redis://localhost:6379
           TEMPORAL_HOST: localhost:7233
         run: |
-          pytest --cov=src --cov-report=xml --cov-report=html --cov-report=term --ignore=tests/e2e
+          pytest --cov=src --cov-report=xml --cov-report=html --cov-report=term --ignore=tests/e2e \
+            --junit-xml=test-results/junit-${{ matrix.python-version }}.xml
+
+      - name: Test summary
+        if: always()
+        run: |
+          python scripts/ci_summary.py "test-results/junit-${{ matrix.python-version }}.xml" coverage.xml >> "$GITHUB_STEP_SUMMARY" \
+            || echo "Test summary unavailable: JUnit or coverage artifact missing" >> "$GITHUB_STEP_SUMMARY"
       
       - name: Upload coverage reports
         uses: codecov/codecov-action@v7
@@ -117,16 +124,68 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
       
-      - name: Upload coverage HTML
+      - name: Upload coverage HTML and JUnit
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: coverage-report-${{ matrix.python-version }}
-          path: htmlcov/
+          path: |
+            htmlcov/
+            test-results/
       
       - name: Check coverage threshold
         run: |
           coverage report --fail-under=25
 
+
+  linux-sandbox:
+    name: Linux Sandbox Controls
+    runs-on: ubuntu-latest
+    env:
+      # A listed module that is skipped or never collected fails the run
+      # (tests/conftest.py, #278). Unknown entries fail closed.
+      CEREBRO_REQUIRED_LINUX_MODULES: tests/unit/core/test_process_hardening.py,tests/test_extraction_sandbox.py
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system -e ".[dev]"
+
+      - name: Run required sandbox modules
+        run: |
+          pytest --no-cov -o addopts='' -ra --strict-markers \
+            --junit-xml=test-results/linux-sandbox.xml \
+            tests/unit/core/test_process_hardening.py \
+            tests/test_extraction_sandbox.py \
+            tests/test_linux_sandbox_guard.py
+
+      - name: Test summary
+        if: always()
+        run: |
+          for f in test-results/linux-sandbox.xml; do
+            python scripts/ci_summary.py "$f" >> "$GITHUB_STEP_SUMMARY" \
+              || echo "Test summary unavailable for $f" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-sandbox-junit
+          path: test-results/
 
   test-cli:
     name: CLI Integration Tests
@@ -295,16 +354,20 @@ jobs:
 
   all-checks:
     name: All CI Checks
-    needs: [lint, test, test-cli, security, validate-docker, validate-k8s, frontend-ci]
+    needs: [lint, test, linux-sandbox, test-cli, security, validate-docker, validate-k8s, frontend-ci]
     runs-on: ubuntu-latest
     if: always()
-    
+
     steps:
       - name: Check all job statuses
+        env:
+          NEEDS: ${{ toJSON(needs) }}
         run: |
-          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
-            echo "One or more CI checks failed"
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          # cancelled and skipped are not success: a skipped required job
+          # means an upstream failure or a masked check.
+          if echo "$NEEDS" | jq -e 'any(.[]; .result != "success")' >/dev/null; then
+            echo "One or more required CI jobs did not succeed"
             exit 1
-          else
-            echo "All CI checks passed"
           fi
+          echo "All required CI jobs succeeded"
