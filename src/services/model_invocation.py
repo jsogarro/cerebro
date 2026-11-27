@@ -62,7 +62,15 @@ class DeadlineExceededError(RuntimeError):
 
 _COMPLETE = {"completed", "complete", "stop", "end_turn", "STOP"}
 _TRUNCATED = {"length", "max_tokens", "MAX_TOKENS"}
-_FILTERED = {"content_filter", "filtered", "SAFETY", "RECITATION", "BLOCKLIST"}
+_FILTERED = {
+    "content_filter",
+    "filtered",
+    "SAFETY",
+    "RECITATION",
+    "BLOCKLIST",
+    "PROHIBITED_CONTENT",
+    "SPII",
+}
 
 
 @dataclass(frozen=True)

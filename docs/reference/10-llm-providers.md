@@ -30,7 +30,8 @@ Language-model calls go through two layers. `GeminiService` is the default clien
 | rate limit | 10 requests per 60 seconds |
 | concurrent requests | 2 |
 | attempts per call | 1; a retry is the caller's decision |
-| circuit breaker | opens after 5 consecutive failures, 30 second cooldown, one trial call |
+| SDK retries | 1 (`max_retries=1`; the SDK default of 6 would bill each resend under one reservation) |
+| circuit breaker | opens after 5 consecutive provider-side failures (timeouts, connection errors, HTTP 5xx, 408, 429), 30 second cooldown, one trial call; request errors such as an oversized prompt do not count |
 
 The `GEMINI_*` environment variables are read by `GeminiConfig.from_env`, which `GeminiService` uses unless a complete `config` is given; an `api_key` argument replaces only `GEMINI_API_KEY`. See [configuration](02-configuration.md).
 

@@ -290,16 +290,17 @@ class TestModelCallBoundary:
         assert caught.value.dimension is BudgetDimension.COST
         route.router.route_and_generate.assert_not_called()
 
-    async def test_unregistered_provider_is_refused_as_unpriced(self) -> None:
+    async def test_unregistered_provider_is_unavailable_not_unpriced(self) -> None:
+        from src.agents.llm_worker_base import PlanProviderUnavailableError
+
         route = _route([_response(10)])
         route.router.registry.providers = {}
         request = SimpleNamespace(prompt="p", max_tokens=1000)
         decision = {"primary_model": {"provider": "gemini", "name": "m"}}
-        with pytest.raises(BudgetExceededError) as caught:
+        with pytest.raises(PlanProviderUnavailableError):
             await _Worker()._metered_route_and_generate(
                 route, request, _task(BudgetLedger(_budget())), decision
             )
-        assert caught.value.dimension is BudgetDimension.COST
         route.router.route_and_generate.assert_not_called()
 
     async def test_explicit_zero_price_provider_is_admitted(self) -> None:
@@ -362,21 +363,27 @@ class TestModelCallBoundary:
     async def test_budget_error_is_not_converted_to_provider_unavailable(
         self,
     ) -> None:
+        from src.agents.llm_worker_base import _GenerationRoute
+
         ledger = BudgetLedger(_budget(tokens=10))
         worker = _Worker()
         task = AgentTask(
             id="t",
             agent_type="test_budget",
-            input_data={
-                "query": "q",
-                "provider_model_policy": {
-                    "primary": {"provider": "gemini", "model": "gemini-2.5-pro"}
-                },
-            },
+            input_data={"query": "q"},
             context={BUDGET_LEDGER_CONTEXT_KEY: ledger},
         )
-        with pytest.raises(BudgetExceededError):
+        priced = _GenerationRoute(
+            router=_route([_response(10)]).router,
+            routing_decision=_FIXTURE_DECISION,
+            fail_closed=True,
+        )
+        with (
+            patch.object(worker, "_select_generation_route", return_value=priced),
+            pytest.raises(BudgetExceededError) as caught,
+        ):
             await worker._generate_with_routing("prompt", task)
+        assert caught.value.dimension is BudgetDimension.TOKENS
 
 
 class TestToolBoundary:

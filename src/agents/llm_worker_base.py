@@ -461,7 +461,9 @@ class LLMWorkerAgentBase(BaseAgent):
         """
         if task is None:
             return None
-        supplied = task.context.get(MODEL_INVOCATION_CONTEXT_KEY)
+        supplied: ModelInvocationContext | None = task.context.get(
+            MODEL_INVOCATION_CONTEXT_KEY
+        )
         if supplied is not None:
             return supplied
         ledger = task.context.get(BUDGET_LEDGER_CONTEXT_KEY)
@@ -531,19 +533,22 @@ class LLMWorkerAgentBase(BaseAgent):
         routing_decision: dict[str, Any],
         prompt: int,
         completion: int,
-    ) -> CallPrice | None:
-        """Price the call at the model's rate, or ``None`` when the route is unpriced.
+    ) -> CallPrice:
+        """Price the call at the model's rate.
 
-        An unpriced route is refused by the wrapper rather than assumed free; an
+        A provider missing from the registry is unavailable. One that cannot
+        price the call is refused as unknown cost rather than assumed free; an
         explicitly zero-priced provider (a local or fixture model) is a price.
-        Any other failure to price is refused here as unknown cost.
         """
         primary = routing_decision.get("primary_model") or {}
         try:
             provider = route.router.registry.providers[primary.get("provider")]
-        except (KeyError, AttributeError, TypeError):
-            self.log_warning("budget_call_unpriced", provider=primary.get("provider"))
-            return None
+        except (KeyError, AttributeError, TypeError) as exc:
+            # A provider that never registered (no key, failed init) is an
+            # unavailable provider, not an unpriced one.
+            raise PlanProviderUnavailableError(
+                f"provider {primary.get('provider')!r} is not available"
+            ) from exc
         try:
             cost = Decimal(
                 str(provider.estimate_cost(prompt, completion, primary.get("name")))
@@ -757,6 +762,10 @@ class LLMWorkerAgentBase(BaseAgent):
                 raise ValueError("No language model configured")
             return await gemini.generate_structured_content(prompt, schema)
 
+        # A governed call is one provider request: a parse failure or a
+        # truncation fails typed instead of buying a second generation.
+        governed = route.fail_closed or self._invocation_context(task) is not None
+
         # Route through the resolved provider (JSON mode)
         try:
             from src.ai_brain.providers import ModelRequest
@@ -790,7 +799,6 @@ class LLMWorkerAgentBase(BaseAgent):
                 metadata=metadata,
             )
 
-            # Route and generate with truncation-aware retry
             response = await self._metered_route_and_generate(
                 route, request, task, route.routing_decision
             )
@@ -831,8 +839,13 @@ class LLMWorkerAgentBase(BaseAgent):
                         f"OpenRouter JSON parse/validation failed: {parse_err}"
                     )
 
+                if needs_retry and governed:
+                    self.log_warning(
+                        f"structured generation not re-asked on a governed route: "
+                        f"{retry_reason}"
+                    )
                 # Retry ONCE with doubled max_tokens (capped at 8000) if needed
-                if needs_retry and max_tokens < 8000:
+                elif needs_retry and max_tokens < 8000:
                     retry_max_tokens = min(max_tokens * 2, 8000)
                     self.log_info(
                         "structured_generation_retry",
@@ -924,7 +937,11 @@ class LLMWorkerAgentBase(BaseAgent):
                     "falling back to GeminiService"
                 )
 
-        except (PlanProviderUnavailableError, BudgetExceededError):
+        except (
+            PlanProviderUnavailableError,
+            BudgetExceededError,
+            DeadlineExceededError,
+        ):
             raise
         except Exception as exc:
             if route.fail_closed:
@@ -936,7 +953,7 @@ class LLMWorkerAgentBase(BaseAgent):
                 "falling back to GeminiService"
             )
 
-        if route.fail_closed:
+        if route.fail_closed or governed:
             raise PlanProviderUnavailableError(
                 "plan-backed provider "
                 f"{route.routing_decision['primary_model']['provider']!r} failed "

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from src.core.budget import BudgetDimension, BudgetExceededError, BudgetLedger
 from src.core.contracts import ExecutionBudget
@@ -328,6 +329,9 @@ class TestNormalization:
             ({"finish_reason": "MAX_TOKENS"}, CallStatus.TRUNCATED),
             ({"finish_reason": "content_filter"}, CallStatus.FILTERED),
             ({"finish_reason": "SAFETY"}, CallStatus.FILTERED),
+            ({"finish_reason": "PROHIBITED_CONTENT"}, CallStatus.FILTERED),
+            ({"finish_reason": "SPII"}, CallStatus.FILTERED),
+            ({"finish_reason": "BLOCKLIST"}, CallStatus.FILTERED),
             ({"content": "   "}, CallStatus.EMPTY),
             ({"content": None}, CallStatus.EMPTY),
             ({"success": False}, CallStatus.FAILED),
@@ -466,3 +470,80 @@ class TestWorkerUsesTheWrapper:
         ):
             _Worker()._build_legacy_openrouter_route()
         assert "max_retries" not in router_cls.call_args.args[0]
+
+
+class _Shape(BaseModel):
+    a: int
+
+
+def _structured_route(*responses: Any, fail_closed: bool = True) -> Any:
+    from src.agents.llm_worker_base import _GenerationRoute
+    from tests.test_budget_enforcement import _FIXTURE_DECISION, _route
+
+    route = _route(list(responses))
+    return _GenerationRoute(
+        router=route.router, routing_decision=_FIXTURE_DECISION, fail_closed=fail_closed
+    )
+
+
+class TestGovernedRoutesDoNotQuietlyReask:
+    async def _structured(self, task: Any, route: Any) -> Any:
+        from unittest.mock import patch
+
+        from tests.test_budget_enforcement import _Worker
+
+        with patch.object(_Worker, "_select_generation_route", return_value=route):
+            return await _Worker()._generate_structured_with_routing("p", _Shape, task)
+
+    async def test_a_parse_failure_is_one_provider_call_then_a_typed_failure(
+        self,
+    ) -> None:
+        from src.agents.llm_worker_base import PlanProviderUnavailableError
+
+        route = _structured_route(_response(content="not json"), _response())
+        task = TestWorkerUsesTheWrapper._task(None, _ledger())
+        with pytest.raises(PlanProviderUnavailableError):
+            await self._structured(task, route)
+        assert route.router.route_and_generate.await_count == 1
+
+    async def test_a_truncated_result_is_a_failure_not_a_second_call(self) -> None:
+        from src.agents.llm_worker_base import PlanProviderUnavailableError
+
+        truncated = _response(content='{"a": 1}', finish_reason="length")
+        route = _structured_route(truncated, _response(content='{"a": 2}'))
+        task = TestWorkerUsesTheWrapper._task(None, _ledger())
+        with pytest.raises(PlanProviderUnavailableError):
+            await self._structured(task, route)
+        assert route.router.route_and_generate.await_count == 1
+
+    async def test_an_ungoverned_route_still_reasks_with_more_tokens(self) -> None:
+        route = _structured_route(
+            _response(content="not json"),
+            _response(content='{"a": 2}'),
+            fail_closed=False,
+        )
+        task = TestWorkerUsesTheWrapper._task(None)
+        result = await self._structured(task, route)
+        assert result.a == 2
+        assert route.router.route_and_generate.await_count == 2
+
+    async def test_a_missed_deadline_is_not_reported_as_provider_unavailable(
+        self,
+    ) -> None:
+        route = _structured_route(_response(content='{"a": 1}'))
+        ctx = ModelInvocationContext(ledger=_ledger(), remaining_seconds=lambda: 0.0)
+        with pytest.raises(DeadlineExceededError):
+            await self._structured(TestWorkerUsesTheWrapper._task(ctx), route)
+        route.router.route_and_generate.assert_not_called()
+
+    async def test_a_plan_provider_missing_from_the_registry_is_unavailable_not_unpriced(
+        self,
+    ) -> None:
+        from src.agents.llm_worker_base import PlanProviderUnavailableError
+
+        route = TestWorkerUsesTheWrapper._route(_response())
+        route.router.registry.providers = {}
+        task = TestWorkerUsesTheWrapper._task(None, _ledger())
+        with pytest.raises(PlanProviderUnavailableError, match="not available"):
+            await TestWorkerUsesTheWrapper()._generate(task, route)
+        route.router.route_and_generate.assert_not_called()

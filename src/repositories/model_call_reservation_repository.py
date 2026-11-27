@@ -18,9 +18,9 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Protocol
+from typing import Any, Protocol, cast
 
-from sqlalchemy import func, select, update
+from sqlalchemy import ColumnElement, CursorResult, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,10 @@ from src.repositories.tenant_scope import normalize_organization_id
 _OPEN = "open"
 _RESERVED = "reserved"
 _MAY_HAVE_SENT = "may_have_sent"
+
+
+def _rowcount(result: object) -> int:
+    return cast(CursorResult[Any], result).rowcount
 
 
 class OwnerLostError(RuntimeError):
@@ -116,7 +120,7 @@ class ModelCallReservationRepository:
         async with self._factory() as own, own.begin():
             yield own
 
-    def _scope(self) -> tuple[object, ...]:
+    def _scope(self) -> tuple[ColumnElement[bool], ...]:
         return (
             ModelCallReservation.organization_id == self._org,
             ModelCallReservation.owner_kind == self._owner.kind,
@@ -155,8 +159,8 @@ class ModelCallReservationRepository:
         unknown = by_state.get("settled_unknown", zero)
         open_ = by_state.get(_OPEN, zero)
         return JournalTotals(
-            known_tokens=int(known[2]),
-            known_cost_usd=Decimal(known[3]),
+            known_tokens=int(known[2] or 0),
+            known_cost_usd=Decimal(known[3] or 0),
             uncertain_tokens=int(unknown[0]),
             uncertain_cost_usd=Decimal(unknown[1]),
             open_tokens=int(open_[0]),
@@ -247,7 +251,7 @@ class ModelCallReservationRepository:
                 )
                 .values(dispatch_state=_MAY_HAVE_SENT)
             )
-            if moved.rowcount != 1:
+            if _rowcount(moved) != 1:
                 raise OwnerLostError(f"call {call_id} is not open for dispatch")
 
     async def _settle(
@@ -260,7 +264,7 @@ class ModelCallReservationRepository:
         actual: tuple[int, Decimal] | None = None,
         session: AsyncSession | None,
     ) -> bool:
-        conditions = [
+        conditions: list[ColumnElement[bool]] = [
             *self._scope(),
             ModelCallReservation.call_id == call_id,
             ModelCallReservation.settlement_state == _OPEN,
@@ -278,7 +282,7 @@ class ModelCallReservationRepository:
             result = await tx.execute(
                 update(ModelCallReservation).where(*conditions).values(**values)
             )
-            return result.rowcount == 1
+            return _rowcount(result) == 1
 
     async def settle_known(
         self,
@@ -354,7 +358,7 @@ class ModelCallReservationRepository:
                     )
                     .values(settlement_state=state, settled_at=func.now())
                 )
-                counts.append(result.rowcount)
+                counts.append(_rowcount(result))
             return Reconciliation(released_unsent=counts[0], settled_unknown=counts[1])
 
     async def entry(self, call_id: str) -> JournalEntry | None:

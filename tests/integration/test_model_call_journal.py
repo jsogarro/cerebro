@@ -431,6 +431,22 @@ async def test_another_tenant_cannot_see_settle_or_reconcile_a_call(
     assert (await repo_a.totals()).open_tokens == 400
 
 
+async def test_reconciling_an_owner_that_is_not_the_organizations_is_refused(
+    engine: AsyncEngine, factory: Callable[[], AsyncSession]
+) -> None:
+    """Reconcile takes the owner lock, so the owner must exist in this tenant."""
+    owner = await _owner(engine, org=ORG_A)
+    repo = _repo(factory, owner)
+    await _reserve(repo, "c1")
+    await repo.mark_may_have_sent("c1", fencing_token=7)
+
+    with pytest.raises(OwnerLostError):
+        await _repo(factory, owner, ORG_B).reconcile_owner()
+
+    entry = await repo.entry("c1")
+    assert entry is not None and entry.settlement_state == "open"
+
+
 async def test_every_row_carries_its_organization(
     engine: AsyncEngine, factory: Callable[[], AsyncSession]
 ) -> None:
