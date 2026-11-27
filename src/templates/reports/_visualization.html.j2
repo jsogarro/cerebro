@@ -1,0 +1,18 @@
+{# Chart image (a data: URI built from validated base64) or, when no image could
+   be produced, the plotted values as a table. All values are autoescaped. #}
+{% macro viz_body(viz, image) %}
+{% if image %}
+<img src="{{ image }}" alt="{{ viz.title }}">
+{% else %}
+<table class="visualization-data">
+    <caption>{{ viz.title }}</caption>
+    {% set xs = viz.data.get("labels") or viz.data.get("x") or viz.data.get("years") or [] %}
+    {% set ys = viz.data.get("values") or viz.data.get("y") or viz.data.get("counts") or [] %}
+    <tbody>
+    {% for x in xs %}
+        <tr><td>{{ x }}</td><td>{{ ys[loop.index0] if loop.index0 < ys | length else "" }}</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endmacro %}

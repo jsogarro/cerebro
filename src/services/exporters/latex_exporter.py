@@ -238,10 +238,12 @@ class LaTeXExporter:
                 )
                 title_parts.append("\\hline")
 
-            if report.metadata.quality_score > 0:
-                quality_pct = report.metadata.quality_score * 100
-                title_parts.append(f"Quality Score & {quality_pct:.1f}\\% \\\\")
-                title_parts.append("\\hline")
+            quality = report.metadata.quality_score
+            quality_text = (
+                "Not evaluated" if quality is None else f"{quality * 100:.1f}\\%"
+            )
+            title_parts.append(f"Quality Score & {quality_text} \\\\")
+            title_parts.append("\\hline")
 
             title_parts.extend(
                 [

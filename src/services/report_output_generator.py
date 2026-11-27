@@ -5,11 +5,12 @@ This module owns conversion of a structured report into concrete output formats.
 
 import asyncio
 import json
+import re
 from html import escape as esc
 
 from structlog import get_logger
 
-from src.models.report import Report, ReportFormat, ReportOutput
+from src.models.report import Report, ReportFormat, ReportOutput, format_score
 from src.services.exporters import (
     DOCXExporter,
     LaTeXExporter,
@@ -23,8 +24,14 @@ from src.services.report_config import (
     ReportTemplateConfig,
 )
 from src.services.template_renderer import TemplateRenderer, TemplateRenderingError
+from src.services.visualization_generator import (
+    VisualizationGenerationError,
+    VisualizationGenerator,
+)
 
 logger = get_logger()
+
+_BASE64 = re.compile(r"[A-Za-z0-9+/]+={0,2}")
 
 
 class ReportOutputGenerator:
@@ -77,7 +84,9 @@ class ReportOutputGenerator:
     async def generate_html(self, report: Report) -> ReportOutput:
         """Generate HTML report output."""
         try:
-            html_content = self.template_renderer.render_report(report)
+            html_content = self.template_renderer.render_report(
+                report, visualization_images=self._chart_images(report)
+            )
         except TemplateRenderingError as e:
             logger.warning(f"Template rendering unavailable, using basic HTML: {e}")
             html_content = self.generate_basic_html(report)
@@ -91,11 +100,35 @@ class ReportOutputGenerator:
             encoding="utf-8",
         )
 
+    def _chart_images(self, report: Report) -> dict[str, str]:
+        """Render each chart to a PNG data URI; a chart that cannot render is absent.
+
+        A raster image carries no markup, and only strict base64 is embedded, so
+        chart content cannot reach the page as HTML. Missing renderer
+        dependencies leave the template to show the plotted values as a table.
+        """
+        if not report.visualizations:
+            return {}
+        try:
+            rendered = VisualizationGenerator(
+                self.settings
+            ).generate_report_visualizations(report, format="png")
+        except VisualizationGenerationError as e:
+            logger.warning(f"Charts not rendered, showing data tables: {e}")
+            return {}
+        return {
+            viz_id: f"data:image/png;base64,{chart['data']}"
+            for viz_id, chart in rendered.items()
+            if chart.get("format") == "png" and _BASE64.fullmatch(chart["data"])
+        }
+
     async def generate_markdown(self, report: Report) -> ReportOutput:
         """Generate Markdown report output."""
         markdown = f"# {report.title}\n\n"
         markdown += f"**Generated:** {report.metadata.generated_at}\n"
-        markdown += f"**Quality Score:** {report.metadata.quality_score:.2%}\n\n"
+        markdown += (
+            f"**Quality Score:** {format_score(report.metadata.quality_score)}\n\n"
+        )
 
         if report.executive_summary:
             markdown += report.executive_summary + "\n\n"
@@ -176,7 +209,7 @@ class ReportOutputGenerator:
 
     <div class="metadata">
         <strong>Generated:</strong> {esc(str(report.metadata.generated_at))}<br>
-        <strong>Quality Score:</strong> {report.metadata.quality_score:.2%}
+        <strong>Quality Score:</strong> {format_score(report.metadata.quality_score)}
     </div>
 """
 

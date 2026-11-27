@@ -1,4 +1,5 @@
 {% extends "base.html.j2" %}
+{% from "_visualization.html.j2" import viz_body %}
 
 {% block title %}{{ report.title }} - Academic Research Paper{% endblock %}
 
@@ -292,7 +293,7 @@
         </div>
         <div>
             <strong>Quality Assessment:</strong><br>
-            {{ "%.1f" | format(report.metadata.quality_score * 100) }}% ({{ "High" if report.metadata.quality_score > 0.8 else "Moderate" if report.metadata.quality_score > 0.6 else "Acceptable" }} confidence)
+            {{ report.metadata.quality_score | format_score }}{% if report.metadata.quality_score is not none %} ({{ "High" if report.metadata.quality_score > 0.8 else "Moderate" if report.metadata.quality_score > 0.6 else "Acceptable" }} confidence){% endif %}
         </div>
     </div>
 </div>
@@ -429,11 +430,7 @@
     <h2>{{ section_counter.value }}. Figures and Tables</h2>
     {% for viz in report.visualizations %}
     <div class="figure">
-        <div style="border: 1px solid #ccc; padding: 2rem; background: #f9f9f9; text-align: center;">
-            <p><strong>{{ viz.title }}</strong></p>
-            <p style="color: #666; font-style: italic;">{{ viz.type.value.replace('_', ' ').title() }}</p>
-            <p style="font-size: 10pt; color: #888;">[Figure {{ loop.index }} would be rendered here]</p>
-        </div>
+        {{ viz_body(viz, visualization_images.get(viz.id)) }}
         <div class="figure-caption">
             <strong>Figure {{ loop.index }}.</strong> {{ viz.title }}. 
             {% if viz.caption %}{{ viz.caption }}{% endif %}

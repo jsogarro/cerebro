@@ -202,6 +202,11 @@ class Citation(BaseModel):
         return citation + "."
 
 
+def format_score(score: float | None) -> str:
+    """Render a 0-1 score as a percentage; None is shown as not evaluated."""
+    return "Not evaluated" if score is None else f"{score:.2%}"
+
+
 class ReportMetadata(BaseModel):
     """Metadata for a research report."""
 
@@ -209,11 +214,17 @@ class ReportMetadata(BaseModel):
     workflow_id: str | None = Field(None, description="Associated workflow ID")
     project_id: UUID | None = Field(None, description="Associated project ID")
     user_id: UUID | None = Field(None, description="Report creator ID")
-    quality_score: float = Field(
-        0.0, ge=0.0, le=1.0, description="Quality assessment score"
+    quality_score: float | None = Field(
+        None, ge=0.0, le=1.0, description="Quality score; None when not evaluated"
     )
-    confidence_score: float = Field(
-        0.0, ge=0.0, le=1.0, description="Overall confidence"
+    confidence_score: float | None = Field(
+        None, ge=0.0, le=1.0, description="Confidence; None when not evaluated"
+    )
+    source_kind: str | None = Field(
+        None, description="Where the report content came from (project or user)"
+    )
+    evaluation_availability: str | None = Field(
+        None, description="Whether claim/quality evaluation exists for the content"
     )
     total_sources: int = Field(0, ge=0, description="Number of sources analyzed")
     total_citations: int = Field(0, ge=0, description="Number of citations")
@@ -225,9 +236,9 @@ class ReportMetadata(BaseModel):
 
     @field_validator("quality_score", "confidence_score")
     @classmethod
-    def validate_scores(cls, v: float) -> float:
-        """Ensure scores are between 0 and 1."""
-        return max(0.0, min(1.0, v))
+    def validate_scores(cls, v: float | None) -> float | None:
+        """Ensure scores are between 0 and 1; None stays unknown."""
+        return None if v is None else max(0.0, min(1.0, v))
 
 
 class ReportConfiguration(BaseModel):
@@ -321,8 +332,10 @@ class Report(BaseModel):
             workflow_id=None,
             project_id=None,
             user_id=None,
-            quality_score=0.0,
-            confidence_score=0.0,
+            quality_score=None,
+            confidence_score=None,
+            source_kind=None,
+            evaluation_availability=None,
             total_sources=0,
             total_citations=0,
             generation_time_seconds=0.0,

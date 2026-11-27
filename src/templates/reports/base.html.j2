@@ -1,3 +1,4 @@
+{% from "_visualization.html.j2" import viz_body %}
 <!DOCTYPE html>
 <html lang="{{ config.language }}">
 <head>
@@ -321,7 +322,7 @@
             </div>
             <div class="metadata-item">
                 <div class="metadata-label">Quality Score</div>
-                <div class="metadata-value">{{ "%.1f" | format(report.metadata.quality_score * 100) }}%</div>
+                <div class="metadata-value">{{ report.metadata.quality_score | format_score }}</div>
             </div>
             <div class="metadata-item">
                 <div class="metadata-label">Word Count</div>
@@ -409,11 +410,7 @@
         <h2>Visualizations</h2>
         {% for viz in report.visualizations %}
         <div id="viz-{{ viz.id }}" class="visualization">
-            <div class="visualization-placeholder">
-                <p><strong>{{ viz.title }}</strong></p>
-                <p>Type: {{ viz.type.value }}</p>
-                <p><em>Visualization would be rendered here</em></p>
-            </div>
+            {{ viz_body(viz, visualization_images.get(viz.id)) }}
             {% if viz.caption %}
             <div class="visualization-caption">{{ viz.caption }}</div>
             {% endif %}

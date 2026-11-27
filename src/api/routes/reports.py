@@ -13,7 +13,6 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
@@ -24,7 +23,6 @@ from src.middleware.tenant_context import (
     owner_ids,
 )
 from src.models.db.generated_report import GeneratedReport
-from src.models.db.research_project import ResearchProject
 from src.models.db.session import get_session, get_session_factory
 from src.models.report import (
     CitationStyle,
@@ -36,6 +34,10 @@ from src.models.report import (
 from src.repositories.report_repository import ReportFormatRepository, ReportRepository
 from src.services.report_config import create_report_settings
 from src.services.report_generator import ReportGenerator
+from src.services.report_source_projection import (
+    ReportSourceRepository,
+    ReportSourceUnavailableError,
+)
 from src.services.report_storage import (
     ReportStorageError,
     ReportStorageService,
@@ -107,8 +109,8 @@ class ReportResponse(BaseModel):
     formats_generated: list[str]
     word_count: int
     page_count: int
-    quality_score: float
-    confidence_score: float
+    quality_score: float | None = None
+    confidence_score: float | None = None
     created_at: str
     generation_time_seconds: float | None = None
     download_urls: dict[str, str] = Field(default_factory=dict)
@@ -133,8 +135,8 @@ class ReportResponse(BaseModel):
             formats_generated=[f.format_type for f in report.formats],
             word_count=report.word_count or 0,
             page_count=report.page_count or 0,
-            quality_score=report.quality_score or 0.0,
-            confidence_score=report.confidence_score or 0.0,
+            quality_score=report.quality_score,
+            confidence_score=report.confidence_score,
             created_at=report.created_at.isoformat(),
             generation_time_seconds=report.generation_time_seconds,
             download_urls=download_urls,
@@ -199,18 +201,24 @@ async def _validate_project_access(
     user_id: UUID,
     organization_id: UUID,
 ) -> UUID | None:
-    """Validate project ownership before using a caller-provided project ID."""
+    """Check the caller can report on the project before anything is queued.
+
+    Another owner's, another tenant's, deleted and missing projects all answer
+    the same 404; a project of the caller's own with nothing final to report
+    answers a typed 409.
+    """
     if project_id is None:
         return None
-
-    query = select(ResearchProject.id).where(
-        ResearchProject.id == project_id,
-        ResearchProject.user_id == user_id,
-        ResearchProject.organization_id == organization_id,
-        ResearchProject.deleted_at.is_(None),
-    )
-    result = await session.execute(query)
-    if result.scalar_one_or_none() is None:
+    try:
+        projection = await ReportSourceRepository(session).load_project_source(
+            project_id, user_id=user_id, organization_id=organization_id
+        )
+    except ReportSourceUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "report_source_unavailable", "message": str(exc)},
+        ) from exc
+    if projection is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Project {project_id} not found",
@@ -780,7 +788,16 @@ async def _generate_report_task(
                 )
 
             started_at = time.perf_counter()
-            input_data = await generator._extract_input_data(request)
+            # Identity comes from the authenticated request, never from the
+            # payload, and this fresh session reads the project's stored results.
+            projection = None
+            if project_id is not None:
+                projection = await ReportSourceRepository(session).load_project_source(
+                    project_id, user_id=user_id, organization_id=organization_id
+                )
+                if projection is None:
+                    raise ReportStorageError(f"Project {project_id} is not available")
+            input_data = await generator._extract_input_data(request, projection)
             report = await generator._build_report_structure(
                 input_data,
                 request.configuration,
