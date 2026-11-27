@@ -25,7 +25,7 @@ async def test_cancelled_project_is_recorded_as_cancelled(client, db, new_accoun
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="P03: POST /api/v1/runs/{run_id}/restart missing (explicit restart with parent_run_id)",
+    reason="P08-A/P02-C: POST /api/v1/runs/{run_id}/restart missing (explicit restart with parent_run_id); interruption and reconciliation are covered by tests/integration/test_run_execution_ownership.py",
 )
 async def test_interrupted_run_restarts_as_a_linked_new_run(client, new_account):
     await require_operation(

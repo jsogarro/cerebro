@@ -27,13 +27,14 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from structlog import get_logger
 
 from src.api.services.event_publisher import EventPublisher
 from src.api.websocket.run_stream import RunStreamHub, run_stream_hub
+from src.core.observability import outbox_dead_lettered_total, outbox_rows
 from src.models.db.run_event import AgentRunEventOutbox, EventDeliveryStatus
 
 logger = get_logger()
@@ -160,6 +161,7 @@ class OutboxRelay:
         async with self.session_factory() as session:
             rows = await self._claim_batch(session)
             await self._dead_letter_abandoned_claims(session)
+            await self._export_backlog(session)
             await session.commit()
 
         # Built-in destinations go first and serially; handler rows then run
@@ -182,6 +184,20 @@ class OutboxRelay:
             await self._finalize(session, row, delivered=ok)
             await session.commit()
         return int(ok)
+
+    async def _export_backlog(self, session: AsyncSession) -> None:
+        """Publish row counts by delivery status; pending and failed are the backlog."""
+        counts = dict(
+            (
+                await session.execute(
+                    select(AgentRunEventOutbox.status, func.count()).group_by(
+                        AgentRunEventOutbox.status
+                    )
+                )
+            ).all()
+        )
+        for status in EventDeliveryStatus:
+            outbox_rows.labels(status=status.value).set(counts.get(status.value, 0))
 
     def _notify_stream_subscribers(self, rows: list[AgentRunEventOutbox]) -> None:
         """Wake local stream subscribers for every run this batch touched.
@@ -390,6 +406,7 @@ class OutboxRelay:
                 .where(AgentRunEventOutbox.id == row.id, abandoned_at_ceiling)
                 .values(status=EventDeliveryStatus.FAILED.value, last_error=last_error)
             )
+            outbox_dead_lettered_total.inc()
             logger.error(
                 "outbox_relay_dead_lettered",
                 event_id=row.event_id,
@@ -450,6 +467,7 @@ class OutboxRelay:
                     ),
                 )
             )
+            outbox_dead_lettered_total.inc()
             logger.error(
                 "outbox_relay_dead_lettered",
                 event_id=row.event_id,

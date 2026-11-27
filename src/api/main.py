@@ -339,6 +339,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         ):
             restored = await direct_execution_service.restore_active_executions()
             logger.info("Active executions restored from persistence", count=restored)
+            direct_execution_service.start_expired_run_reconciliation()
 
             from src.api.services.outbox_relay import OutboxRelay
 

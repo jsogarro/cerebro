@@ -15,6 +15,7 @@ This page lists code and settings present in the repository that no production p
 | Citation binding | Not wired | none | `src/core/claims/citation_*.py`, `src/core/contracts/citation.py` |
 | Orphan modules | Not wired | none | see [Orphan modules](#orphan-modules) |
 | Dead execution attributes | Not wired | none | `src/api/services/direct_execution_service.py`, `src/core/config.py` |
+| Lease release and typed resume refusal | Not wired | none | `src/repositories/run_lifecycle_repository.py`, `src/api/services/direct_execution_service.py` |
 | Settings with no effect | Not wired | none | `src/core/config.py` (`Settings`) |
 | Unbacked web pages | Not wired | none | `cerebro/web/src/api/` |
 | Row-level security for execution-service sessions | Not wired | none | `src/api/services/direct_execution_service.py` |
@@ -103,6 +104,10 @@ Tests that exercise them live in `tests/unit/core/claims/`. `src/core/acquisitio
 - `DirectExecutionService._fast_path_provider` is initialised to `None`, never assigned a provider and only closed and reset in `close`.
 - `Settings.TEMPORAL_HOST` and `Settings.OTEL_EXPORTER_OTLP_ENDPOINT` have no reader under `src/` outside `get_ai_brain_config` (tracked in #297; `config/production.py` and `config/staging.py` read their own copies).
 - `Settings.MULTI_DOMAIN_MERGE_STRATEGY` (default `concat`) and `Settings.MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT` (default 4000) are read by no code under `src/`.
+
+## Lease release and typed resume refusal
+
+> **Not wired.** `RunLifecycleRepository.release_lease` (expires a run's lease at once) has no caller: a process that shuts down leaves its leases to expire, and the expired-run reconciler takes the runs over after at most the lease time. `resume_execution` still answers with a rebuilt status or `None`; it does not return a typed `RESUME_UNSUPPORTED` refusal, because that is a change to the resume route's response contract. The lease time, renewal interval, cancellation poll interval and reconciliation interval are attributes of `DirectExecutionService`, not `Settings`.
 
 ## Settings with no effect
 

@@ -17,11 +17,14 @@ import asyncio
 import copy
 import hashlib
 import json
+import os
+import socket
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +45,11 @@ from src.core.budget import (
     BudgetLedger,
 )
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
+from src.core.observability import (
+    run_cancellation_delay_seconds,
+    run_ownership_expired_total,
+    run_reconciliation_failures_total,
+)
 from src.core.telemetry import count_tokens, telemetry_enabled
 from src.models.db.run_event import EVENT_ENVELOPE_VERSION
 from src.repositories.artifact_repository import ArtifactRepository
@@ -51,12 +59,24 @@ from src.repositories.checkpoint_repository import (
     CheckpointRepository,
 )
 from src.repositories.claim_support_repository import ClaimSupportRepository
+from src.repositories.model_call_reservation_repository import (
+    ModelCallReservationRepository,
+    OwnerLostError,
+)
 from src.repositories.research_repository import ResearchRepository
 from src.repositories.run_config_snapshot_repository import (
     RunConfigSnapshotRepository,
 )
 from src.repositories.run_event_repository import RunEventRepository
-from src.repositories.run_lifecycle_repository import RunLifecycleRepository
+from src.repositories.run_lifecycle_repository import (
+    ResearchRunJournalOwner,
+    RunLifecycleRepository,
+    StaleFenceError,
+)
+from src.services.model_invocation import (
+    MODEL_INVOCATION_CONTEXT_KEY,
+    ModelInvocationContext,
+)
 
 from ...agents.models import AgentTask
 from ...agents.supervisors.base_supervisor import BaseSupervisor
@@ -151,6 +171,7 @@ _RUN_STATUS_TO_EXECUTION_STATUS: dict[str, str] = {
 # about it: the ``@retry`` decorator, and the failure path's decision about
 # whether a terminal FAILED may be persisted yet.
 INTERRUPTED_BY_RESTART = "interrupted by restart"
+PROCESS_INTERRUPTED = "PROCESS_INTERRUPTED"
 RESTORE_DEADLINE_MARGIN = timedelta(minutes=5)
 _WORKFLOW_MAX_ATTEMPTS = 3
 
@@ -275,6 +296,14 @@ class _DurableTransition:
     event_id: str
     journaled_result: dict[str, Any] | None = None
     final_report: _FinalReport | None = None
+    # The writer's lease. A write from a process whose lease ended is refused,
+    # so a worker that lost its run cannot record an outcome for it.
+    fencing_token: int | None = None
+    # Runs in the commit's own transaction after the fence is proven, so work
+    # that must land with the transition (settling a dead owner's open model
+    # calls) cannot commit without it, or the reverse. Must be idempotent: an
+    # ambiguous commit re-runs it.
+    in_transaction: Callable[[Any], Awaitable[None]] | None = None
 
 
 @dataclass
@@ -408,6 +437,13 @@ class ExecutionStatus:
     _task: Task | None = field(default=None, repr=False)
     _attempt: Attempt | None = field(default=None, repr=False)
 
+    # This process's lease on the durable run. ``_lease_confirmed_until`` is a
+    # monotonic instant taken from when a renewal was *sent*, so a slow
+    # database can only make the local view stricter than the database's.
+    _fencing_token: int | None = field(default=None, repr=False)
+    _lease_confirmed_until: float = field(default=0.0, repr=False)
+    _lease_lost: bool = field(default=False, repr=False)
+
 
 class DirectExecutionService:
     """
@@ -509,6 +545,17 @@ class DirectExecutionService:
         self.durable_write_retry_seconds = 0.1
         self.durable_reconcile_interval_seconds = 1.0
         self.durable_reconcile_max_seconds = 300.0
+
+        # Execution ownership. A run is leased to one process at a time; the
+        # lease is renewed well inside its lifetime, and the same loop polls
+        # for a cancellation another process recorded.
+        self.owner_instance_id = (
+            f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+        )
+        self.lease_ttl_seconds = 30.0
+        self.lease_renew_seconds = 5.0
+        self.cancel_poll_seconds = 1.0
+        self.expired_run_scan_seconds = 15.0
         self._pending_terminal_outcomes: dict[str, _PendingTerminalOutcome] = {}
         self._terminal_reconciler: asyncio.Task[None] | None = None
 
@@ -792,6 +839,7 @@ class DirectExecutionService:
             )
             queued_run = binding.run.transition_to(RunStatus.QUEUED, at=now)
             ready_task = task.transition_to(TaskStatus.READY, at=now)
+            lease_sent_at = time.monotonic()
 
             async with self.session_factory() as session:
                 try:
@@ -811,6 +859,16 @@ class DirectExecutionService:
                         run_id=binding.run.run_id,
                         organization_id=binding.run.tenant_id,
                     )
+                    # Owned from admission, in the same transaction, so there
+                    # is no instant at which the run is running unowned.
+                    fencing_token = await repo.acquire_lease(
+                        binding.run.run_id,
+                        owner=self.owner_instance_id,
+                        ttl_seconds=self.lease_ttl_seconds,
+                        organization_id=binding.run.tenant_id,
+                    )
+                    if fencing_token is None:
+                        raise RuntimeError("a run admitted just now was already owned")
                     capability_grants = self.capability_issuer.issue(
                         binding,
                         run_id=queued_run.run_id,
@@ -841,6 +899,10 @@ class DirectExecutionService:
                     raise
 
             execution_status.run_id = queued_run.run_id
+            execution_status._fencing_token = fencing_token
+            execution_status._lease_confirmed_until = (
+                lease_sent_at + self.lease_ttl_seconds
+            )
             execution_status._run = queued_run
             execution_status._task = ready_task
             execution_status._attempt = attempt
@@ -942,8 +1004,12 @@ class DirectExecutionService:
         event_type: str,
         payload: dict[str, Any],
         occurred_at: datetime,
+        fencing_token: int | None = None,
     ) -> None:
         """Append one durable event and its outbox row within ``session``.
+
+        With a ``fencing_token`` the append is refused unless that token still
+        owns the run.
 
         The relay's only wired destination today is ``redis`` — a
         project-scoped WebSocket derivation from this persisted stream is
@@ -954,6 +1020,10 @@ class DirectExecutionService:
         """
         if event_id is None:
             event_id = str(uuid.uuid4())
+        if fencing_token is not None:
+            await RunLifecycleRepository(session).require_fence(
+                run.run_id, fencing_token
+            )
         await RunEventRepository(session).append_event(
             run_id=run.run_id,
             organization_id=run.tenant_id,
@@ -1150,6 +1220,8 @@ class DirectExecutionService:
         event_type: str,
         payload: dict[str, Any],
         reason: str | None = None,
+        fenced: bool = True,
+        in_transaction: Callable[[Any], Awaitable[None]] | None = None,
     ) -> DurableWriteOutcome:
         """Advance the durable run/task/attempt and append their event.
 
@@ -1169,6 +1241,14 @@ class DirectExecutionService:
         write is called unavailable, and an unavailable *terminal* write is
         parked for reconciliation rather than dropped — the outcome is the
         one thing a run cannot afford to lose.
+
+        The write carries this process's fencing token unless ``fenced`` is
+        false (a reconciler taking over a dead owner's run proves its right to
+        write inside ``in_transaction`` instead). A write the durable record
+        refuses, because the lease was lost or a cancellation got there first,
+        is ``REJECTED``: the in-memory view is rebuilt from the durable rows,
+        and a success that lost to a recorded cancellation finishes that
+        cancellation rather than leaving the run cancelling forever.
         """
         if not self.session_factory or execution_status._run is None:
             return DurableWriteOutcome.RECORDED
@@ -1193,6 +1273,7 @@ class DirectExecutionService:
                 event_type=event_type,
                 error=str(exc),
             )
+            await self._finish_cancellation_that_won(execution_status, run_target)
             return DurableWriteOutcome.REJECTED
 
         final_report = None
@@ -1227,9 +1308,16 @@ class DirectExecutionService:
             ),
             journaled_result=journaled_result,
             final_report=final_report,
+            fencing_token=execution_status._fencing_token if fenced else None,
+            in_transaction=in_transaction,
         )
 
-        if await self._commit_transition(transition):
+        committed = await self._commit_transition(transition)
+        if committed is DurableWriteOutcome.REJECTED:
+            await self._adopt_durable_state(execution_status)
+            await self._finish_cancellation_that_won(execution_status, run_target)
+            return DurableWriteOutcome.REJECTED
+        if committed is DurableWriteOutcome.RECORDED:
             execution_status._run = run
             execution_status._task = task
             execution_status._attempt = attempt
@@ -1241,6 +1329,294 @@ class DirectExecutionService:
         if run.status in TERMINAL_RUN_STATUSES:
             self._park_terminal_outcome(execution_status, transition)
         return DurableWriteOutcome.UNAVAILABLE
+
+    async def _adopt_durable_state(self, execution_status: ExecutionStatus) -> None:
+        """Rebuild the in-memory run/task/attempt from the durable rows.
+
+        After a refused write this process's copy is stale by definition: the
+        durable record moved (a reconciliation failed the run, a cancellation
+        was requested elsewhere). Best effort: if the database cannot be read
+        the stale copy stays, and the next write is refused the same way.
+        """
+        if not self.session_factory or execution_status.run_id is None:
+            return
+        try:
+            async with self.session_factory() as session:
+                repo = RunLifecycleRepository(session)
+                run_row = await repo.get_run(
+                    execution_status.run_id,
+                    organization_id=execution_status.organization_id,
+                )
+                if run_row is None:
+                    return
+                fresh = await self._rehydrate_execution(repo, run_row)
+        except (SQLAlchemyError, OSError) as exc:
+            logger.warning(
+                "durable_state_refresh_failed",
+                execution_id=execution_status.execution_id,
+                error=str(exc),
+            )
+            return
+        if fresh is not None:
+            execution_status._run = fresh._run
+            execution_status._task = fresh._task
+            execution_status._attempt = fresh._attempt
+
+    async def _finish_cancellation_that_won(
+        self, execution_status: ExecutionStatus, refused_target: RunStatus
+    ) -> None:
+        """Turn a refused success into the cancellation that beat it.
+
+        A cancellation request and a success racing end in exactly one
+        terminal state. When the request committed first the success is
+        refused, and nothing else would ever record CANCELLED for it: the
+        workflow task has no pending cancellation left to react to.
+        """
+        run = execution_status._run
+        if (
+            refused_target is RunStatus.SUCCEEDED
+            and run is not None
+            and run.status is RunStatus.CANCELLING
+        ):
+            execution_status.status = "cancelled"
+            await self._record_requested_cancellation(execution_status)
+
+    def _lose_lease(self, execution_status: ExecutionStatus, *, reason: str) -> None:
+        """Stop this process's work on a run it no longer owns."""
+        if execution_status._lease_lost:
+            return
+        execution_status._lease_lost = True
+        logger.error(
+            "run_lease_lost",
+            execution_id=execution_status.execution_id,
+            run_id=execution_status.run_id,
+            reason=reason,
+        )
+        workflow_task = self._workflow_tasks.get(execution_status.execution_id)
+        if workflow_task is not None:
+            workflow_task.cancel()
+
+    def _ownership_guard(self, execution_status: ExecutionStatus) -> Callable[[], None]:
+        """The check made immediately before every model call is admitted."""
+
+        def guard() -> None:
+            if (
+                execution_status._lease_lost
+                or time.monotonic() >= execution_status._lease_confirmed_until
+            ):
+                raise OwnerLostError("this process no longer confirms its run lease")
+            if execution_status.status == "cancelled":
+                raise asyncio.CancelledError("the run was cancelled")
+
+        return guard
+
+    def _model_call_journal(
+        self, execution_status: ExecutionStatus
+    ) -> ModelCallReservationRepository | None:
+        """The durable journal of this run's model calls, or ``None`` in memory mode."""
+        run = execution_status._run
+        if not self.session_factory or run is None:
+            return None
+        plan = execution_status.execution_plan
+        budget = plan.routing_decision.budget if plan is not None else None
+        return ModelCallReservationRepository(
+            self.session_factory,
+            organization_id=run.tenant_id,
+            # Reconciliation reads no ceilings, so a run rebuilt from the
+            # database (no plan) can still settle its open calls.
+            owner=ResearchRunJournalOwner(
+                run.run_id,
+                max_tokens=budget.max_total_tokens if budget else 0,
+                max_cost_usd=budget.max_cost_usd if budget else Decimal(0),
+            ),
+        )
+
+    def _invocation_context_entry(
+        self, execution_status: ExecutionStatus
+    ) -> dict[str, Any]:
+        """The owner's context for governed model calls, once the run is leased.
+
+        It carries the lease's fencing token and attempt, so a call made after
+        the lease was lost is refused before it is reserved, and a dead
+        owner's open calls can be settled from the journal.
+        """
+        journal = self._model_call_journal(execution_status)
+        if (
+            journal is None
+            or execution_status._fencing_token is None
+            or execution_status._attempt is None
+        ):
+            return {}
+        from src.core.config import settings
+
+        return {
+            MODEL_INVOCATION_CONTEXT_KEY: ModelInvocationContext(
+                ledger=execution_status._budget_ledger,
+                journal=journal,
+                guard=self._ownership_guard(execution_status),
+                fencing_token=execution_status._fencing_token,
+                attempt_ref=execution_status._attempt.attempt_id,
+                max_attempts=settings.MODEL_ROUTER_MAX_RETRIES,
+            )
+        }
+
+    async def _hold_lease(self, execution_status: ExecutionStatus) -> None:
+        """Keep the run's lease alive and watch for a cancellation recorded elsewhere.
+
+        Runs until cancelled. A renewal the database refuses means ownership
+        was lost; a renewal that merely cannot be confirmed is retried until
+        the last confirmed lease would have expired.
+        """
+        token = execution_status._fencing_token
+        run_id = execution_status.run_id
+        if self.session_factory is None or token is None or run_id is None:
+            return
+        last_renewed = time.monotonic()
+        while True:
+            await asyncio.sleep(self.cancel_poll_seconds)
+            sent_at = time.monotonic()
+            try:
+                async with self.session_factory() as session:
+                    repo = RunLifecycleRepository(session)
+                    if sent_at - last_renewed >= self.lease_renew_seconds:
+                        if not await repo.renew_lease(
+                            run_id,
+                            owner=self.owner_instance_id,
+                            fencing_token=token,
+                            ttl_seconds=self.lease_ttl_seconds,
+                        ):
+                            self._lose_lease(execution_status, reason="renewal refused")
+                            return
+                        await session.commit()
+                        last_renewed = sent_at
+                        execution_status._lease_confirmed_until = (
+                            sent_at + self.lease_ttl_seconds
+                        )
+                    if (
+                        execution_status.status != "cancelled"
+                        and await repo.cancellation_requested(run_id)
+                    ):
+                        await self._adopt_remote_cancellation(execution_status)
+            except (SQLAlchemyError, OSError) as exc:
+                logger.warning(
+                    "run_lease_renewal_unconfirmed",
+                    run_id=run_id,
+                    error=str(exc),
+                )
+            if time.monotonic() >= execution_status._lease_confirmed_until:
+                self._lose_lease(execution_status, reason="lease unconfirmed")
+                return
+
+    async def _adopt_remote_cancellation(
+        self, execution_status: ExecutionStatus
+    ) -> None:
+        """Stop local work for a cancellation another process durably requested."""
+        await self._adopt_durable_state(execution_status)
+        run = execution_status._run
+        if run is None or run.status is not RunStatus.CANCELLING:
+            return
+        execution_status.status = "cancelled"
+        execution_status.current_phase = "cancelled"
+        workflow_task = self._workflow_tasks.get(execution_status.execution_id)
+        if workflow_task is not None:
+            workflow_task.cancel()
+
+    async def reconcile_expired_runs(self) -> int:
+        """Fail every run whose owner's lease expired, settling its open model calls.
+
+        A run whose lease is live, or that has no owner at all, is left alone;
+        a lease that is renewed while this runs wins. Nothing is redispatched:
+        an interrupted run is a failed run, and running it again is an explicit
+        new run.
+
+        Returns:
+            The number of runs reconciled on this pass.
+        """
+        if not self.session_factory:
+            return 0
+        try:
+            async with self.session_factory() as session:
+                repo = RunLifecycleRepository(session)
+                interrupted = []
+                for run_row in await repo.list_expired_runs():
+                    rebuilt = await self._rehydrate_execution(repo, run_row)
+                    if rebuilt is not None:
+                        interrupted.append(rebuilt)
+        except (SQLAlchemyError, OSError) as exc:
+            run_reconciliation_failures_total.inc()
+            logger.warning("expired_run_scan_failed", error=str(exc))
+            return 0
+        return sum([await self._reconcile_interrupted(es) for es in interrupted])
+
+    async def _reconcile_interrupted(self, execution_status: ExecutionStatus) -> int:
+        """Fail one dead owner's run and settle its open model calls, atomically."""
+        run = execution_status._run
+        if run is None:
+            return 0
+        journal = self._model_call_journal(execution_status)
+        payload: dict[str, Any] = {"reason": PROCESS_INTERRUPTED}
+
+        async def take_over_and_settle(session: Any) -> None:
+            await RunLifecycleRepository(session).take_over_expired_run(run.run_id)
+            if journal is None:
+                return
+            settled = await journal.reconcile_owner(session=session)
+            totals = await journal.totals(session=session)
+            payload["model_calls"] = {
+                "released_unsent": settled.released_unsent,
+                "settled_unknown": settled.settled_unknown,
+                "uncertain_tokens": totals.uncertain_tokens,
+                "uncertain_cost_usd": str(totals.uncertain_cost_usd),
+                "known_tokens": totals.known_tokens,
+                "known_cost_usd": str(totals.known_cost_usd),
+            }
+
+        execution_status.failure_code = PROCESS_INTERRUPTED
+        outcome = await self._persist_transition(
+            execution_status,
+            run_target=RunStatus.FAILED,
+            task_target=TaskStatus.FAILED,
+            attempt_target=AttemptStatus.FAILED,
+            event_type="run.interrupted",
+            payload=payload,
+            reason=PROCESS_INTERRUPTED,
+            fenced=False,
+            in_transaction=take_over_and_settle,
+        )
+        if outcome is DurableWriteOutcome.UNAVAILABLE:
+            run_reconciliation_failures_total.inc()
+            return 0
+        if outcome is DurableWriteOutcome.REJECTED:
+            # A live lease won, or another reconciler got there first.
+            return 0
+        run_ownership_expired_total.inc()
+        self._settle_terminal_state(
+            execution_status, outcome=outcome, status="failed", phase="failed"
+        )
+        self.active_executions[execution_status.execution_id] = execution_status
+        self._execution_ids_by_run_id[run.run_id] = execution_status.execution_id
+        return 1
+
+    def start_expired_run_reconciliation(self) -> None:
+        """Periodically reconcile runs whose owners died after this process started."""
+        if self.closed or any(
+            t.get_name() == "expired-run-reconciler" and not t.done()
+            for t in self._background_tasks
+        ):
+            return
+
+        async def loop() -> None:
+            while True:
+                await asyncio.sleep(self.expired_run_scan_seconds)
+                try:
+                    await self.reconcile_expired_runs()
+                except (SQLAlchemyError, OSError) as exc:
+                    run_reconciliation_failures_total.inc()
+                    logger.warning("expired_run_reconciliation_failed", error=str(exc))
+
+        task = asyncio.create_task(loop(), name="expired-run-reconciler")
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     async def _record_attempt_failure(
         self, execution_status: ExecutionStatus, *, error: str
@@ -1262,9 +1638,10 @@ class DirectExecutionService:
                     event_type="run.attempt_failed",
                     payload={"error": error, "attempt": execution_status.retry_count},
                     occurred_at=datetime.now(UTC),
+                    fencing_token=execution_status._fencing_token,
                 )
                 await session.commit()
-        except (SQLAlchemyError, OSError) as exc:
+        except (SQLAlchemyError, OSError, StaleFenceError) as exc:
             logger.warning(
                 "attempt_failure_event_not_recorded",
                 execution_id=execution_status.execution_id,
@@ -1425,15 +1802,20 @@ class DirectExecutionService:
 
         return True
 
-    async def _commit_transition(self, transition: _DurableTransition) -> bool:
+    async def _commit_transition(
+        self, transition: _DurableTransition
+    ) -> DurableWriteOutcome:
         """Commit one planned transition, retrying transient failures.
 
         All writes share a single transaction and a single commit, so a
         failure anywhere inside leaves the durable record exactly where it
         was — which is what makes a retry safe to attempt at all.
+
+        A lost lease or a status the durable row cannot leave that way is not
+        transient, so it is ``REJECTED`` at once instead of being retried.
         """
         if not self.session_factory:
-            return False
+            return DurableWriteOutcome.UNAVAILABLE
         run = transition.run
         last_error: Exception | None = None
         for attempt_number in range(1, self.durable_write_max_attempts + 1):
@@ -1443,25 +1825,35 @@ class DirectExecutionService:
                         if await self._terminal_transition_already_committed(
                             session, transition
                         ):
-                            return True
+                            return DurableWriteOutcome.RECORDED
 
                         repo = RunLifecycleRepository(session)
+                        fence = transition.fencing_token
+                        if fence is not None:
+                            await repo.require_fence(run.run_id, fence)
+                        if transition.in_transaction is not None:
+                            await transition.in_transaction(session)
                         await repo.record_run_transition(
-                            run, organization_id=run.tenant_id
+                            run, organization_id=run.tenant_id, fencing_token=fence
                         )
                         if transition.task is not None:
                             await repo.record_task_transition(
-                                transition.task, organization_id=run.tenant_id
+                                transition.task,
+                                organization_id=run.tenant_id,
+                                fencing_token=fence,
                             )
                         if transition.attempt is not None:
                             await repo.record_attempt_transition(
-                                transition.attempt, organization_id=run.tenant_id
+                                transition.attempt,
+                                organization_id=run.tenant_id,
+                                fencing_token=fence,
                             )
                             if transition.journaled_result is not None:
                                 await repo.write_journaled_result(
                                     transition.attempt.attempt_id,
                                     organization_id=run.tenant_id,
                                     result=transition.journaled_result,
+                                    fencing_token=fence,
                                 )
 
                         if transition.final_report is not None:
@@ -1493,7 +1885,15 @@ class DirectExecutionService:
                     except BaseException:
                         await session.rollback()
                         raise
-                return True
+                return DurableWriteOutcome.RECORDED
+            except (StaleFenceError, InvalidTransitionError) as exc:
+                logger.warning(
+                    "run_transition_refused_by_durable_record",
+                    run_id=run.run_id,
+                    event_type=transition.event_type,
+                    error=str(exc),
+                )
+                return DurableWriteOutcome.REJECTED
             except Exception as exc:
                 last_error = exc
                 if attempt_number < self.durable_write_max_attempts:
@@ -1507,7 +1907,7 @@ class DirectExecutionService:
             attempts=self.durable_write_max_attempts,
             error=str(last_error),
         )
-        return False
+        return DurableWriteOutcome.UNAVAILABLE
 
     def _park_terminal_outcome(
         self, execution_status: ExecutionStatus, transition: _DurableTransition
@@ -1626,9 +2026,20 @@ class DirectExecutionService:
         """
         reconciled = 0
         for execution_id, pending in list(self._pending_terminal_outcomes.items()):
-            if not await self._commit_transition(pending.transition):
+            outcome = await self._commit_transition(pending.transition)
+            if outcome is DurableWriteOutcome.UNAVAILABLE:
                 continue
             self._pending_terminal_outcomes.pop(execution_id, None)
+            if outcome is DurableWriteOutcome.REJECTED:
+                # The durable record moved on while this outcome waited (a
+                # reconciler took the run over): drop it rather than retry a
+                # write that can never land.
+                await self._adopt_durable_state(pending.execution_status)
+                self._realign_with_durable_record(
+                    pending.execution_status,
+                    refused_status=pending.observable_status,
+                )
+                continue
             execution_status = pending.execution_status
             execution_status._run = pending.transition.run
             execution_status._task = pending.transition.task
@@ -1773,10 +2184,12 @@ class DirectExecutionService:
         before any authenticated request context exists. Only non-terminal
         runs are restored; a run that reached a terminal status before the
         restart already has its outcome durably recorded and does not need
-        an in-memory placeholder. A restored run past its own deadline (plus
-        a margin) is recorded as failed with reason "interrupted by restart";
-        one still within it may be running on another replica and is left
-        alone, without counting against this process's concurrency cap.
+        an in-memory placeholder. A run whose owner's lease has expired is
+        reconciled as ``PROCESS_INTERRUPTED``; one under a live lease belongs
+        to another replica and is left alone, without counting against this
+        process's concurrency cap. A run no fenced process ever owned (a row
+        from before ownership existed) cannot be proven dead by a lease, so it
+        is failed only once it is past its own deadline plus a margin.
 
         Returns:
             The number of executions rehydrated.
@@ -1788,6 +2201,9 @@ class DirectExecutionService:
             async with self.session_factory() as session:
                 lifecycle_repo = RunLifecycleRepository(session)
                 runs = await lifecycle_repo.list_non_terminal_runs(organization_id=None)
+                expired = {
+                    row.run_id for row in await lifecycle_repo.list_expired_runs()
+                }
                 for run_row in runs:
                     execution_status = await self._rehydrate_execution(
                         lifecycle_repo, run_row
@@ -1797,10 +2213,18 @@ class DirectExecutionService:
                     execution_id = execution_status.execution_id
                     if execution_id in self.active_executions:
                         continue
+                    if run_row.run_id in expired:
+                        if await self._reconcile_interrupted(execution_status):
+                            restored += 1
+                        continue
                     # Another replica may still be running this work, and
-                    # nothing here resumes it (issue #296), so only a run that
-                    # is past its own deadline is known to be dead.
-                    if await self._is_past_deadline(session, run_row):
+                    # nothing here resumes it (issue #296). A leased run is
+                    # live until its lease expires; only a run with no owner
+                    # on record falls back to its own deadline.
+                    if (
+                        run_row.owner_instance_id is None
+                        and await self._is_past_deadline(session, run_row)
+                    ):
                         outcome = await self._persist_transition(
                             execution_status,
                             run_target=RunStatus.FAILED,
@@ -2295,6 +2719,11 @@ class DirectExecutionService:
         task.add_done_callback(self._background_tasks.discard)
         self._workflow_tasks[execution_id] = task
         task.add_done_callback(lambda _t: self._workflow_tasks.pop(execution_id, None))
+        if execution_status._fencing_token is not None:
+            lease_task = asyncio.create_task(self._hold_lease(execution_status))
+            self._background_tasks.add(lease_task)
+            lease_task.add_done_callback(self._background_tasks.discard)
+            task.add_done_callback(lambda _t: lease_task.cancel())
 
         logger.info(f"Started direct execution {execution_id} for project {project.id}")
 
@@ -2482,6 +2911,7 @@ class DirectExecutionService:
                 context={
                     **self._durable_agent_task_context(execution_status),
                     BUDGET_LEDGER_CONTEXT_KEY: execution_status._budget_ledger,
+                    **self._invocation_context_entry(execution_status),
                 },
                 input_data={
                     "query": project.query.text,
@@ -2686,14 +3116,43 @@ class DirectExecutionService:
                 event_type="run.cancelled",
                 payload={},
                 reason="Execution cancelled by request",
+                in_transaction=self._settle_open_model_calls(execution_status),
             )
         )
+        if (
+            outcome is DurableWriteOutcome.RECORDED
+            and run.cancellation_requested_at is not None
+        ):
+            run_cancellation_delay_seconds.observe(
+                max(
+                    0.0,
+                    (datetime.now(UTC) - run.cancellation_requested_at).total_seconds(),
+                )
+            )
         self._settle_terminal_state(
             execution_status,
             outcome=outcome,
             status="cancelled",
             phase="cancelled",
         )
+
+    def _settle_open_model_calls(
+        self, execution_status: ExecutionStatus
+    ) -> Callable[[Any], Awaitable[None]] | None:
+        """Close any model call the cancelled work left open, with the terminal write.
+
+        Each call settles itself as the work unwinds; this is the backstop for
+        a settlement that was lost, so a cancelled run never ends with a
+        reservation still counted against it.
+        """
+        journal = self._model_call_journal(execution_status)
+        if journal is None:
+            return None
+
+        async def settle(session: Any) -> None:
+            await journal.reconcile_owner(session=session)
+
+        return settle
 
     def _visible_execution(
         self, execution_id: str, organization_id: str | None
