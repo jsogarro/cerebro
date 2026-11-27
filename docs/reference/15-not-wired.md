@@ -12,7 +12,7 @@ This page lists code and settings present in the repository that no production p
 | Model configuration manager | Not wired | none | `src/ai_brain/config/`, `configs/models/` |
 | Prompt manager and versioning | Not wired | none | `src/prompts/` |
 | Reliability service registry | Not wired | none | `src/reliability/service_registry.py` |
-| Stub packages | Not wired | none | `src/benchmarks/`, `src/costs/`, `src/improvement/`, `src/memory/`, `src/research_platform/` |
+| Stub packages | Not wired | none | `src/research_platform/` |
 | Citation binding and PDF text extraction | Not wired | none | `src/core/claims/citation_*.py`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py` |
 | Orphan modules | Not wired | none | see [Orphan modules](#orphan-modules) |
 | Dead execution attributes | Not wired | none | `src/api/services/direct_execution_service.py`, `src/core/config.py` |
@@ -36,34 +36,19 @@ Tests that exercise it: `tests/test_memory_architecture_ttl.py`, `tests/test_con
 
 ## A/B experimentation framework
 
-> **Not wired.** `src/ai_brain/experimentation/` holds an experiment manager, a registry, statistical analyzers, a dashboard, an optimizer and integrations for MASR, the API and the agent framework. Nothing on a production path imports them. The exceptions are `core/adaptive_allocation_engine.py` and, through it, `MultiBanditOptimizer` and `BanditAlgorithm` in `statistical/enhanced_statistical_engine.py`: `MASRouter` builds an `AdaptiveAllocationEngine` only when `ADAPTIVE_ROUTING_ENABLED` is true, and the setting defaults to `false`. See [MASR routing](06-masr-routing.md).
-
-Not wired:
-
-| Module | Classes and functions |
-|---|---|
-| `core/unified_experiment_manager.py` | `UnifiedExperimentManager` |
-| `core/system_experiment_registry.py` | `SystemExperimentRegistry` |
-| `integration/masr_experiment_integration.py` | `MASRExperimentalRouter` (a `MASRouter` subclass) |
-| `integration/api_pattern_experiments.py` | `APIPatternExperimentor` |
-| `integration/agent_framework_integration.py` | `AgentFrameworkExperimentor` |
-| `statistical/bayesian_experiment_design.py` | `BayesianExperimentDesigner` |
-| `statistical/multi_variate_analysis.py` | `MultiVariateAnalyzer` |
-| `statistical/enhanced_statistical_engine.py` | `FrequentistAnalyzer` (`power_analysis`), `BayesianAnalyzer`, `EnhancedStatisticalEngine` (`early_stopping_analysis`, `_bonferroni_correction`, `_fdr_correction`) |
-| `monitoring/real_time_dashboard.py` | `RealTimeDashboard`, `get_dashboard` |
-| `optimization/feedback_loop_optimizer.py` | `FeedbackLoopOptimizer`, `get_feedback_optimizer` |
+> **Not wired.** `statistical/enhanced_statistical_engine.py` (`FrequentistAnalyzer`, `BayesianAnalyzer`, `EnhancedStatisticalEngine`) is imported only by the `eval/` subpackage and tests, apart from `MultiBanditOptimizer` and `BanditAlgorithm`, which `core/adaptive_allocation_engine.py` uses: `MASRouter` builds an `AdaptiveAllocationEngine` only when `ADAPTIVE_ROUTING_ENABLED` is true, and the setting defaults to `false`. See [MASR routing](06-masr-routing.md).
 
 The `eval/` subpackage (`adaptive_routing_eval.py`, `adaptive_routing_promotion.py`) is imported only by `scripts/run_adaptive_routing_eval.py` and `scripts/evaluate_adaptive_routing_promotion.py`.
 
 The five tables `experiments`, `experiment_variants`, `experiment_assignments`, `experiment_results` and `experiment_analyses` are defined in `src/models/db/experiment.py` and created by Alembic migrations. No repository and no route reads or writes them.
 
-Tests that exercise it: `tests/test_ab_testing_integration.py`, `tests/test_ab_testing_math.py`, `tests/test_ab_testing_optimizer_integration.py`, `tests/test_ab_testing_dashboard.py`, `tests/unit/ai_brain/experimentation/test_continuous_beta_update.py`.
+Tests that exercise it: `tests/unit/ai_brain/experimentation/test_continuous_beta_update.py`.
 
 ## Learning and self-improvement
 
 > **Not wired.** `SupervisionFeedbackLearner` in `src/ai_brain/learning/supervision_feedback.py` records execution feedback and recommends routing strategies. `MASRRoutingService.__init__` assigns one to `self.feedback_learner`, and no code calls a method on it.
 
-The `src/improvement/` package is listed under [Stub packages](#stub-packages). `SELF_IMPROVEMENT_REFLECTION_FREQUENCY`, `SELF_IMPROVEMENT_PERFORMANCE_THRESHOLD`, `SELF_IMPROVEMENT_ENABLE_PROMPT_OPTIMIZATION`, `FINE_TUNING_ENABLED`, `FINE_TUNING_MIN_EXAMPLES`, `FINE_TUNING_QUALITY_THRESHOLD` and `FINE_TUNING_AUTO_TRIGGER` are read only by `Settings.get_ai_brain_config`.
+`SELF_IMPROVEMENT_REFLECTION_FREQUENCY`, `SELF_IMPROVEMENT_PERFORMANCE_THRESHOLD`, `SELF_IMPROVEMENT_ENABLE_PROMPT_OPTIMIZATION`, `FINE_TUNING_ENABLED`, `FINE_TUNING_MIN_EXAMPLES`, `FINE_TUNING_QUALITY_THRESHOLD` and `FINE_TUNING_AUTO_TRIGGER` are read only by `Settings.get_ai_brain_config`.
 
 ## Model configuration manager
 
@@ -87,14 +72,10 @@ The one part of `src/reliability/` in production use is `retry_strategies.Circui
 
 ## Stub packages
 
-> **Not wired.** These packages hold small in-memory dataclass modules. Nothing under `src/`, `tests/`, `evals/` or `scripts/` imports them.
+> **Not wired.** This package is a script target with no other caller.
 
 | Package | Contents |
 |---|---|
-| `src/benchmarks/` | `BenchmarkDataset`, `BenchmarkLibrary`, `ReplicationPackage`, `ResearchReplicationToolkit`, `BenchmarkEvaluator`, `PeerReviewSystem` |
-| `src/costs/` | `CostTransaction`, `CostTracker` (with a fixed per-model price table), `Budget`, `BudgetManager`, `CostForecaster`, `CostOptimizer` |
-| `src/improvement/` | `FeedbackCollectionService`, `RewardModel`, `RLTrainer`, `PromptOptimizer`, `AgentReflection`, `MetaLearner`, `ContinuousImprovementPipeline` |
-| `src/memory/` | `WorkingMemoryManager`, `EpisodicMemoryService`, `EntityExtractionService`, `ProceduralMemoryService`, `QuerySuggestionService` |
 | `src/research_platform/` | `main()`, the `research-platform` script target; see [CLI and web clients](13-cli-and-web-clients.md) |
 
 ## Citation binding and PDF text extraction
@@ -127,10 +108,8 @@ Tests that exercise them live in `tests/unit/core/claims/` and `tests/unit/core/
 
 ## Dead execution attributes
 
-> **Not wired.** Five names in the execution path and the settings are defined and never read. The live execution path is described in [research execution](05-research-execution.md).
+> **Not wired.** Three names in the execution path and the settings are defined and never read. The live execution path is described in [research execution](05-research-execution.md).
 
-- `DirectExecutionService.max_domain_parallelism` is assigned `4` in `__init__` and read nowhere.
-- `DirectExecutionService._fast_path_passes_quality` is a method that nothing calls.
 - `DirectExecutionService._fast_path_provider` is initialised to `None`, never assigned a provider and only closed and reset in `close`.
 - `Settings.TEMPORAL_HOST` and `Settings.OTEL_EXPORTER_OTLP_ENDPOINT` have no reader under `src/` outside `get_ai_brain_config` (tracked in #297; `config/production.py` and `config/staging.py` read their own copies).
 - `Settings.MULTI_DOMAIN_MERGE_STRATEGY` (default `concat`) and `Settings.MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT` (default 4000) are read by no code under `src/`.
@@ -147,13 +126,13 @@ The web workbench pages for workflows, runs, run detail and memory call API rout
 
 - `src/ai_brain/memory/`: the four memory managers and `MultiTierMemorySystem`
 - `src/core/memory_encryption.py`: `MemoryEncryption`
-- `src/ai_brain/experimentation/`: experiment framework; `core/adaptive_allocation_engine.py` is the part `MASRouter` uses
+- `src/ai_brain/experimentation/`: the adaptive allocation engine `MASRouter` uses, its statistical engine and the offline `eval/` gate
 - `src/models/db/experiment.py`: the five experiment tables
 - `src/ai_brain/learning/supervision_feedback.py`: `SupervisionFeedbackLearner`
 - `src/ai_brain/config/`, `configs/models/`: model configuration manager and YAML files
 - `src/prompts/`: `PromptManager`, versioning, templates
 - `src/reliability/`: `service_registry.py` (not wired) and `retry_strategies.py` (used)
-- `src/benchmarks/`, `src/costs/`, `src/improvement/`, `src/memory/`, `src/research_platform/`: stub packages
+- `src/research_platform/`: stub packages
 - `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py`: citation and PDF text modules (the rest of `src/core/claims/` is the live claim-support path)
 - `tests/architecture/test_module_reachability.py`: import-graph test that lists the modules no entry point reaches
 - `src/api/services/direct_execution_service.py`: the dead execution attributes

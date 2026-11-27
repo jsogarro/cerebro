@@ -336,3 +336,46 @@ async def test_checkpoint_captures_all_execution_state(
         assert checkpoint_data["errors"] == ["minor error"]
         assert checkpoint_data["warnings"] == ["performance warning"]
         assert checkpoint_data["retry_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_links_the_admitted_run(
+    execution_service_with_checkpoint,
+):
+    execution_status = ExecutionStatus(
+        execution_id="exec-123",
+        project_id=str(uuid.uuid4()),
+        status="running",
+        progress_percentage=50.0,
+        current_phase="supervisor_execution",
+    )
+    execution_status.run_id = "run-abc"
+
+    with patch(
+        "src.api.services.direct_execution_service.CheckpointRepository"
+    ) as mock_repo_cls:
+        mock_repo_instance = AsyncMock(spec=CheckpointRepository)
+        mock_repo_cls.return_value = mock_repo_instance
+
+        await execution_service_with_checkpoint._checkpoint(
+            execution_status, "supervisor_execution"
+        )
+
+    assert mock_repo_instance.create_checkpoint.call_args.kwargs["run_id"] == "run-abc"
+
+
+@pytest.mark.asyncio
+async def test_create_checkpoint_persists_run_id():
+    session = AsyncMock()
+    session.add = MagicMock()
+    repo = CheckpointRepository(session)
+
+    checkpoint = await repo.create_checkpoint(
+        workflow_id="exec-1",
+        project_id=uuid.uuid4(),
+        checkpoint_data={},
+        phase="done",
+        run_id="run-abc",
+    )
+
+    assert checkpoint.run_id == "run-abc"
