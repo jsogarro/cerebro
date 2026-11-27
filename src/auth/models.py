@@ -146,7 +146,9 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=12, description="User password")
     device_id: str | None = Field(None, description="Device fingerprint")
     totp_code: str | None = Field(
-        None, description="TOTP code or recovery code; required once MFA is enrolled"
+        None,
+        max_length=32,
+        description="TOTP code or recovery code; required once MFA is enrolled",
     )
     remember_me: bool = Field(
         default=False,
@@ -195,6 +197,12 @@ class MfaCodeRequest(BaseModel):
     """A TOTP code, or a recovery code where the route accepts one."""
 
     code: str = Field(..., min_length=6, max_length=32)
+
+
+class MfaEnrollRequest(BaseModel):
+    """Enrolment re-proves the password, so a stolen session cannot lock the owner out."""
+
+    current_password: str = Field(..., min_length=1, max_length=128)
 
 
 class MfaEnrollResponse(BaseModel):

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import secrets
 import time
 from datetime import UTC, datetime
@@ -18,12 +19,16 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
-from src.core.memory_encryption import document_cipher
+from src.core.memory_encryption import DocumentEncryptionUnavailable, document_cipher
 from src.models.db.user import MfaRecoveryCode, User
 
 RECOVERY_CODE_COUNT = 10
 # One step either side tolerates clock drift between the authenticator and us.
 _DRIFT_STEPS = 1
+
+
+class MfaUnavailableError(RuntimeError):
+    """The stored TOTP secret cannot be decrypted (key missing or rotated away)."""
 
 
 def new_secret() -> str:
@@ -45,7 +50,10 @@ def encrypt_secret(secret: str) -> str:
 def _secret_of(user: User) -> str | None:
     if user.totp_secret_enc is None:
         return None
-    return document_cipher().decrypt_text(user.totp_secret_enc)
+    try:
+        return document_cipher().decrypt_text(user.totp_secret_enc)
+    except (DocumentEncryptionUnavailable, ValueError) as exc:
+        raise MfaUnavailableError from exc
 
 
 def matching_step(secret: str, code: str, now: float | None = None) -> int | None:
@@ -59,13 +67,27 @@ def matching_step(secret: str, code: str, now: float | None = None) -> int | Non
     return None
 
 
+def _normalise(code: str) -> str:
+    return code.strip().lower().replace("-", "")
+
+
 def _hash_recovery_code(code: str) -> str:
-    # Codes are 40 random bits and single use, so a fast hash is enough.
-    return hashlib.sha256(code.strip().lower().encode()).hexdigest()
+    # Keyed with the application secret so a database dump alone cannot be
+    # brute-forced offline.
+    return hmac.new(
+        settings.SECRET_KEY.encode(),
+        b"mfa-recovery:" + _normalise(code).encode(),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def new_recovery_codes() -> list[str]:
-    return [secrets.token_hex(5) for _ in range(RECOVERY_CODE_COUNT)]
+    """Ten 80-bit codes, shown as four dash-separated groups."""
+    codes = []
+    for _ in range(RECOVERY_CODE_COUNT):
+        raw = secrets.token_hex(10)
+        codes.append("-".join(raw[i : i + 5] for i in range(0, 20, 5)))
+    return codes
 
 
 async def store_recovery_codes(db: AsyncSession, user: User, codes: list[str]) -> None:
@@ -113,6 +135,6 @@ async def consume_recovery_code(db: AsyncSession, user: User, code: str) -> bool
 async def verify_second_factor(db: AsyncSession, user: User, code: str) -> bool:
     """Check a TOTP code, falling back to a recovery code."""
     code = code.strip()
-    if code.isdigit() and len(code) == 6:
+    if re.fullmatch(r"[0-9]{6}", code):
         return await consume_totp(db, user, code)
     return await consume_recovery_code(db, user, code)

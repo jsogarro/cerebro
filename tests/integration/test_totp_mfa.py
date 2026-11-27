@@ -1,7 +1,10 @@
 """TOTP MFA against real Postgres: enrol, activate, login, replay, refresh, disable."""
 
 import ast
+import hashlib
+import hmac
 import os
+import re
 import subprocess
 import sys
 import time
@@ -38,6 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC = Path(sys.executable).parent / "alembic"
 PASSWORD = "CorrectHorse!Battery9"
 EMAIL = "mfa@example.com"
+ENROLL = {"current_password": PASSWORD}
 MAX_FAILURES = 4
 
 
@@ -196,12 +200,15 @@ def _code(secret: str, steps_ahead: int = 0) -> str:
 async def _enrol(client: _Client) -> tuple[str, str, list[str]]:
     """Enrol and activate; return (secret, access token, recovery codes)."""
     token = (await client.login()).json()["tokens"]["access_token"]
-    enrolled = await client.post("/auth/mfa/enroll", {}, token)
+    enrolled = await client.post("/auth/mfa/enroll", ENROLL, token)
     assert enrolled.status_code == 200, enrolled.text
     secret = enrolled.json()["secret"]
     activated = await client.post("/auth/mfa/verify", {"code": _code(secret)}, token)
     assert activated.status_code == 200, activated.text
-    return secret, token, activated.json()["recovery_codes"]
+    codes = activated.json()["recovery_codes"]
+    # Activation ends every session, this one included; sign in again.
+    fresh = (await client.login(codes.pop())).json()["tokens"]["access_token"]
+    return secret, fresh, codes
 
 
 async def test_enrol_returns_a_provisioning_uri_and_stores_the_secret_encrypted(
@@ -211,7 +218,7 @@ async def test_enrol_returns_a_provisioning_uri_and_stores_the_secret_encrypted(
 ) -> None:
     token = (await client.login()).json()["tokens"]["access_token"]
 
-    response = await client.post("/auth/mfa/enroll", {}, token)
+    response = await client.post("/auth/mfa/enroll", ENROLL, token)
 
     body = response.json()
     assert response.status_code == 200
@@ -232,7 +239,7 @@ async def test_pending_enrolment_does_not_require_a_code_at_login(
     client: _Client,
 ) -> None:
     token = (await client.login()).json()["tokens"]["access_token"]
-    await client.post("/auth/mfa/enroll", {}, token)
+    await client.post("/auth/mfa/enroll", ENROLL, token)
 
     assert (await client.login()).status_code == 200
 
@@ -244,7 +251,7 @@ async def test_verify_activates_and_recovery_codes_are_hashed_at_rest(
 ) -> None:
     _, _, codes = await _enrol(client)
 
-    assert len(codes) == 10 and len(set(codes)) == 10
+    assert len(codes) == 9 and len(set(codes)) == 9
     async with sessions() as db:
         enabled = (
             await db.execute(
@@ -264,7 +271,7 @@ async def test_verify_activates_and_recovery_codes_are_hashed_at_rest(
 
 async def test_verify_with_a_wrong_code_does_not_activate(client: _Client) -> None:
     token = (await client.login()).json()["tokens"]["access_token"]
-    await client.post("/auth/mfa/enroll", {}, token)
+    await client.post("/auth/mfa/enroll", ENROLL, token)
 
     response = await client.post("/auth/mfa/verify", {"code": "000000"}, token)
 
@@ -380,7 +387,7 @@ async def test_failed_codes_are_throttled_and_audited(
 
 async def test_failed_activation_codes_are_throttled(client: _Client) -> None:
     token = (await client.login()).json()["tokens"]["access_token"]
-    await client.post("/auth/mfa/enroll", {}, token)
+    await client.post("/auth/mfa/enroll", ENROLL, token)
 
     statuses = [
         (await client.post("/auth/mfa/verify", {"code": "000000"}, token)).status_code
@@ -390,23 +397,121 @@ async def test_failed_activation_codes_are_throttled(client: _Client) -> None:
     assert statuses[-1] == 429
 
 
+async def test_enrol_needs_the_current_password(client: _Client) -> None:
+    token = (await client.login()).json()["tokens"]["access_token"]
+
+    assert (await client.post("/auth/mfa/enroll", {}, token)).status_code == 422
+    wrong = await client.post(
+        "/auth/mfa/enroll", {"current_password": "Wrong!Horse9xx"}, token
+    )
+    assert wrong.status_code == 401
+    assert (await client.login()).status_code == 200  # owner not locked out
+
+
+async def test_activation_ends_sessions_started_before_it(client: _Client) -> None:
+    before = (await client.login()).json()["tokens"]["access_token"]
+    await _enrol(client)
+
+    assert (await client.post("/auth/mfa/enroll", ENROLL, before)).status_code == 401
+
+
+async def test_disable_and_reenrol_kill_old_mfa_sessions(client: _Client) -> None:
+    secret, token, codes = await _enrol(client)
+    old = (await client.login(_code(secret, steps_ahead=1))).json()["tokens"]
+
+    done = await client.post("/auth/mfa/disable", {"code": codes[0]}, token)
+    assert done.status_code == 204
+    assert (await client.post("/auth/mfa/enroll", ENROLL, token)).status_code == 401
+
+    fresh = (await client.login()).json()["tokens"]["access_token"]
+    again = (await client.post("/auth/mfa/enroll", ENROLL, fresh)).json()["secret"]
+    await client.post("/auth/mfa/verify", {"code": _code(again)}, fresh)
+
+    stale = await client.post("/auth/refresh", {"refresh_token": old["refresh_token"]})
+    assert stale.status_code == 401
+
+
+async def test_recovery_codes_are_long_and_peppered_at_rest(
+    client: _Client,
+    sessions: async_sessionmaker[AsyncSession],
+    user_id: uuid.UUID,
+) -> None:
+    _, _, codes = await _enrol(client)
+
+    assert all(re.fullmatch(r"[0-9a-f]{5}(-[0-9a-f]{5}){3}", c) for c in codes)
+    # All 80 bits random: the second half of each code differs between codes too.
+    assert len({c[-11:] for c in codes}) == len(codes)
+    async with sessions() as db:
+        stored = {
+            r[0]
+            for r in await db.execute(
+                text("SELECT code_hash FROM mfa_recovery_codes WHERE user_id=:i"),
+                {"i": user_id},
+            )
+        }
+    code = codes[0]
+    plain = hashlib.sha256(code.replace("-", "").encode()).hexdigest()
+    peppered = hmac.new(
+        settings.SECRET_KEY.encode(),
+        b"mfa-recovery:" + code.replace("-", "").encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    assert peppered in stored and plain not in stored
+
+
+async def test_non_ascii_digits_are_a_failed_code_not_a_crash(
+    client: _Client, audit: _AuditSpy, user_id: uuid.UUID
+) -> None:
+    await _enrol(client)
+    audit.events.clear()
+
+    response = await client.login("١٢٣٤٥٦")
+
+    assert response.status_code == 401
+    assert any(
+        e["event_type"] == AuditEventType.LOGIN_FAILED and e["user_id"] == user_id
+        for e in audit.events
+    )
+
+
+async def test_oversized_code_is_rejected_by_the_schema(client: _Client) -> None:
+    assert (await client.login("1" * 33)).status_code == 422
+
+
+@pytest.mark.parametrize("key", ["", Fernet.generate_key().decode()])
+async def test_unusable_encryption_key_is_a_typed_audited_503(
+    client: _Client,
+    audit: _AuditSpy,
+    user_id: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+    key: str,
+) -> None:
+    await _enrol(client)
+    monkeypatch.setattr(settings, "DOCUMENT_ENCRYPTION_KEY", key)
+    audit.events.clear()
+
+    response = await client.login("123456")
+
+    assert response.status_code == 503
+    assert "MFA" in response.json()["detail"]
+    assert any(e["user_id"] == user_id for e in audit.events)
+
+
 async def test_flag_off_refuses_new_enrolment_but_never_weakens_enrolled_accounts(
     client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     token = (await client.login()).json()["tokens"]["access_token"]
-    pending = (await client.post("/auth/mfa/enroll", {}, token)).json()["secret"]
-    secret, token, _ = await _enrol(client)
+    pending = (await client.post("/auth/mfa/enroll", ENROLL, token)).json()["secret"]
+    secret, token, codes = await _enrol(client)
     monkeypatch.setattr(settings, "ENABLE_MFA", False)
 
-    assert (await client.post("/auth/mfa/enroll", {}, token)).status_code == 403
+    assert (await client.post("/auth/mfa/enroll", ENROLL, token)).status_code == 403
     assert (
         await client.post("/auth/mfa/verify", {"code": "000000"}, token)
     ).status_code == 403
     assert (await client.login()).status_code == 401  # enforcement stays
     assert (await client.login(_code(secret, steps_ahead=1))).status_code == 200
-    done = await client.post(
-        "/auth/mfa/disable", {"code": _code(secret, steps_ahead=2)}, token
-    )
+    done = await client.post("/auth/mfa/disable", {"code": codes[0]}, token)
     assert done.status_code == 204
     assert pending  # enrolment above ran while the flag was on
 
@@ -433,3 +538,22 @@ def test_every_token_issuing_call_site_is_known() -> None:
                 ):
                     found.add((path.relative_to(src).as_posix(), fn.name))
     assert found == allowed
+
+
+def test_no_token_is_encoded_outside_the_jwt_service() -> None:
+    """Minting through ``jwt.encode`` directly would skip the MFA claim and check."""
+    offenders = []
+    src = REPO_ROOT / "src"
+    for path in src.rglob("*.py"):
+        if path.relative_to(src).as_posix() == "auth/jwt_service.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "encode"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "jwt"
+            ):
+                offenders.append(f"{path.relative_to(src)}:{node.lineno}")
+    assert not offenders

@@ -4,7 +4,7 @@ Authentication API endpoints.
 Provides user registration, login, token management, and password reset.
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from uuid import UUID, uuid4
 
 import redis.asyncio as redis
@@ -32,6 +32,7 @@ from src.auth.models import (
     LoginRequest,
     MfaActivateResponse,
     MfaCodeRequest,
+    MfaEnrollRequest,
     MfaEnrollResponse,
     PasswordResetConfirm,
     PasswordResetRequest,
@@ -336,10 +337,14 @@ async def login(
             status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled"
         )
 
-    if user.totp_enabled and not (
-        request.totp_code
-        and await mfa.verify_second_factor(db, user, request.totp_code)
-    ):
+    try:
+        second_factor_ok = not user.totp_enabled or bool(
+            request.totp_code
+            and await mfa.verify_second_factor(db, user, request.totp_code)
+        )
+    except mfa.MfaUnavailableError as exc:
+        raise _mfa_unavailable(req, user) from exc
+    if not second_factor_ok:
         req.state.audit_subject_id = user.id
         logger.warning("Failed MFA code at login", ip=client_ip(req))
         raise HTTPException(
@@ -382,16 +387,24 @@ async def login(
     return AuthResponse(user=UserResponse.from_orm(user), tokens=tokens)
 
 
-async def _checked_mfa_code(
-    db: AsyncSession,
+def _mfa_unavailable(req: Request, user: User) -> HTTPException:
+    """A stored secret that cannot be decrypted is an outage, never a bad code."""
+    req.state.audit_subject_id = user.id
+    logger.error("MFA secret cannot be decrypted; check DOCUMENT_ENCRYPTION_KEY")
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="MFA verification unavailable",
+    )
+
+
+async def _throttled_check(
     user: User,
-    code: str,
     req: Request,
     throttle: LoginThrottle,
-    *,
-    totp_only: bool = False,
+    check: Callable[[], Awaitable[bool]],
+    failure: str,
 ) -> None:
-    """Throttle and check a code on an MFA management route, or raise."""
+    """Throttle an MFA-management check and raise 401 (audited) when it fails."""
     key = f"mfa:{user.id}"
     retry_after = await throttle.begin(key)
     if retry_after:
@@ -400,17 +413,14 @@ async def _checked_mfa_code(
             detail="Too many failed MFA attempts. Try again later.",
             headers={"Retry-After": str(retry_after)},
         )
-    valid = (
-        await mfa.consume_totp(db, user, code.strip())
-        if totp_only
-        else await mfa.verify_second_factor(db, user, code)
-    )
+    try:
+        valid = await check()
+    except mfa.MfaUnavailableError as exc:
+        raise _mfa_unavailable(req, user) from exc
     if not valid:
         req.state.audit_subject_id = user.id
-        logger.warning("Failed MFA code", ip=client_ip(req))
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid MFA code"
-        )
+        logger.warning("Failed MFA check", ip=client_ip(req))
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure)
     await throttle.clear(key)
 
 
@@ -424,8 +434,11 @@ def _require_enrolment_enabled() -> None:
 
 @router.post("/mfa/enroll", response_model=MfaEnrollResponse)
 async def mfa_enroll(
+    request: MfaEnrollRequest,
+    req: Request,
     db: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
+    throttle: LoginThrottle = Depends(get_login_throttle),
 ) -> MfaEnrollResponse:
     """Generate a pending TOTP secret; it takes effect once a code verifies it."""
     _require_enrolment_enabled()
@@ -433,6 +446,11 @@ async def mfa_enroll(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="MFA is already enabled"
         )
+
+    async def password_ok() -> bool:
+        return user.verify_password(request.current_password)
+
+    await _throttled_check(user, req, throttle, password_ok, "Invalid password")
     try:
         secret = mfa.new_secret()
         user.totp_secret_enc = mfa.encrypt_secret(secret)
@@ -455,17 +473,29 @@ async def mfa_verify(
     db: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
     throttle: LoginThrottle = Depends(get_login_throttle),
+    jwt_service: JWTService = Depends(get_jwt_service),
 ) -> MfaActivateResponse:
-    """Activate MFA with a code from the pending secret and issue recovery codes."""
+    """Activate MFA with a code from the pending secret and issue recovery codes.
+
+    Every existing session ends, this one included: tokens minted before the
+    second factor existed must not outlive it.
+    """
     _require_enrolment_enabled()
     if user.totp_enabled or user.totp_secret_enc is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="No MFA enrolment is pending"
         )
-    await _checked_mfa_code(db, user, request.code, req, throttle, totp_only=True)
+    await _throttled_check(
+        user,
+        req,
+        throttle,
+        lambda: mfa.consume_totp(db, user, request.code.strip()),
+        "Invalid MFA code",
+    )
     codes = mfa.new_recovery_codes()
     await mfa.store_recovery_codes(db, user, codes)
     user.totp_enabled = True
+    await _revoke_sessions(jwt_service, user)
     await db.commit()
     return MfaActivateResponse(recovery_codes=codes)
 
@@ -477,18 +507,37 @@ async def mfa_disable(
     db: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
     throttle: LoginThrottle = Depends(get_login_throttle),
+    jwt_service: JWTService = Depends(get_jwt_service),
 ) -> None:
-    """Turn MFA off; a valid TOTP or recovery code is required."""
+    """Turn MFA off; a valid TOTP or recovery code is required. Ends all sessions."""
     if not user.totp_enabled:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="MFA is not enabled"
         )
-    await _checked_mfa_code(db, user, request.code, req, throttle)
+    await _throttled_check(
+        user,
+        req,
+        throttle,
+        lambda: mfa.verify_second_factor(db, user, request.code),
+        "Invalid MFA code",
+    )
     await mfa.store_recovery_codes(db, user, [])
     user.totp_enabled = False
     user.totp_secret_enc = None
     user.totp_last_step = None
+    await _revoke_sessions(jwt_service, user)
     await db.commit()
+
+
+async def _revoke_sessions(jwt_service: JWTService, user: User) -> None:
+    """Revoke before committing, so an outage leaves MFA state unchanged."""
+    try:
+        await jwt_service.revoke_all_user_tokens(str(user.id))
+    except JWTServiceUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service unavailable",
+        ) from exc
 
 
 @router.post("/refresh", response_model=TokenPair)
