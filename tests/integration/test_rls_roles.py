@@ -136,7 +136,9 @@ async def seeded_fixture(admin_url: str) -> str:
     _apply_roles(admin_url)
     _run([str(ALEMBIC), "upgrade", "head"], admin_url)
     _apply_roles(admin_url)  # second pass: idempotent, and now grants existing tables
-    engine = create_async_engine(admin_url.replace("postgresql://", "postgresql+asyncpg://"))
+    engine = create_async_engine(
+        admin_url.replace("postgresql://", "postgresql+asyncpg://")
+    )
     async with engine.begin() as connection:
         for org in (ORG_A, ORG_B):
             user_id = uuid.uuid4()
@@ -226,14 +228,18 @@ async def seeded_fixture(admin_url: str) -> str:
 
 @pytest_asyncio.fixture(name="app_engine", loop_scope="module")
 async def app_engine_fixture(seeded: str) -> AsyncIterator[AsyncEngine]:
-    engine = create_async_engine(_role_url(seeded, "cerebro_app"), pool_size=1, max_overflow=0)
+    engine = create_async_engine(
+        _role_url(seeded, "cerebro_app"), pool_size=1, max_overflow=0
+    )
     yield engine
     await engine.dispose()
 
 
 @pytest_asyncio.fixture(name="maint_engine", loop_scope="module")
 async def maint_engine_fixture(seeded: str) -> AsyncIterator[AsyncEngine]:
-    engine = create_async_engine(_role_url(seeded, "cerebro_maint"), pool_size=1, max_overflow=0)
+    engine = create_async_engine(
+        _role_url(seeded, "cerebro_maint"), pool_size=1, max_overflow=0
+    )
     yield engine
     await engine.dispose()
 
@@ -263,47 +269,59 @@ pytestmark.append(pytest.mark.asyncio(loop_scope="module"))
 
 
 async def test_catalog_roles_and_forced_tables(seeded: str) -> None:
-    engine = create_async_engine(seeded.replace("postgresql://", "postgresql+asyncpg://"))
+    engine = create_async_engine(
+        seeded.replace("postgresql://", "postgresql+asyncpg://")
+    )
     async with engine.connect() as connection:
         roles = {
             row.rolname: row
             for row in await connection.execute(
-                text("SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname LIKE 'cerebro\\_%'")
+                text(
+                    "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname LIKE 'cerebro\\_%'"
+                )
             )
         }
-        owned = (
-            await connection.scalar(
-                text(
-                    "SELECT count(*) FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner "
-                    "WHERE r.rolname IN ('cerebro_app', 'cerebro_maint')"
-                )
+        owned = await connection.scalar(
+            text(
+                "SELECT count(*) FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner "
+                "WHERE r.rolname IN ('cerebro_app', 'cerebro_maint')"
             )
         )
         rls = {
             row.relname: row.relforcerowsecurity
             for row in await connection.execute(
-                text("SELECT relname, relforcerowsecurity FROM pg_class WHERE relrowsecurity AND relkind = 'r'")
+                text(
+                    "SELECT relname, relforcerowsecurity FROM pg_class WHERE relrowsecurity AND relkind = 'r'"
+                )
             )
         }
         maint_tables = {
             row.tablename
             for row in await connection.execute(
-                text("SELECT tablename FROM pg_policies WHERE 'cerebro_maint' = ANY (roles)")
+                text(
+                    "SELECT tablename FROM pg_policies WHERE 'cerebro_maint' = ANY (roles)"
+                )
             )
         }
     await engine.dispose()
 
     assert not roles["cerebro_app"].rolsuper and not roles["cerebro_app"].rolbypassrls
-    assert not roles["cerebro_maint"].rolsuper and not roles["cerebro_maint"].rolbypassrls
+    assert (
+        not roles["cerebro_maint"].rolsuper and not roles["cerebro_maint"].rolbypassrls
+    )
     assert roles["cerebro_migrator"].rolbypassrls
     assert owned == 0
     tenant = {name for name in rls if name in TENANT_TABLES}
-    assert tenant == TENANT_TABLES, f"tenant tables without RLS: {TENANT_TABLES - tenant}"
+    assert tenant == TENANT_TABLES, (
+        f"tenant tables without RLS: {TENANT_TABLES - tenant}"
+    )
     assert all(rls[name] for name in TENANT_TABLES), "a tenant table is not FORCEd"
     assert maint_tables == TENANT_TABLES - NO_MAINTENANCE
 
 
-async def test_every_tenant_policy_tolerates_an_empty_setting(app_engine: AsyncEngine) -> None:
+async def test_every_tenant_policy_tolerates_an_empty_setting(
+    app_engine: AsyncEngine,
+) -> None:
     """A pooled connection leaves ``''`` behind; a bare ::uuid cast would raise."""
     async with app_engine.begin() as connection:
         await connection.execute(
@@ -335,7 +353,9 @@ async def test_app_role_with_a_tenant_sees_only_it_and_cannot_write_another(
         )
         seen = {
             row[0]
-            for row in await connection.execute(text("SELECT organization_id FROM agent_runs"))
+            for row in await connection.execute(
+                text("SELECT organization_id FROM agent_runs")
+            )
         }
         assert seen == {ORG_A}
         async with AsyncSession(bind=connection, expire_on_commit=False) as session:
@@ -350,7 +370,11 @@ async def test_maintenance_role_reads_every_tenants_runs_and_authorities(
     assert await _count(maint_engine, "agent_runs") == 2
     assert await _count(maint_engine, "agent_execution_authorities") == 2
     # Granted and policy-admitted even when empty.
-    for table in ("agent_run_tasks", "agent_task_attempts", "agent_run_config_snapshots"):
+    for table in (
+        "agent_run_tasks",
+        "agent_task_attempts",
+        "agent_run_config_snapshots",
+    ):
         await _count(maint_engine, table)
 
 
@@ -360,7 +384,9 @@ async def test_maintenance_role_sees_nothing_it_has_no_policy_for(
     with pytest.raises(DBAPIError, match="permission denied"):
         await _count(maint_engine, "research_projects")
     # Granted for the purge, so only the row policy keeps unexpired uploads out.
-    assert await _count(maint_engine, "uploaded_documents WHERE expires_at > now()") == 0
+    assert (
+        await _count(maint_engine, "uploaded_documents WHERE expires_at > now()") == 0
+    )
 
 
 async def test_maintenance_role_cannot_write_runs(maint_engine: AsyncEngine) -> None:
@@ -389,10 +415,14 @@ async def test_the_purge_deletes_expired_uploads_and_egress_rows_across_tenants(
     from src.repositories.uploaded_document_repository import UploadedDocumentRepository
 
     async with async_sessionmaker(maint_engine, expire_on_commit=False)() as session:
-        purged = await UploadedDocumentRepository(session, None).purge_expired(datetime.now(UTC))
+        purged = await UploadedDocumentRepository(session, None).purge_expired(
+            datetime.now(UTC)
+        )
         await session.commit()
     assert purged == 2
-    admin = create_async_engine(seeded.replace("postgresql://", "postgresql+asyncpg://"))
+    admin = create_async_engine(
+        seeded.replace("postgresql://", "postgresql+asyncpg://")
+    )
     assert await _count(admin, "uploaded_documents") == 2
     assert await _count(admin, "egress_events") == 0
     await admin.dispose()
@@ -405,11 +435,15 @@ async def test_tenant_session_scopes_every_transaction_it_opens(
 
     factory = async_sessionmaker(app_engine, expire_on_commit=False)
     async with tenant_session(factory, str(ORG_B)) as session:
-        first = (await session.execute(text("SELECT count(*) FROM agent_runs"))).scalar_one()
+        first = (
+            await session.execute(text("SELECT count(*) FROM agent_runs"))
+        ).scalar_one()
         await session.commit()
         # A second transaction on the same session keeps the tenant.
         second = (
-            await session.execute(text("SELECT count(DISTINCT organization_id) FROM agent_runs"))
+            await session.execute(
+                text("SELECT count(DISTINCT organization_id) FROM agent_runs")
+            )
         ).scalar_one()
     assert (first, second) == (1, 1)
     assert await _count(app_engine, "agent_runs") == 0

@@ -18,7 +18,9 @@ async def _reset_db() -> None:
     await db_session.close_db()
 
 
-async def test_production_refuses_to_start_without_a_maintenance_url(monkeypatch) -> None:
+async def test_production_refuses_to_start_without_a_maintenance_url(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "MAINTENANCE_DATABASE_URL", None)
     with pytest.raises(RuntimeError, match="MAINTENANCE_DATABASE_URL"):
@@ -32,8 +34,7 @@ async def test_development_falls_back_to_the_application_factory(monkeypatch) ->
     monkeypatch.setattr(settings, "MAINTENANCE_DATABASE_URL", None)
     await db_session.init_db("sqlite+aiosqlite://")
     assert (
-        db_session.get_maintenance_session_factory()
-        is db_session.get_session_factory()
+        db_session.get_maintenance_session_factory() is db_session.get_session_factory()
     )
 
 

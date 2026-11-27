@@ -7,7 +7,7 @@ if [ -n "${ROLES_ADMIN_DATABASE_URL:-}" ]; then
 fi
 
 echo "Running database migrations..."
-if DATABASE_URL="${MIGRATION_DATABASE_URL:-$DATABASE_URL}" alembic upgrade head; then
+if alembic upgrade head; then
     echo "Database migrations completed."
 else
     migration_status=$?

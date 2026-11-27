@@ -26,9 +26,7 @@ async def apply_roles(admin_url: str) -> None:
                 await connection.execute(
                     "SELECT set_config($1, $2, true)", setting, os.environ[variable]
                 )
-            await connection.execute(
-                Path(__file__).with_name("roles.sql").read_text()
-            )
+            await connection.execute(Path(__file__).with_name("roles.sql").read_text())
     finally:
         await connection.close()
 

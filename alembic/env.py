@@ -32,8 +32,8 @@ target_metadata = Base.metadata
 # Get database URL from environment variable or use default
 def get_database_url():
     """Get database URL from environment or config."""
-    # First try environment variable
-    url = os.environ.get("DATABASE_URL")
+    # Migrations run as the schema owner when MIGRATION_DATABASE_URL is set.
+    url = os.environ.get("MIGRATION_DATABASE_URL") or os.environ.get("DATABASE_URL")
     
     if url:
         # Convert postgres:// to postgresql:// if needed (for Heroku compatibility)
