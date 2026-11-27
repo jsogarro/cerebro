@@ -44,7 +44,7 @@ Journal write failures after the call (`SQLAlchemyError`, `OSError`) are logged 
 
 ## Telemetry
 
-With a `trace_parent` and a Langfuse client, each real attempt opens one `model_call` generation observation under that trace and ends it on every exit, including cancellation. The observation carries the call id, attempt number, estimated tokens, outcome, provider, model, finish reason, usage certainty, request id and, when reported, token usage and cost. It never carries prompts, response text or provider error text. A missing parent, a disabled client or a failing backend yields no span and changes no result, usage or journal write. See [security, audit and observability](12-security-audit-observability.md#tracing).
+With a `trace_parent` and a Langfuse client, each real attempt opens one `model_call` generation observation under that trace and ends it on every exit, including cancellation. The observation carries the call id, attempt number, estimated tokens, outcome, provider, model, finish reason, usage certainty, request id and, when reported, token usage and cost. It never carries prompts, response text or provider error text. A missing parent, a disabled client or a failing backend (an HTTP, OS, value, attribute or runtime error from the span call) yields no span and changes no result, usage or journal write; any other exception from a span call propagates. See [security, audit and observability](12-security-audit-observability.md#tracing).
 
 ## Source map
 

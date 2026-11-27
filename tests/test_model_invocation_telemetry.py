@@ -222,3 +222,15 @@ async def test_a_missing_token_class_is_omitted_from_the_span_usage(
         for k, v in u.get("usage_details", {}).items()
     }
     assert usage == {"output": 40, "total": 100}
+
+
+def test_a_programming_error_in_a_span_call_is_not_hidden(monkeypatch) -> None:
+    from src.core import tracing
+
+    class _Broken:
+        def start_observation(self, **_kwargs: Any) -> None:
+            raise TypeError("unexpected keyword")
+
+    monkeypatch.setattr(tracing, "get_langfuse_client", lambda: _Broken())
+    with pytest.raises(TypeError):
+        tracing.start_model_attempt("trace-1", {})
