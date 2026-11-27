@@ -14,15 +14,31 @@ so a child row can never disagree with the run that owns it.
 """
 
 import uuid
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Mapping, Sequence
+from datetime import timedelta
+from decimal import Decimal
+from enum import StrEnum
+from typing import Any, TypeVar
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.contracts import Attempt, Run, Task
-from src.core.contracts.states import TERMINAL_RUN_STATUSES
+from src.core.contracts.states import (
+    ATTEMPT_TRANSITIONS,
+    RUN_TRANSITIONS,
+    TASK_TRANSITIONS,
+    TERMINAL_RUN_STATUSES,
+    AttemptStatus,
+    InvalidTransitionError,
+    RunStatus,
+    TaskStatus,
+)
 from src.models.db.run_lifecycle import AgentRun, AgentRunTask, AgentTaskAttempt
+from src.repositories.model_call_reservation_repository import (
+    OwnerBudget,
+    OwnerLostError,
+)
 from src.repositories.tenant_scope import (
     TenantMismatchError,
     enforce_tenant_identity,
@@ -30,6 +46,36 @@ from src.repositories.tenant_scope import (
 )
 
 OrganizationId = uuid.UUID | str | None
+
+_TERMINAL_RUN_VALUES = [status.value for status in TERMINAL_RUN_STATUSES]
+
+
+class StaleFenceError(RuntimeError):
+    """The writer's lease ended or its fencing token is no longer current."""
+
+
+_S = TypeVar("_S", bound=StrEnum)
+
+
+def _ensure_reachable(
+    entity: str,
+    current: str,
+    target: _S,
+    status_type: type[_S],
+    transitions: Mapping[_S, frozenset[_S]],
+) -> None:
+    """Refuse a write the durable row cannot legally accept.
+
+    The contract validated the writer's copy; this validates the row, which
+    another process may have moved on (a cancellation request, a
+    reconciliation). Writing the same status again is allowed so a replayed
+    commit stays idempotent.
+    """
+    if target.value != current and target not in transitions[status_type(current)]:
+        raise InvalidTransitionError(
+            f"{entity} is {current!r} in the durable record; it cannot become "
+            f"{target.value!r}"
+        )
 
 
 class RunLifecycleRepository:
@@ -87,7 +133,11 @@ class RunLifecycleRepository:
         return row
 
     async def record_run_transition(
-        self, run: Run, *, organization_id: OrganizationId
+        self,
+        run: Run,
+        *,
+        organization_id: OrganizationId,
+        fencing_token: int | None = None,
     ) -> AgentRun:
         """Persist a run contract's current state onto its existing row.
 
@@ -106,6 +156,10 @@ class RunLifecycleRepository:
             TenantMismatchError: ``run.tenant_id`` disagrees with
                 ``organization_id``, or the row belongs to a different org.
             ValueError: No row exists for ``run.run_id``.
+            StaleFenceError: ``fencing_token`` is given and is no longer the
+                run's live lease.
+            InvalidTransitionError: The stored status cannot reach
+                ``run.status`` (another process moved the run first).
         """
         normalized_organization_id = normalize_organization_id(organization_id)
         enforce_tenant_identity(
@@ -119,6 +173,8 @@ class RunLifecycleRepository:
                 f"run {run.run_id!r} does not belong to organization "
                 f"{normalized_organization_id}"
             )
+        await self._lock_for_write(row, row.run_id, fencing_token)
+        _ensure_reachable("run", row.status, run.status, RunStatus, RUN_TRANSITIONS)
         row.status = run.status.value
         row.started_at = run.started_at
         row.completed_at = run.completed_at
@@ -167,6 +223,182 @@ class RunLifecycleRepository:
             )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
+
+    # --- ownership lease -------------------------------------------------
+
+    async def acquire_lease(
+        self,
+        run_id: str,
+        *,
+        owner: str,
+        ttl_seconds: float,
+        organization_id: OrganizationId = None,
+    ) -> int | None:
+        """Take a run's lease if it has none or its lease has expired.
+
+        One conditional UPDATE on database time, so two owners cannot both win.
+        Every acquisition raises the fencing token, which is what stops the
+        previous holder's late writes.
+
+        Returns:
+            The new fencing token, or ``None`` when another owner's lease is
+            live or the run is terminal.
+        """
+        stmt = (
+            update(AgentRun)
+            .where(
+                AgentRun.run_id == run_id,
+                AgentRun.status.notin_(_TERMINAL_RUN_VALUES),
+                or_(
+                    AgentRun.owner_instance_id.is_(None),
+                    AgentRun.lease_expires_at <= func.clock_timestamp(),
+                ),
+            )
+            .values(
+                owner_instance_id=owner,
+                fencing_token=AgentRun.fencing_token + 1,
+                lease_expires_at=func.clock_timestamp()
+                + timedelta(seconds=ttl_seconds),
+            )
+            .returning(AgentRun.fencing_token)
+            .execution_options(synchronize_session=False)
+        )
+        if organization_id is not None:
+            stmt = stmt.where(
+                AgentRun.organization_id == normalize_organization_id(organization_id)
+            )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def renew_lease(
+        self, run_id: str, *, owner: str, fencing_token: int, ttl_seconds: float
+    ) -> bool:
+        """Extend a live lease; ``False`` means it was lost and the owner must stop.
+
+        An expired lease cannot be renewed even if nobody has taken it over:
+        reconciliation reads expiry as death, so the owner must read it the
+        same way.
+        """
+        result = await self.session.execute(
+            update(AgentRun)
+            .where(
+                AgentRun.run_id == run_id,
+                AgentRun.owner_instance_id == owner,
+                AgentRun.fencing_token == fencing_token,
+                AgentRun.lease_expires_at > func.clock_timestamp(),
+                AgentRun.status.notin_(_TERMINAL_RUN_VALUES),
+            )
+            .values(
+                lease_expires_at=func.clock_timestamp() + timedelta(seconds=ttl_seconds)
+            )
+            .returning(AgentRun.id)
+            .execution_options(synchronize_session=False)
+        )
+        return result.first() is not None
+
+    async def release_lease(
+        self, run_id: str, *, owner: str, fencing_token: int
+    ) -> bool:
+        """Expire the owner's lease now so reconciliation need not wait it out."""
+        result = await self.session.execute(
+            update(AgentRun)
+            .where(
+                AgentRun.run_id == run_id,
+                AgentRun.owner_instance_id == owner,
+                AgentRun.fencing_token == fencing_token,
+                AgentRun.status.notin_(_TERMINAL_RUN_VALUES),
+            )
+            .values(lease_expires_at=func.clock_timestamp())
+            .returning(AgentRun.id)
+            .execution_options(synchronize_session=False)
+        )
+        return result.first() is not None
+
+    async def cancellation_requested(self, run_id: str) -> bool:
+        """Whether a cancellation was requested on the durable run, by any process."""
+        requested = await self.session.scalar(
+            select(AgentRun.cancellation_requested_at).where(AgentRun.run_id == run_id)
+        )
+        return requested is not None
+
+    async def list_expired_runs(self, *, limit: int = 100) -> list[AgentRun]:
+        """Non-terminal runs whose owner's lease has expired, oldest lease first.
+
+        Runs with no owner at all are not listed: nothing can say that their
+        executor is gone.
+        """
+        result = await self.session.execute(
+            select(AgentRun)
+            .where(
+                AgentRun.status.notin_(_TERMINAL_RUN_VALUES),
+                AgentRun.owner_instance_id.is_not(None),
+                AgentRun.lease_expires_at <= func.clock_timestamp(),
+            )
+            .order_by(AgentRun.lease_expires_at)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def take_over_expired_run(self, run_id: str) -> AgentRun:
+        """Lock a run whose owner expired and fence that owner out.
+
+        Raises:
+            StaleFenceError: The lease was renewed, released to another owner,
+                or the run finished since it was listed. A live lease wins.
+        """
+        row = (
+            await self.session.execute(
+                select(AgentRun)
+                .where(
+                    AgentRun.run_id == run_id,
+                    AgentRun.status.notin_(_TERMINAL_RUN_VALUES),
+                    AgentRun.owner_instance_id.is_not(None),
+                    AgentRun.lease_expires_at <= func.clock_timestamp(),
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise StaleFenceError(f"run {run_id!r} has no expired lease to take over")
+        row.fencing_token += 1
+        await self.session.flush()
+        return row
+
+    async def require_fence(self, run_id: str, fencing_token: int) -> None:
+        """Lock the run and prove ``fencing_token`` is its live lease.
+
+        The row lock is what serializes this writer against a reconciler: one
+        of them commits first and the other then sees the changed row.
+
+        Raises:
+            StaleFenceError: The lease expired, was taken over, or the run is
+                terminal.
+        """
+        held = await self.session.execute(
+            select(AgentRun.id)
+            .where(
+                AgentRun.run_id == run_id,
+                AgentRun.fencing_token == fencing_token,
+                AgentRun.owner_instance_id.is_not(None),
+                AgentRun.lease_expires_at > func.clock_timestamp(),
+            )
+            .with_for_update()
+        )
+        if held.first() is None:
+            raise StaleFenceError(
+                f"fencing token {fencing_token} no longer owns run {run_id!r}"
+            )
+
+    async def _lock_for_write(
+        self, row: Any, run_id: str, fencing_token: int | None
+    ) -> None:
+        """Take the run lock first (fence-checked when fenced), then the row's.
+
+        The run is always locked before its children so writers and
+        reconcilers cannot deadlock.
+        """
+        if fencing_token is not None:
+            await self.require_fence(run_id, fencing_token)
+        await self.session.refresh(row, with_for_update=True)
 
     # --- tasks -----------------------------------------------------------
 
@@ -222,7 +454,11 @@ class RunLifecycleRepository:
         return row
 
     async def record_task_transition(
-        self, task: Task, *, organization_id: OrganizationId
+        self,
+        task: Task,
+        *,
+        organization_id: OrganizationId,
+        fencing_token: int | None = None,
     ) -> AgentRunTask:
         """Persist a task contract's current state onto its existing row."""
         normalized_organization_id = normalize_organization_id(organization_id)
@@ -234,6 +470,8 @@ class RunLifecycleRepository:
                 f"task {task.task_id!r} does not belong to organization "
                 f"{normalized_organization_id}"
             )
+        await self._lock_for_write(row, row.run_id, fencing_token)
+        _ensure_reachable("task", row.status, task.status, TaskStatus, TASK_TRANSITIONS)
         row.status = task.status.value
         row.started_at = task.started_at
         row.completed_at = task.completed_at
@@ -326,7 +564,11 @@ class RunLifecycleRepository:
         return row
 
     async def record_attempt_transition(
-        self, attempt: Attempt, *, organization_id: OrganizationId
+        self,
+        attempt: Attempt,
+        *,
+        organization_id: OrganizationId,
+        fencing_token: int | None = None,
     ) -> AgentTaskAttempt:
         """Persist an attempt contract's current state onto its existing row."""
         normalized_organization_id = normalize_organization_id(organization_id)
@@ -338,6 +580,10 @@ class RunLifecycleRepository:
                 f"attempt {attempt.attempt_id!r} does not belong to organization "
                 f"{normalized_organization_id}"
             )
+        await self._lock_for_write(row, row.run_id, fencing_token)
+        _ensure_reachable(
+            "attempt", row.status, attempt.status, AttemptStatus, ATTEMPT_TRANSITIONS
+        )
         row.status = attempt.status.value
         row.started_at = attempt.started_at
         row.completed_at = attempt.completed_at
@@ -354,6 +600,7 @@ class RunLifecycleRepository:
         *,
         organization_id: OrganizationId,
         result: dict[str, Any],
+        fencing_token: int | None = None,
     ) -> AgentTaskAttempt:
         """Record the nondeterministic result recovery must replay.
 
@@ -376,6 +623,7 @@ class RunLifecycleRepository:
                 f"attempt {attempt_id!r} does not belong to organization "
                 f"{normalized_organization_id}"
             )
+        await self._lock_for_write(row, row.run_id, fencing_token)
         row.journaled_result = result
         await self.session.flush()
         await self.session.refresh(row)
@@ -413,4 +661,53 @@ class RunLifecycleRepository:
         return result.scalar_one_or_none()
 
 
-__all__ = ["RunLifecycleRepository"]
+class ResearchRunJournalOwner:
+    """The ``agent_runs`` row as the owner of a run's model-call journal.
+
+    Live means the row is non-terminal and its lease has not expired, so a call
+    made after the lease was lost, taken over or reconciled is refused before it
+    is reserved.
+    """
+
+    kind = "research_run"
+
+    def __init__(self, run_id: str, *, max_tokens: int, max_cost_usd: Decimal) -> None:
+        self.owner_id = run_id
+        self._max_tokens = max_tokens
+        self._max_cost_usd = max_cost_usd
+
+    async def lock(
+        self, session: AsyncSession, organization_id: uuid.UUID
+    ) -> OwnerBudget:
+        row = (
+            await session.execute(
+                select(
+                    AgentRun.fencing_token,
+                    (
+                        AgentRun.status.notin_(_TERMINAL_RUN_VALUES)
+                        & AgentRun.lease_expires_at.is_not(None)
+                        & (AgentRun.lease_expires_at > func.clock_timestamp())
+                    ).label("live"),
+                )
+                .where(
+                    AgentRun.run_id == self.owner_id,
+                    AgentRun.organization_id == organization_id,
+                )
+                .with_for_update()
+            )
+        ).first()
+        if row is None:
+            raise OwnerLostError(f"run {self.owner_id!r} does not exist")
+        return OwnerBudget(
+            max_tokens=self._max_tokens,
+            max_cost_usd=self._max_cost_usd,
+            fencing_token=row.fencing_token,
+            live=bool(row.live),
+        )
+
+
+__all__ = [
+    "ResearchRunJournalOwner",
+    "RunLifecycleRepository",
+    "StaleFenceError",
+]

@@ -112,6 +112,21 @@ class AgentRun(BaseModel):
         server_default=CONTRACT_SCHEMA_VERSION,
     )
 
+    # Execution ownership. Both columns are NULL on a run no fenced process
+    # ever owned (rows from before ownership existed); a legacy row is never
+    # reconciled as interrupted because nothing can say its executor is gone.
+    owner_instance_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    fencing_token: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Raised on every acquisition and reconciliation; never reused",
+    )
+
     __table_args__ = (
         UniqueConstraint(
             "tenant_id", "idempotency_key", name="uq_agent_run_tenant_idempotency"
@@ -120,6 +135,12 @@ class AgentRun(BaseModel):
         CheckConstraint(
             "last_event_sequence >= 0", name="ck_agent_run_sequence_non_negative"
         ),
+        CheckConstraint("fencing_token >= 0", name="ck_agent_run_fence_non_negative"),
+        CheckConstraint(
+            "(owner_instance_id IS NULL) = (lease_expires_at IS NULL)",
+            name="ck_agent_run_lease_pair",
+        ),
+        Index("idx_agent_run_lease_expiry", "lease_expires_at"),
         Index("idx_agent_run_org_status", "organization_id", "status", "created_at"),
         Index("idx_agent_run_tenant_status", "tenant_id", "status", "created_at"),
     )

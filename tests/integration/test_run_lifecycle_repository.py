@@ -122,6 +122,8 @@ async def test_record_run_transition_updates_the_existing_row(
     queued = run.transition_to(RunStatus.QUEUED, at=NOW)
     running = queued.transition_to(RunStatus.RUNNING, at=NOW)
 
+    # The row is checked against its stored status, so each step is recorded.
+    await repo.record_run_transition(queued, organization_id=ORG_ID)
     row = await repo.record_run_transition(running, organization_id=ORG_ID)
 
     assert row.status == RunStatus.RUNNING.value
@@ -225,6 +227,7 @@ async def test_record_task_transition_updates_the_existing_row(
     ready = task.transition_to(TaskStatus.READY, at=NOW)
     running = ready.transition_to(TaskStatus.RUNNING, at=NOW)
 
+    await repo.record_task_transition(ready, organization_id=ORG_ID)
     row = await repo.record_task_transition(running, organization_id=ORG_ID)
 
     assert row.status == TaskStatus.RUNNING.value
