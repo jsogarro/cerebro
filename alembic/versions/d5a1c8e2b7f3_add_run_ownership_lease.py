@@ -1,7 +1,7 @@
 """Add the run ownership lease and fencing token.
 
 Revision ID: d5a1c8e2b7f3
-Revises: c4d7a2e9f1b6
+Revises: f1c8a4d7e2b6
 Create Date: 2026-11-27
 
 Additive and nullable (the token defaults to 0), so executors that predate
@@ -20,7 +20,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "d5a1c8e2b7f3"
-down_revision: str | Sequence[str] | None = "c4d7a2e9f1b6"
+down_revision: str | Sequence[str] | None = "f1c8a4d7e2b6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
