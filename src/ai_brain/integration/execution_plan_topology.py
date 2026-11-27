@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
+
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 
 from src.agents.llm_worker_base import PlanProviderUnavailableError
 from src.agents.models import AgentResult, AgentTask
@@ -39,11 +43,151 @@ WorkerExecutor = Callable[[WorkerAssignment, AgentTask], Awaitable[AgentResult]]
 CapabilityChecker = Callable[[str], bool]
 
 
+_DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
+_REF_KEYWORDS = ("$ref", "$dynamicRef")
+
+
+class WorkerOutcomeStatus(StrEnum):
+    SUCCESS = "success"
+    FAILED = "failed"
+    TIMED_OUT = "timed_out"
+    INVALID_OUTPUT = "invalid_output"
+
+
+# Legacy ``AgentResult.status`` spellings that mean a timeout.
+_TIMEOUT_STATUSES = frozenset({"timeout", "timed_out", "timed-out"})
+
+
+@dataclass(frozen=True)
+class WorkerOutcome:
+    """A worker's normalized result: only ``SUCCESS`` counts toward a run."""
+
+    worker_id: str
+    status: WorkerOutcomeStatus
+    code: str | None = None
+    reason: str | None = None
+
+    @property
+    def succeeded(self) -> bool:
+        return self.status is WorkerOutcomeStatus.SUCCESS
+
+
+def _plain(node: Any) -> Any:
+    """Contract schemas are frozen mappings/tuples; the validator wants JSON types."""
+
+    if isinstance(node, Mapping):
+        return {key: _plain(value) for key, value in node.items()}
+    if isinstance(node, (list, tuple)):
+        return [_plain(item) for item in node]
+    return node
+
+
+def _local_refs_only(node: Any) -> bool:
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if (
+                key in _REF_KEYWORDS
+                and isinstance(value, str)
+                and not value.startswith("#")
+            ):
+                return False
+            if not _local_refs_only(value):
+                return False
+    elif isinstance(node, list):
+        return all(_local_refs_only(item) for item in node)
+    return True
+
+
+def schema_rejection_reason(schema: dict[str, Any]) -> str | None:
+    """Why a worker output schema cannot be used, or ``None`` when it can."""
+
+    if not schema:
+        return None
+    if schema.get("$schema", _DRAFT_2020_12) != _DRAFT_2020_12:
+        return "output schema must use JSON Schema draft 2020-12"
+    if not _local_refs_only(schema):
+        return "output schema may only reference local definitions"
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as error:
+        return f"output schema is invalid: {error.message}"
+    return None
+
+
+def classify_worker_result(
+    worker: WorkerAssignment, result: AgentResult
+) -> WorkerOutcome:
+    """Normalize a legacy result; anything not provably successful fails."""
+
+    worker_id = str(worker.worker_id)
+    status = str(result.status).lower()
+    if status in _TIMEOUT_STATUSES:
+        return WorkerOutcome(worker_id, WorkerOutcomeStatus.TIMED_OUT, "WORKER_TIMEOUT")
+    if status == "failed":
+        return WorkerOutcome(worker_id, WorkerOutcomeStatus.FAILED, "WORKER_FAILED")
+    if status != "success":
+        return WorkerOutcome(
+            worker_id, WorkerOutcomeStatus.FAILED, "WORKER_STATUS_UNKNOWN"
+        )
+    # An agent with nothing to work on reports "success" at zero confidence;
+    # that is an abstention, not a finding.
+    if result.confidence <= 0:
+        return WorkerOutcome(
+            worker_id, WorkerOutcomeStatus.INVALID_OUTPUT, "ZERO_CONFIDENCE"
+        )
+    if worker.output_schema:
+        # Report where the output is wrong, never its content.
+        error = next(
+            iter(
+                Draft202012Validator(_plain(worker.output_schema)).iter_errors(
+                    result.output
+                )
+            ),
+            None,
+        )
+        if error is not None:
+            where = "/".join(str(part) for part in error.absolute_path) or "<root>"
+            return WorkerOutcome(
+                worker_id,
+                WorkerOutcomeStatus.INVALID_OUTPUT,
+                "OUTPUT_SCHEMA_VIOLATION",
+                f"{where} violates {error.validator!r}",
+            )
+    return WorkerOutcome(worker_id, WorkerOutcomeStatus.SUCCESS)
+
+
 @dataclass(frozen=True)
 class PlanExecutionResult:
     """Results keyed by stable, plan-local worker identifiers."""
 
     worker_results: dict[str, AgentResult]
+    outcomes: dict[str, WorkerOutcome] = field(default_factory=dict)
+    blocked_worker_ids: tuple[str, ...] = ()
+
+    @property
+    def succeeded(self) -> bool:
+        return not self.blocked_worker_ids and all(
+            outcome.succeeded for outcome in self.outcomes.values()
+        )
+
+    @property
+    def failures(self) -> list[dict[str, str | None]]:
+        """Stable, content-free failure records for events and diagnostics."""
+
+        failed = [
+            {
+                "worker_id": outcome.worker_id,
+                "status": outcome.status.value,
+                "code": outcome.code,
+                "reason": outcome.reason,
+            }
+            for outcome in self.outcomes.values()
+            if not outcome.succeeded
+        ]
+        return failed + [
+            {"worker_id": worker_id, "status": "blocked", "code": "UPSTREAM_FAILED"}
+            for worker_id in self.blocked_worker_ids
+        ]
 
     @property
     def workers_used(self) -> int:
@@ -79,6 +223,12 @@ class ExecutionPlanTopologyExecutor:
             record_topology_rejected(plan, error.code, unsupported)
             raise error
         for worker in decision.workers:
+            schema_problem = schema_rejection_reason(_plain(worker.output_schema))
+            if schema_problem is not None:
+                reason = f"worker {worker.worker_id!r}: {schema_problem}"
+                error = ExecutionTopologyUnsupportedError(reason)
+                record_topology_rejected(plan, error.code, reason)
+                raise error
             if not self._capability_checker(str(worker.worker_type)):
                 reason = f"worker capability {worker.worker_type!r} is unavailable"
                 error = ExecutionTopologyUnsupportedError(reason)
@@ -108,6 +258,7 @@ class ExecutionPlanTopologyExecutor:
         workers = {str(worker.worker_id): worker for worker in decision.workers}
         dependencies = self._dependencies(plan)
         completed: dict[str, AgentResult] = {}
+        outcomes: dict[str, WorkerOutcome] = {}
         pending = set(workers)
         semaphore = asyncio.Semaphore(decision.budget.max_parallel_tasks)
 
@@ -166,8 +317,16 @@ class ExecutionPlanTopologyExecutor:
             ledger.ensure_not_exceeded()
             completed.update(zip(ready, results, strict=True))
             pending.difference_update(ready)
+            for worker_id, result in zip(ready, results, strict=True):
+                outcomes[worker_id] = classify_worker_result(workers[worker_id], result)
+            if not all(outcomes[worker_id].succeeded for worker_id in ready):
+                break
 
-        return PlanExecutionResult(worker_results=completed)
+        return PlanExecutionResult(
+            worker_results=completed,
+            outcomes=outcomes,
+            blocked_worker_ids=tuple(sorted(pending)),
+        )
 
     def _unsupported_reason(self, plan: ExecutionPlan) -> str | None:
         decision = plan.routing_decision

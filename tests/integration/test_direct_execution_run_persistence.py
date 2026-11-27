@@ -1115,7 +1115,9 @@ async def test_succeeded_run_event_carries_budget_usage(
 
     async def _execute(plan: Any, task: Any) -> Any:
         await _settle_one_unpriced_call(task)
-        return SimpleNamespace(output={"report": "Usage is recorded."}, workers_used=1)
+        return SimpleNamespace(
+            output={"report": "Usage is recorded."}, workers_used=1, succeeded=True
+        )
 
     service.supervisor_bridge.execute_execution_plan.side_effect = _execute
 

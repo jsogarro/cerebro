@@ -135,6 +135,7 @@ def _make_service() -> DirectExecutionService:
         return_value=SimpleNamespace(
             output={"result": "ok"},
             workers_used=1,
+            succeeded=True,
         )
     )
 

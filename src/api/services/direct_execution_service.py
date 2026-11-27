@@ -63,6 +63,7 @@ from ...agents.tools.mediation import (
     RUN_ID_CONTEXT_KEY,
     TASK_ID_CONTEXT_KEY,
 )
+from ...ai_brain.integration.execution_plan_topology import PlanExecutionResult
 from ...ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
 from ...ai_brain.router.execution_plan_compiler import ExecutionPlanCompiler
 from ...ai_brain.router.masr import MASRouter
@@ -2447,9 +2448,11 @@ class DirectExecutionService:
                 plan_task,
             )
             execution_status.agent_results = plan_result.output
-            execution_status.final_output = plan_result.output
             execution_status.workers_used = plan_result.workers_used
-            self.execution_stats["successful_executions"] += 1
+            if not plan_result.succeeded:
+                await self._fail_run_on_worker_outcomes(execution_status, plan_result)
+                return
+            execution_status.final_output = plan_result.output
             outcome = await self._persist_transition(
                 execution_status,
                 run_target=RunStatus.SUCCEEDED,
@@ -2460,6 +2463,8 @@ class DirectExecutionService:
                     execution_status, workers_used=execution_status.workers_used
                 ),
             )
+            if outcome is DurableWriteOutcome.RECORDED:
+                self.execution_stats["successful_executions"] += 1
             self._settle_terminal_state(
                 execution_status,
                 outcome=outcome,
@@ -2548,6 +2553,35 @@ class DirectExecutionService:
 
             # Final progress update
             await self._publish_progress_update(execution_status)
+
+    async def _fail_run_on_worker_outcomes(
+        self, execution_status: ExecutionStatus, plan_result: PlanExecutionResult
+    ) -> None:
+        """Record a semantic worker failure as terminal; retrying cannot fix it."""
+        failures = plan_result.failures
+        execution_status.failure_code = "WORKER_FAILED"
+        execution_status.errors.extend(
+            f"{f['worker_id']}: {f['status']} ({f['code']})" for f in failures
+        )
+        self.execution_stats["failed_executions"] += 1
+        outcome = await self._persist_transition(
+            execution_status,
+            run_target=RunStatus.FAILED,
+            task_target=TaskStatus.FAILED,
+            attempt_target=AttemptStatus.FAILED,
+            event_type="run.failed",
+            payload=self._terminal_payload(
+                execution_status,
+                error="worker outcomes did not satisfy the plan",
+                failure_code=execution_status.failure_code,
+                failures=failures,
+                partial_worker_ids=sorted(plan_result.worker_results),
+            ),
+            reason="worker outcomes did not satisfy the plan",
+        )
+        self._settle_terminal_state(
+            execution_status, outcome=outcome, status="failed", phase="failed"
+        )
 
     def _visible_execution(
         self, execution_id: str, organization_id: str | None
