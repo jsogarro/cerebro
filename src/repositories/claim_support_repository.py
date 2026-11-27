@@ -158,6 +158,42 @@ class ClaimSupportRepository:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def list_claim_supports_for_run(
+        self,
+        run_id: str,
+        *,
+        organization_id: OrganizationId,
+        latest_per_claim: bool = False,
+    ) -> list[AgentClaimSupport]:
+        """Return a run's judgments ordered ``(artifact_id, claim_id,
+        recorded_at, id)``, or only the last one per claim.
+
+        ``recorded_at`` is the database's clock; the evaluator-supplied
+        ``evaluated_at`` is never an ordering key, because a pod with a fast
+        clock would make an older verdict look newest. ``id`` breaks ties
+        between rows written in one transaction.
+        """
+        query = (
+            select(AgentClaimSupport)
+            .where(AgentClaimSupport.run_id == run_id)
+            .order_by(
+                AgentClaimSupport.artifact_id,
+                AgentClaimSupport.claim_id,
+                AgentClaimSupport.recorded_at,
+                AgentClaimSupport.id,
+            )
+        )
+        query = scope_to_organization(
+            query,
+            AgentClaimSupport.organization_id,
+            normalize_organization_id(organization_id),
+        )
+        rows = list((await self.session.execute(query)).scalars().all())
+        if not latest_per_claim:
+            return rows
+        # Ordered by claim then time, so the dict keeps each claim's last row.
+        return list({(row.artifact_id, row.claim_id): row for row in rows}.values())
+
     async def _missing_evidence_ids(
         self,
         evidence_ids: Sequence[str],

@@ -41,7 +41,7 @@ The persistence layer is SQLAlchemy 2.1 over an async engine (`asyncpg` on Postg
 
 `BaseModel` also provides `is_deleted`, `soft_delete()`, `restore()` and `to_dict()`.
 
-Thirteen tables extend `Base` directly and carry their own columns:
+Fourteen tables extend `Base` directly and carry their own columns:
 
 | Table | Primary key | Append-only |
 |---|---|---|
@@ -58,10 +58,11 @@ Thirteen tables extend `Base` directly and carry their own columns:
 | `similarity_checks` | `id`, `PortableUUID` | no |
 | `similarity_matches` | `id`, `PortableUUID` | no |
 | `egress_events` | `id`, `PortableUUID` | no |
+| `agent_evaluation_results` | `id`, `PortableUUID` | yes |
 
 The other 21 tables extend `BaseModel`, so they have soft deletion. `generated_reports` and `report_formats` redeclare `id` as `postgresql.UUID(as_uuid=True)` with `uuid4` as the default instead of `PortableUUID`.
 
-`register_append_only` (`src/models/db/append_only.py`) is a class decorator that registers `before_update` and `before_delete` listeners raising `AppendOnlyViolationError`. It covers ORM unit-of-work writes only. Migration `c3f5a1d7b209` installs the function `reject_append_only_mutation()` and `BEFORE UPDATE OR DELETE` triggers on `agent_run_events` and `agent_run_config_snapshots`; migration `5d04cec6c232` installs the same trigger on `agent_evidence` and `agent_claim_supports`. The triggers are created on PostgreSQL only. `agent_execution_authorities` is decorated too but has no trigger.
+`register_append_only` (`src/models/db/append_only.py`) is a class decorator that registers `before_update` and `before_delete` listeners raising `AppendOnlyViolationError`. It covers ORM unit-of-work writes only. Migration `c3f5a1d7b209` installs the function `reject_append_only_mutation()` and `BEFORE UPDATE OR DELETE` triggers on `agent_run_events` and `agent_run_config_snapshots`; migration `5d04cec6c232` installs the same trigger on `agent_evidence` and `agent_claim_supports`; migration `c5a9e2f7d1b4` installs it on `agent_evaluation_results`. The triggers are created on PostgreSQL only. `agent_execution_authorities` is decorated too but has no trigger.
 
 ## Tables
 
@@ -98,6 +99,7 @@ The models declare 34 tables.
 | `similarity_checks` | `SimilarityCheck` | `similarity_check.py` | `organization_id`, not null | `tenant_isolation_similarity_checks` | no | similarity checks |
 | `similarity_matches` | `SimilarityMatch` | `similarity_check.py` | `organization_id`, not null | `tenant_isolation_similarity_matches` | no | similarity checks |
 | `egress_events` | `EgressEvent` | `similarity_check.py` | `organization_id`, not null | `tenant_isolation_egress_events` | no | similarity checks |
+| `agent_evaluation_results` | `AgentEvaluationResult` | `evaluation_result.py` | `organization_id`, nullable | `tenant_isolation_agent_evaluation_results` | yes | evaluation |
 | `experiments` | `Experiment` | `experiment.py` | none | no | no | experiments (not wired) |
 | `experiment_variants` | `ExperimentVariant` | `experiment.py` | none | no | no | experiments (not wired) |
 | `experiment_assignments` | `ExperimentAssignment` | `experiment.py` | none | no | no | experiments (not wired) |
@@ -138,6 +140,7 @@ Columns: `workflow_id`, `project_id` (foreign key to `research_projects.id`), `r
 - `agent_artifacts`: content-addressed outputs, including the final report of a run and source snapshots.
 - `agent_evidence`: citations of snapshot spans, each referencing an artifact and optionally the invocation that produced it.
 - `agent_claim_supports`: one verdict row per material claim of an artifact.
+- `agent_evaluation_results`: one evaluator outcome per row (`passed`, `failed`, `error` or `abstained`), appended on every evaluation. The canonical view of a run is the latest row per `(evaluator_id, evaluator_version, dimension, subject_id)` by the database `recorded_at`. A dimension with no row was not evaluated and is reported as `not_attempted`, never as a pass. `EvaluationResultRepository` requires an organization on every read and write.
 
 ## Tenancy in the data layer
 
@@ -213,6 +216,7 @@ Alembic scripts are in `alembic/versions/`; `alembic/env.py` reads `DATABASE_URL
 | `b7a9c2d4e8f1` | row-level security policies on `research_projects` and `agent_tasks` |
 | `c3f5a1d7b209` | `agent_runs`, `agent_run_tasks`, `agent_task_attempts`, `agent_run_config_snapshots`, `agent_run_events`, `agent_run_event_outbox`; `workflow_checkpoints.run_id`; append-only triggers and row-level security |
 | `5d04cec6c232` | `agent_capability_grants`, `agent_capability_approvals`, `agent_artifacts`, `agent_tool_invocations`, `agent_evidence`, `agent_claim_supports`; append-only triggers and row-level security |
+| `c5a9e2f7d1b4` | `agent_evaluation_results`; append-only trigger and row-level security |
 | `7b1e4c9d2a08` | replaces the unconditional unique constraint on `agent_tool_invocations (attempt_id, idempotency_key)` with a partial unique index that excludes `denied` rows, plus a plain lookup index |
 | `c4a8d1e2f307` | `generated_reports` and `report_formats` |
 | `f8c9d0e1a2b3` | drops `mfa_settings`, `user_sessions`, `password_history`, `api_keys` |
