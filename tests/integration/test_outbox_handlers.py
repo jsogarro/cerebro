@@ -122,15 +122,32 @@ async def test_raising_handler_backs_off_and_names_the_exception_class(
     factory: async_sessionmaker[AsyncSession],
 ) -> None:
     async def handler(row: AgentRunEventOutbox) -> bool:
-        raise RuntimeError("secret-token-123")
+        raise ConnectionError("secret-token-123")
 
     event_id = await _seed(factory, run_id="h-raise")
     assert await _relay(factory, {"evaluation": handler}).run_once() == 0
     row = await _outbox(factory, event_id)
     assert row.status == EventDeliveryStatus.FAILED.value
     assert row.available_at > datetime.now(UTC)
-    assert "RuntimeError" in (row.last_error or "")
+    assert "ConnectionError" in (row.last_error or "")
     assert "secret-token-123" not in (row.last_error or "")
+
+
+@pytest.mark.asyncio
+async def test_a_bug_in_a_handler_is_raised_not_recorded_as_a_failed_delivery(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async def handler(row: AgentRunEventOutbox) -> bool:
+        raise TypeError("handler bug")
+
+    event_id = await _seed(factory, run_id="h-bug")
+    with pytest.raises(TypeError):
+        await _relay(factory, {"evaluation": handler}).run_once()
+    # Left claimed, so the lease expires and the row is retried, then
+    # dead-lettered at max_attempts like any other abandoned claim.
+    assert (await _outbox(factory, event_id)).status == (
+        EventDeliveryStatus.IN_FLIGHT.value
+    )
 
 
 @pytest.mark.asyncio
@@ -138,7 +155,7 @@ async def test_raising_handler_dead_letters_and_never_blocks_siblings(
     factory: async_sessionmaker[AsyncSession],
 ) -> None:
     async def handler(row: AgentRunEventOutbox) -> bool:
-        raise RuntimeError("boom")
+        raise ConnectionError("boom")
 
     bad = await _seed(factory, run_id="h-dead")
     good = await _seed(factory, run_id="h-sibling", destinations=("redis",))

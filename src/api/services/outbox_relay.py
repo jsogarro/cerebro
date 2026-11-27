@@ -28,6 +28,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, or_, select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from structlog import get_logger
 
@@ -36,6 +37,11 @@ from src.api.websocket.run_stream import RunStreamHub, run_stream_hub
 from src.models.db.run_event import AgentRunEventOutbox, EventDeliveryStatus
 
 logger = get_logger()
+
+# The failures a handler's dependencies produce: a store or network being
+# down, or the handler timeout. Anything else is a bug in the handler; it
+# propagates, and the claimed row is retried once its lease expires.
+_HANDLER_FAILURES = (TimeoutError, SQLAlchemyError, OSError)
 
 _MAX_BACKOFF_SECONDS = 300
 _BUILTIN_DESTINATIONS = frozenset({"redis", "websocket"})
@@ -309,7 +315,7 @@ class OutboxRelay:
                 return await asyncio.wait_for(
                     handler(row), timeout=self.handler_timeout_seconds
                 )
-            except Exception as exc:
+            except _HANDLER_FAILURES as exc:
                 # Class name only: the message may carry payload or credentials.
                 self._handler_errors[row.id] = type(exc).__name__
                 logger.warning(
