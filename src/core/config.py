@@ -224,7 +224,7 @@ class Settings(BaseSettings):
 
     # Model Router Configuration
     MODEL_ROUTER_HEALTH_CHECK_INTERVAL: int = 300  # 5 minutes
-    MODEL_ROUTER_MAX_RETRIES: int = 3
+    MODEL_ROUTER_MAX_RETRIES: int = 1  # max attempts per governed model call
     MODEL_ROUTER_ENABLE_FALLBACK: bool = True
 
     # Multi-Tier Memory Configuration

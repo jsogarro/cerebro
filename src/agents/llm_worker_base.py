@@ -14,9 +14,11 @@ model answer.
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Final
 
 from pydantic.errors import PydanticUserError
@@ -30,10 +32,20 @@ from src.core.budget import (
     BUDGET_LEDGER_CONTEXT_KEY,
     BudgetDimension,
     BudgetExceededError,
-    ReportedUsage,
     estimate_prompt_tokens,
 )
 from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY
+from src.services.model_invocation import (
+    MODEL_INVOCATION_CONTEXT_KEY,
+    CallPrice,
+    CallStatus,
+    DeadlineExceededError,
+    ModelCallResult,
+    ModelInvocationContext,
+    invoke_model,
+    normalize_response,
+    price_digest,
+)
 
 if TYPE_CHECKING:
     from src.ai_brain.memory import ProceduralMemoryManager
@@ -410,7 +422,6 @@ class LLMWorkerAgentBase(BaseAgent):
                     }
                 },
                 "enable_fallback": True,
-                "max_retries": 3,
             }
             self._model_router = ModelRouter(
                 router_config,
@@ -440,6 +451,64 @@ class LLMWorkerAgentBase(BaseAgent):
             return self._build_plan_route(policy)
         return self._build_legacy_openrouter_route()
 
+    def _invocation_context(
+        self, task: AgentTask | None
+    ) -> ModelInvocationContext | None:
+        """The owner's context for this call, or ``None`` when it is not governed.
+
+        An owner that supplies a full context (deadline, guard, journal) wins;
+        otherwise a run's ledger alone makes the call governed.
+        """
+        if task is None:
+            return None
+        supplied = task.context.get(MODEL_INVOCATION_CONTEXT_KEY)
+        if supplied is not None:
+            return supplied
+        ledger = task.context.get(BUDGET_LEDGER_CONTEXT_KEY)
+        if ledger is None:
+            return None
+        from src.core.config import settings
+
+        return ModelInvocationContext(
+            ledger=ledger, max_attempts=settings.MODEL_ROUTER_MAX_RETRIES
+        )
+
+    async def _route_call(
+        self,
+        route: Any,
+        request: Any,
+        task: AgentTask | None,
+        routing_decision: dict[str, Any],
+    ) -> ModelCallResult:
+        """One provider call through the invocation wrapper, typed on the way out.
+
+        A call with no governing context (legacy endpoints) is dispatched as it
+        always was; it gets a typed result but no reservation or journal.
+        """
+
+        async def call(remaining: float | None) -> Any:
+            if remaining is not None:
+                bound = max(1, math.ceil(remaining))
+                request.timeout_seconds = min(
+                    getattr(request, "timeout_seconds", bound), bound
+                )
+            return await route.router.route_and_generate(
+                request, routing_decision=routing_decision
+            )
+
+        ctx = self._invocation_context(task)
+        if ctx is None:
+            return normalize_response(await call(None))
+        prompt_tokens = estimate_prompt_tokens(request.prompt)
+        return await invoke_model(
+            ctx,
+            call,
+            estimated_tokens=prompt_tokens + request.max_tokens,
+            price=self._call_price(
+                route, routing_decision, prompt_tokens, request.max_tokens
+            ),
+        )
+
     async def _metered_route_and_generate(
         self,
         route: Any,
@@ -453,50 +522,30 @@ class LLMWorkerAgentBase(BaseAgent):
         on the same budget. A call the budget cannot hold raises
         ``BudgetExceededError`` before the provider is contacted.
         """
-        ledger = task.context.get(BUDGET_LEDGER_CONTEXT_KEY) if task else None
-        if ledger is None:
-            return await route.router.route_and_generate(
-                request, routing_decision=routing_decision
-            )
-        prompt_tokens = estimate_prompt_tokens(request.prompt)
-        reservation = ledger.reserve_call(
-            prompt_tokens + request.max_tokens,
-            self._estimate_call_cost(
-                route, routing_decision, prompt_tokens, request.max_tokens
-            ),
-        )
-        response = None
-        try:
-            response = await route.router.route_and_generate(
-                request, routing_decision=routing_decision
-            )
-        finally:
-            # No response (error or cancellation) means unknown usage, which
-            # settles as the full reservation rather than as nothing.
-            ledger.settle(reservation, self._reported_usage(response))
-        return response
+        result = await self._route_call(route, request, task, routing_decision)
+        return result.response
 
-    def _estimate_call_cost(
+    def _call_price(
         self,
         route: Any,
         routing_decision: dict[str, Any],
         prompt: int,
         completion: int,
-    ) -> Decimal:
-        """Price the call at the model's rate.
+    ) -> CallPrice | None:
+        """Price the call at the model's rate, or ``None`` when the route is unpriced.
 
-        A provider the router does not know is unpriced (zero, logged): the
-        documented first-call overshoot. Any other failure to price is
-        unknown cost, so the call is refused rather than assumed free.
+        An unpriced route is refused by the wrapper rather than assumed free; an
+        explicitly zero-priced provider (a local or fixture model) is a price.
+        Any other failure to price is refused here as unknown cost.
         """
         primary = routing_decision.get("primary_model") or {}
         try:
             provider = route.router.registry.providers[primary.get("provider")]
         except (KeyError, AttributeError, TypeError):
             self.log_warning("budget_call_unpriced", provider=primary.get("provider"))
-            return Decimal(0)
+            return None
         try:
-            price = Decimal(
+            cost = Decimal(
                 str(provider.estimate_cost(prompt, completion, primary.get("name")))
             )
         except Exception as exc:
@@ -506,19 +555,14 @@ class LLMWorkerAgentBase(BaseAgent):
                 used=0,
                 detail=f"cannot price call: {exc}",
             ) from exc
-        if not price.is_finite() or price < 0:
+        if not cost.is_finite() or cost < 0:
             raise BudgetExceededError(
                 BudgetDimension.COST, limit=0, used=0, detail="cannot price call"
             )
-        return price
-
-    @staticmethod
-    def _reported_usage(response: Any) -> ReportedUsage | None:
-        if response is None or response.total_tokens <= 0:
-            return None
-        return ReportedUsage(
-            total_tokens=response.total_tokens,
-            cost_usd=Decimal(str(response.cost_estimate)),
+        return CallPrice(
+            cost_usd=cost,
+            digest=price_digest(primary.get("provider"), primary.get("name"), cost),
+            fixture=cost == 0,
         )
 
     async def _generate_with_routing(
@@ -544,7 +588,7 @@ class LLMWorkerAgentBase(BaseAgent):
         """
         route = self._select_generation_route(task)
         if route is None:
-            return await self._generate_with_gemini(prompt)
+            return await self._generate_with_gemini(prompt, task)
 
         try:
             from src.ai_brain.providers import ModelRequest
@@ -557,26 +601,38 @@ class LLMWorkerAgentBase(BaseAgent):
                 metadata={"tier": self._determine_tier(task)},
             )
 
-            response = await self._metered_route_and_generate(
+            result = await self._route_call(
                 route, request, task, route.routing_decision
             )
 
-            if response.success:
-                return response.content, response.confidence_score
+            if result.succeeded:
+                return result.content, getattr(result.response, "confidence_score", 0.0)
+
+            if result.status is not CallStatus.FAILED:
+                # Truncated, filtered or empty output is an explicit failure,
+                # never research that merely looks complete.
+                self.log_warning(
+                    f"generation incomplete: {result.status.value} ({result.error})"
+                )
+                return None, 0.0
 
             if route.fail_closed:
                 raise PlanProviderUnavailableError(
                     "plan-backed provider "
                     f"{route.routing_decision['primary_model']['provider']!r} "
-                    f"failed: {response.error_message}"
+                    f"failed: {result.error}"
                 )
 
             self.log_warning(
-                f"OpenRouter generation failed: {response.error_message}, "
+                f"OpenRouter generation failed: {result.error}, "
                 "falling back to GeminiService"
             )
 
-        except (PlanProviderUnavailableError, BudgetExceededError):
+        except (
+            PlanProviderUnavailableError,
+            BudgetExceededError,
+            DeadlineExceededError,
+        ):
             raise
         except Exception as exc:
             if route.fail_closed:
@@ -588,13 +644,19 @@ class LLMWorkerAgentBase(BaseAgent):
             )
 
         # Fallback to GeminiService (legacy route only; plan routes raised above)
-        return await self._generate_with_gemini(prompt)
+        return await self._generate_with_gemini(prompt, task)
 
-    async def _generate_with_gemini(self, prompt: str) -> tuple[str | None, float]:
+    async def _generate_with_gemini(
+        self, prompt: str, task: AgentTask | None = None
+    ) -> tuple[str | None, float]:
         """Generate content using GeminiService (current default path).
+
+        A governed task goes through the invocation wrapper with the service's
+        typed result; an ungoverned call keeps the plain string helper.
 
         Args:
             prompt: The prompt to generate content for
+            task: The calling task, when its context governs the call
 
         Returns:
             Tuple of (content, confidence_score). Content is None on failure.
@@ -608,12 +670,40 @@ class LLMWorkerAgentBase(BaseAgent):
             return content, 0.3
 
         try:
-            content = await gemini.generate_content(prompt)
-            confidence = 0.85 if content and content.strip() else 0.3
-            return content, confidence
+            ctx = self._invocation_context(task)
+            if ctx is None:
+                content = await gemini.generate_content(prompt)
+                confidence = 0.85 if content and content.strip() else 0.3
+                return content, confidence
+            result = await invoke_model(
+                ctx,
+                lambda _remaining: self._gemini_response(gemini, prompt),
+                estimated_tokens=estimate_prompt_tokens(prompt) + 2000,
+                # GeminiService carries no pinned catalog price.
+                price=None,
+            )
+            return (result.content, 0.85) if result.succeeded else (None, 0.0)
+        except (BudgetExceededError, DeadlineExceededError):
+            raise
         except Exception as exc:
             self.log_error(f"{self.agent_type} generation failed: {exc}")
             return None, 0.0
+
+    @staticmethod
+    async def _gemini_response(gemini: Any, prompt: str) -> Any:
+        generated = await gemini.generate_content_result(prompt)
+        return SimpleNamespace(
+            success=True,
+            content=generated.content,
+            finish_reason=generated.finish_reason,
+            prompt_tokens=generated.prompt_tokens,
+            completion_tokens=generated.completion_tokens,
+            total_tokens=generated.total_tokens,
+            model_name=gemini.model_name,
+            provider="gemini",
+            # The service has no pinned price, so cost stays unknown.
+            cost_estimate=None,
+        )
 
     async def _generate_structured_with_routing(
         self,

@@ -162,6 +162,42 @@ class TestLedger:
             ledger.reserve_call(10)
         assert caught.value.dimension is BudgetDimension.COST
 
+    def test_a_reservation_settles_once(self) -> None:
+        ledger = BudgetLedger(_budget(tokens=1000))
+        reservation = ledger.reserve_call(600)
+        ledger.settle(reservation, _usage(100))
+        ledger.settle(reservation, _usage(100))
+        ledger.settle(reservation, None)
+        assert ledger.tokens_used == 100 and ledger.unknown_usage_calls == 0
+        # A second subtraction would have driven the held total negative and
+        # let this oversized pair of calls through.
+        ledger.reserve_call(900)
+        with pytest.raises(BudgetExceededError):
+            ledger.reserve_call(100)
+
+    def test_release_returns_the_hold_without_charging(self) -> None:
+        ledger = BudgetLedger(_budget(tokens=1000))
+        reservation = ledger.reserve_call(900)
+        ledger.release(reservation)
+        assert ledger.tokens_used == 0 and ledger.unknown_usage_calls == 0
+        ledger.reserve_call(900)
+
+    def test_a_reservation_releases_once(self) -> None:
+        ledger = BudgetLedger(_budget(tokens=1000))
+        reservation = ledger.reserve_call(600)
+        ledger.release(reservation)
+        ledger.release(reservation)
+        ledger.reserve_call(900)
+        with pytest.raises(BudgetExceededError):
+            ledger.reserve_call(200)
+
+    def test_a_released_reservation_cannot_be_settled_afterwards(self) -> None:
+        ledger = BudgetLedger(_budget(tokens=1000))
+        reservation = ledger.reserve_call(900)
+        ledger.release(reservation)
+        ledger.settle(reservation, None)
+        assert ledger.tokens_used == 0 and ledger.unknown_usage_calls == 0
+
     def test_tool_invocations_are_capped(self) -> None:
         ledger = BudgetLedger(_budget(tools=2))
         ledger.charge_tool_invocation()
@@ -192,10 +228,17 @@ def _task(ledger: BudgetLedger | None) -> AgentTask:
     )
 
 
+# A route is priced here: an unpriced one is refused, so the ledger arithmetic
+# below runs against an explicitly zero-priced fixture provider.
+_FIXTURE_DECISION = {"primary_model": {"provider": "fixture", "name": "m"}}
+
+
 def _route(responses: list[Any]) -> Any:
     router = MagicMock()
     router.route_and_generate = AsyncMock(side_effect=responses)
-    router.registry.providers = {}
+    fixture = MagicMock()
+    fixture.estimate_cost = MagicMock(return_value=0.0)
+    router.registry.providers = {"fixture": fixture}
     return SimpleNamespace(router=router)
 
 
@@ -212,7 +255,7 @@ class TestModelCallBoundary:
         request = SimpleNamespace(prompt="p", max_tokens=2000)
         with pytest.raises(BudgetExceededError):
             await _Worker()._metered_route_and_generate(
-                route, request, _task(ledger), {}
+                route, request, _task(ledger), _FIXTURE_DECISION
             )
         route.router.route_and_generate.assert_not_called()
 
@@ -247,13 +290,23 @@ class TestModelCallBoundary:
         assert caught.value.dimension is BudgetDimension.COST
         route.router.route_and_generate.assert_not_called()
 
-    async def test_unregistered_provider_is_unpriced_not_refused(self) -> None:
+    async def test_unregistered_provider_is_refused_as_unpriced(self) -> None:
         route = _route([_response(10)])
         route.router.registry.providers = {}
         request = SimpleNamespace(prompt="p", max_tokens=1000)
         decision = {"primary_model": {"provider": "gemini", "name": "m"}}
+        with pytest.raises(BudgetExceededError) as caught:
+            await _Worker()._metered_route_and_generate(
+                route, request, _task(BudgetLedger(_budget())), decision
+            )
+        assert caught.value.dimension is BudgetDimension.COST
+        route.router.route_and_generate.assert_not_called()
+
+    async def test_explicit_zero_price_provider_is_admitted(self) -> None:
+        route = _route([_response(10)])
+        request = SimpleNamespace(prompt="p", max_tokens=1000)
         await _Worker()._metered_route_and_generate(
-            route, request, _task(BudgetLedger(_budget())), decision
+            route, request, _task(BudgetLedger(_budget())), _FIXTURE_DECISION
         )
         route.router.route_and_generate.assert_awaited_once()
 
@@ -262,11 +315,15 @@ class TestModelCallBoundary:
         route = _route([_response(1000), _response(1000)])
         request = SimpleNamespace(prompt="p", max_tokens=1000)
         worker, task = _Worker(), _task(ledger)
-        await worker._metered_route_and_generate(route, request, task, {})
+        await worker._metered_route_and_generate(
+            route, request, task, _FIXTURE_DECISION
+        )
         with pytest.raises(BudgetExceededError):
             # 1000 spent + a retry reserving 2002 > 3000
             retry = SimpleNamespace(prompt="p", max_tokens=2000)
-            await worker._metered_route_and_generate(route, retry, task, {})
+            await worker._metered_route_and_generate(
+                route, retry, task, _FIXTURE_DECISION
+            )
         assert route.router.route_and_generate.await_count == 1
         assert ledger.tokens_used == 1000
 
@@ -274,7 +331,9 @@ class TestModelCallBoundary:
         ledger = BudgetLedger(_budget())
         route = _route([_response(0)])
         request = SimpleNamespace(prompt="p", max_tokens=1000)
-        await _Worker()._metered_route_and_generate(route, request, _task(ledger), {})
+        await _Worker()._metered_route_and_generate(
+            route, request, _task(ledger), _FIXTURE_DECISION
+        )
         assert ledger.tokens_used >= 1000
         assert ledger.unknown_usage_calls == 1
 
@@ -284,7 +343,9 @@ class TestModelCallBoundary:
         ledger = BudgetLedger(_budget())
         route = _route([_response(0, success=False)])
         request = SimpleNamespace(prompt="p", max_tokens=1000)
-        await _Worker()._metered_route_and_generate(route, request, _task(ledger), {})
+        await _Worker()._metered_route_and_generate(
+            route, request, _task(ledger), _FIXTURE_DECISION
+        )
         assert ledger.tokens_used >= 1000
         assert ledger.unknown_usage_calls == 1
 
@@ -294,7 +355,7 @@ class TestModelCallBoundary:
         request = SimpleNamespace(prompt="p", max_tokens=1000)
         with pytest.raises(RuntimeError):
             await _Worker()._metered_route_and_generate(
-                route, request, _task(ledger), {}
+                route, request, _task(ledger), _FIXTURE_DECISION
             )
         assert ledger.tokens_used >= 1000
 
@@ -590,6 +651,77 @@ def _service_with_bridge(bridge_effect: Any) -> DirectExecutionService:
     return DirectExecutionService(
         masr_router=router, supervisor_bridge=bridge, event_publisher=None
     )
+
+
+class TestProviderFailureIsNotABudgetFailure:
+    """A fail-closed provider error ends the run as that error, after one attempt."""
+
+    async def test_plan_provider_failure_is_terminal_and_keeps_its_failure_code(
+        self,
+    ) -> None:
+        from src.agents.llm_worker_base import (
+            PlanProviderUnavailableError,
+            _GenerationRoute,
+        )
+
+        failed = SimpleNamespace(
+            success=False,
+            content="",
+            error_message="provider down",
+            total_tokens=0,
+            cost_estimate=0.0,
+            finish_reason="error",
+        )
+        route = _route([failed, failed, failed])
+        generation_route = _GenerationRoute(
+            router=route.router,
+            routing_decision=_FIXTURE_DECISION,
+            fail_closed=True,
+        )
+
+        async def bridge(_plan: Any, task: AgentTask) -> Any:
+            worker_task = AgentTask(
+                id="w",
+                agent_type="test_budget",
+                input_data={"query": "q"},
+                context=task.context,
+            )
+            with patch.object(
+                _Worker, "_select_generation_route", return_value=generation_route
+            ):
+                await _Worker()._generate_with_routing("prompt", worker_task)
+
+        service = _service_with_bridge(None)
+        service.supervisor_bridge.execute_execution_plan = AsyncMock(side_effect=bridge)
+        project = _make_project()
+        status = ExecutionStatus(
+            execution_id="exec-p", project_id=str(project.id), status="pending"
+        )
+        persisted: list[dict[str, Any]] = []
+
+        async def record(_status: Any, **kwargs: Any) -> Any:
+            persisted.append(kwargs)
+            return MagicMock()
+
+        retry = service._execute_research_workflow.retry
+        with (
+            patch.object(retry, "sleep", AsyncMock()),
+            patch.object(service, "_persist_transition", side_effect=record),
+            patch.object(service, "_record_attempt_failure", AsyncMock()),
+            patch.object(service, "_settle_terminal_state"),
+            pytest.raises(PlanProviderUnavailableError),
+        ):
+            await service._execute_research_workflow(
+                project,
+                status,
+                {},
+                routing_decision=_DecisionStub(_AllocStub(), _ComplexityAnalysisStub()),
+                execution_plan=_plan(),
+            )
+
+        assert service.supervisor_bridge.execute_execution_plan.await_count == 1
+        assert persisted[-1]["event_type"] == "run.failed"
+        assert status.failure_code == "PLAN_PROVIDER_UNAVAILABLE"
 
 
 class TestServiceTerminalState:

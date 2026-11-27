@@ -172,19 +172,26 @@ class GeminiProvider(BaseProvider):
             raise ValueError("GeminiService not available")
 
         try:
-            service_text = await self.gemini_service.generate_content(prompt)
+            # The provider records this call itself, so the service must not.
+            generated = await self.gemini_service.generate_content_result(
+                prompt, record_metrics=False
+            )
+            service_text = generated.content
             # The service runs its own configured model, whatever was requested.
             model_name = self.gemini_service.model_name
 
             end_time = datetime.now()
             latency_ms = int((end_time - start_time).total_seconds() * 1000)
 
-            # Estimate token usage (Gemini service might provide this)
-            prompt_tokens_float = len(prompt.split()) * 1.3
-            completion_tokens_float = len(service_text.split()) * 1.3
-            prompt_tokens = int(prompt_tokens_float)
-            completion_tokens = int(completion_tokens_float)
-            total_tokens = prompt_tokens + completion_tokens
+            usage_estimated = generated.total_tokens is None
+            if usage_estimated:
+                prompt_tokens = int(len(prompt.split()) * 1.3)
+                completion_tokens = int(len(service_text.split()) * 1.3)
+                total_tokens = prompt_tokens + completion_tokens
+            else:
+                prompt_tokens = generated.prompt_tokens or 0
+                completion_tokens = generated.completion_tokens or 0
+                total_tokens = generated.total_tokens or 0
 
             cost = self._calculate_cost(prompt_tokens, completion_tokens, model_name)
             confidence = self._calculate_confidence_score(service_text, request)
@@ -197,12 +204,13 @@ class GeminiProvider(BaseProvider):
                 completion_tokens=completion_tokens,
                 prompt_tokens=prompt_tokens,
                 total_tokens=total_tokens,
+                usage_estimated=usage_estimated,
                 latency_ms=latency_ms,
                 processing_time_ms=latency_ms,
                 confidence_score=confidence,
                 success=True,
                 cost_estimate=cost,
-                finish_reason="completed",
+                finish_reason=generated.finish_reason or "completed",
             )
 
         except Exception as e:

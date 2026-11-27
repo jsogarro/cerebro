@@ -19,16 +19,19 @@ def gemini_provider(monkeypatch: pytest.MonkeyPatch) -> Any:
     """The real GeminiService; only its network call is stubbed."""
     from src.ai_brain.providers.gemini_provider import GeminiProvider
     from src.services import gemini_service as service_module
+    from src.services.gemini_service import GeminiResult
 
     SENT_PROMPTS.clear()
 
-    async def fake_generate(_self: Any, prompt: str) -> str:
+    async def fake_generate(
+        _self: Any, prompt: str, *, record_metrics: bool = True
+    ) -> GeminiResult:
         SENT_PROMPTS.append(prompt)
-        return "stub answer"
+        return GeminiResult("stub answer", None, None, None, None)
 
     monkeypatch.setattr(service_module, "ChatGoogleGenerativeAI", lambda **_k: None)
     monkeypatch.setattr(
-        service_module.GeminiService, "_generate_content", fake_generate
+        service_module.GeminiService, "generate_content_result", fake_generate
     )
     monkeypatch.setenv("GEMINI_MODEL", "gemini-env-model")
     return GeminiProvider({"api_key": "k"})
@@ -44,6 +47,34 @@ async def test_valid_gemini_request_reaches_the_service(gemini_provider: Any) ->
     assert SENT_PROMPTS == ["hello"]
     # The service runs GEMINI_MODEL, so that is what is reported, not "gemini-pro".
     assert response.model_name == "gemini-env-model"
+
+
+async def test_provider_reports_service_usage_and_finish_reason(
+    gemini_provider: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.services import gemini_service as service_module
+
+    async def reported(_self: Any, prompt: str, *, record_metrics: bool = True) -> Any:
+        assert record_metrics is False  # the provider records the call itself
+        return service_module.GeminiResult("text", "MAX_TOKENS", 7, 3, 10)
+
+    monkeypatch.setattr(
+        service_module.GeminiService, "generate_content_result", reported
+    )
+    response = await gemini_provider.generate(ModelRequest(prompt="hi"), "gemini-pro")
+
+    assert response.finish_reason == "MAX_TOKENS"
+    assert (response.prompt_tokens, response.completion_tokens) == (7, 3)
+    assert response.total_tokens == 10 and response.usage_estimated is False
+
+
+async def test_provider_marks_unreported_usage_as_an_estimate(
+    gemini_provider: Any,
+) -> None:
+    response = await gemini_provider.generate(ModelRequest(prompt="hi"), "gemini-pro")
+
+    assert response.usage_estimated is True
+    assert response.finish_reason == "completed"
 
 
 async def test_concurrent_first_calls_load_the_catalog_once(
