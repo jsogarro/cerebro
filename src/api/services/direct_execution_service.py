@@ -2608,7 +2608,12 @@ class DirectExecutionService:
                 error="worker outcomes did not satisfy the plan",
                 failure_code=execution_status.failure_code,
                 failures=failures,
-                partial_worker_ids=sorted(plan_result.worker_results),
+                # A failed worker's error payload is not a partial result.
+                partial_worker_ids=sorted(
+                    worker_id
+                    for worker_id, outcome in plan_result.outcomes.items()
+                    if outcome.succeeded
+                ),
             ),
             reason="worker outcomes did not satisfy the plan",
         )
