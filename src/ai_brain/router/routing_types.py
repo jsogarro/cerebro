@@ -24,6 +24,21 @@ class RoutingStrategy(StrEnum):
     ADAPTIVE = "adaptive"  # Learn from usage patterns
 
 
+class WorkflowShapeUnsupportedError(ValueError):
+    """The query does not fit the workflow shape a launch is constrained to."""
+
+
+@dataclass(frozen=True)
+class WorkflowShape:
+    """Execution shape a catalogue entry fixes before routing starts."""
+
+    strategy: str
+    domains: tuple[str, ...]
+    collaboration_mode: CollaborationMode
+    worker_types: tuple[str, ...]
+    provider_allowlist: tuple[str, ...]
+
+
 class AdaptiveRoutingStatus(StrEnum):
     """State of the optional Thompson-sampling allocation path."""
 

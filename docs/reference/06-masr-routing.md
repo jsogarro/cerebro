@@ -8,7 +8,7 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 |---|---|---|---|
 | Query analysis and complexity scoring | Active | `MASRouter.route` | `src/ai_brain/router/query_analyzer.py` (`QueryComplexityAnalyzer`) |
 | Multi-domain decomposition | Active (analysis only) | `QueryComplexityAnalyzer.analyze` | `src/ai_brain/router/query_decomposer.py` (`QueryDecomposer`) |
-| `MASR_COMPLEXITY_WEIGHTS`, `MASR_COMPLEXITY_THRESHOLDS` | Not wired | `settings_to_router_config` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) |
+| `MASR_COMPLEXITY_WEIGHTS`, `MASR_COMPLEXITY_THRESHOLDS` | Active | `settings_to_router_config` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) |
 | Collaboration mode selection and fast path | Active | `MASRouter.route` | `src/ai_brain/router/masr.py` (`MASRouter._determine_collaboration_mode`) |
 | Routing strategies | Active | `MASRouter.route`, `POST /api/v1/masr/route` | `src/ai_brain/router/routing_types.py` (`RoutingStrategy`) |
 | Model selection and cost estimate | Active | `MASRouter.route` | `src/ai_brain/router/cost_optimizer.py` (`CostOptimizer`) |
@@ -26,18 +26,18 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 
 ## Role in execution
 
-`MASRouter.route` returns a `RoutingDecision` (`src/ai_brain/router/masr.py`). The research execution path treats that decision as a proposal: `DirectExecutionService._propose_routing` asks MASR for it, and `ExecutionPlanCompiler.compile` (`src/ai_brain/router/execution_plan_compiler.py`) compares it with the trusted execution authority and rejects any mismatch in strategy, collaboration mode, worker types, supervisor type, domains or provider and model routes. MASR cannot supply the worker list, provider policy or budget that the compiled `ExecutionPlan` carries. See [research execution](05-research-execution.md).
+`MASRouter.route` returns a `RoutingDecision` (`src/ai_brain/router/masr.py`). The research execution path treats that decision as a proposal: `DirectExecutionService._propose_routing` asks MASR for it, and `ExecutionPlanCompiler.compile` (`src/ai_brain/router/execution_plan_compiler.py`) compares it with the trusted execution authority and rejects any mismatch in strategy, collaboration mode, worker types, supervisor type (not checked for `fast_path` and `direct`, which have no supervisor node), domains or provider and model routes. MASR cannot supply the worker list, provider policy or budget that the compiled `ExecutionPlan` carries. See [research execution](05-research-execution.md).
 
 `route` catches every `Exception` raised while routing, including a rejection by an open circuit breaker, and `_create_fallback_decision` returns a `DIRECT` decision with one worker of type `general`, supervisor type `general`, `confidence_score` 0.3, `fallback_strategy` `error_recovery` and the `llama-3.3-70b` model specification.
 
 ## Query analysis
 
-`QueryComplexityAnalyzer.analyze` (`src/ai_brain/router/query_analyzer.py`) lower-cases and normalises the query, scores seven factors (linguistic, reasoning, domain, data, output, time, quality) and combines them as a weighted sum capped at 1.0. The analyzer's default weights are 0.15, 0.25, 0.20, 0.15, 0.15, 0.05 and 0.05. A score below 0.12 is `simple`, below 0.22 is `moderate` and anything higher is `complex` (`ComplexityLevel`). The analysis also carries:
+`QueryComplexityAnalyzer.analyze` (`src/ai_brain/router/query_analyzer.py`) lower-cases and normalises the query, scores seven factors (linguistic, reasoning, domain, data, output, time, quality) and combines them as a weighted sum capped at 1.0. The analyzer's default weights are 0.15, 0.25, 0.20, 0.15, 0.15, 0.05 and 0.05. With the default thresholds a score below 0.12 is `simple`, below 0.22 is `moderate` and anything higher is `complex` (`ComplexityLevel`). The analysis also carries:
 
 - `domains`: a list of `QueryDomain` values (`research`, `content`, `analytics`, `service`, `general`, `multimodal`, `finance`) matched by regular expressions.
 - `subtask_count`, `uncertainty`, `reasoning_types`, `recommended_agents`, `estimated_tokens` and `priority_level` (`low`, `normal`, `high`, `critical`).
 
-> **Not wired.** `settings_to_router_config` maps `MASR_COMPLEXITY_WEIGHTS` and `MASR_COMPLEXITY_THRESHOLDS` into `complexity_analyzer.weights` and `complexity_analyzer.thresholds`. Changing them does not change analysis: `QueryComplexityAnalyzer` reads the key `complexity_weights`, which the mapping never sets, and it has no thresholds key (the level cutoffs above are constants in `_determine_complexity_level`).
+`settings_to_router_config` maps `MASR_COMPLEXITY_WEIGHTS` and `MASR_COMPLEXITY_THRESHOLDS` into the analyzer's `complexity_weights` and `complexity_thresholds` keys. The `simple` and `moderate` thresholds default to 0.12 and 0.22.
 
 `QueryDecomposer.decompose_query` runs when the analysis finds more than one domain and `general` is not among them. It matches keyword lists for five domains (`research`, `content`, `analytics`, `service`, `finance`) and returns a `QueryDecomposition` with per-domain sub-queries, a `research` to `content` dependency when both are detected and the `is_multi_domain` property. The result is stored on `ComplexityAnalysis.decomposition`. No production code reads `decomposition` or `is_multi_domain`, so the decomposition does not alter routing.
 
@@ -47,7 +47,7 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 
 | Mode | Plan compilation | Notes |
 |---|---|---|
-| `fast_path` | Implemented | One worker, executed exactly like `direct` |
+| `fast_path` | Implemented | One registered worker, executed exactly like `direct` |
 | `direct` | Implemented | One worker |
 | `parallel` | Implemented | Workers run side by side |
 | `hierarchical` | Implemented | Supervisor-style layout |
@@ -82,13 +82,17 @@ The strategy maps to a cost-optimizer strategy: `speed_first` to `latency_optimi
 
 `MASR_ENABLE_ADAPTIVE` (default `true`) controls only the history-based heuristic in `RoutingMetricsCollector.get_adaptive_strategy`. It never enables the Thompson-sampling allocation described under [Adaptive routing](#adaptive-routing); `settings_to_router_config` documents this and only `ADAPTIVE_ROUTING_ENABLED` can enable it. The heuristic reads up to 10,000 retained decisions from the last 24 hours and returns the strategy with the best average confidence. Because it labels every decision `balanced`, it returns `balanced` once the history holds at least 100 decisions and no context override is given. When none of the retained decisions is recent, it returns the default strategy.
 
+## Routing under a catalogue entry
+
+`MASRouter.route(..., shape=WorkflowShape)` (`src/ai_brain/router/routing_types.py`) routes a catalogue launch. The entry (`WorkflowCatalogEntry.shape()`) fixes strategy, domain, collaboration mode, workers and provider allowlist; the optimizer only considers models whose provider is in the allowlist, no fallbacks are proposed, and the decision cache is bypassed. The query analysis decides only whether the query fits: a domain other than the entry's (or `general`) raises `WorkflowShapeUnsupportedError`, which `route` re-raises instead of returning its fallback decision and which does not count against the routing circuit breaker. Routing without `shape` is unchanged.
+
 ## Worker allocation
 
 `MASRouter._allocate_agents` builds an `AgentAllocation` (`supervisor_type`, `worker_count`, `worker_types`, `max_parallel`, `timeout_seconds`, `retry_attempts`) from the mode:
 
 | Mode | Worker count | Worker types |
 |---|---|---|
-| `fast_path` | 1 | none |
+| `fast_path` | 1 | one registered worker for the domain (`research`: `literature_review`, `content`: `drafting`, `analytics`: `data_analysis`, `finance`: `financial_analysis`); `general`, `service` and `multimodal` get none rather than an unregistered label; the optimizer's fallback models are cleared |
 | `direct` | 1 | one per detected domain |
 | `parallel` | `min(domains + 1, max_parallel_workers)`, then the strategy budget | one per detected domain |
 | `hierarchical` | `min(subtask_count, max_agents)`, then the strategy budget | reasoning specialists, domain specialists and `validation_specialist` |

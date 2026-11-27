@@ -44,6 +44,8 @@ KNOWN_UNREACHABLE: frozenset[str] = frozenset(
         "src.core.contracts.citation",
         "src.services.evaluation_regression",
         "src.services.visualization_generator",
+        # Launch contract frozen ahead of its callers; durable launch wires it.
+        "src.api.services.workflow_launch_service",
     }
 )
 

@@ -224,3 +224,49 @@ class TestStrategyBudgets:
 
         # DEBATE normally fixed at 3, budget cap is also 3 for COST_EFFICIENT
         assert allocation.worker_count == 3, "DEBATE should use 3 workers"
+
+
+class TestFastPathWorker:
+    """The fast path never names an unregistered worker."""
+
+    @pytest.fixture
+    def router(self):
+        return MASRouter(config={"default_strategy": "balanced"})
+
+    @pytest.mark.parametrize(
+        ("domain", "workers"),
+        [
+            ("research", ["literature_review"]),
+            ("content", ["drafting"]),
+            ("analytics", ["data_analysis"]),
+            ("finance", ["financial_analysis"]),
+            # No registered worker: none is named, as before.
+            ("general", []),
+            ("service", []),
+            ("multimodal", []),
+        ],
+    )
+    def test_fast_path_names_only_registered_workers(self, router, domain, workers):
+        from src.core.kernel.component_keys import AGENT_KEYS
+
+        allocation = router._allocate_agents(
+            make_complexity(domains=[domain]), CollaborationMode.FAST_PATH, None, None
+        )
+        assert allocation.worker_types == workers
+        assert set(allocation.worker_types) <= set(AGENT_KEYS)
+
+    @pytest.mark.parametrize("domain", ["general", "service", "multimodal"])
+    def test_eligibility_does_not_depend_on_having_a_worker(self, router, domain):
+        assert router._should_use_fast_path(make_complexity(domains=[domain])) is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "query", ["Hello", "Reset my account password", "Describe this image"]
+    )
+    async def test_uncatalogued_routing_names_no_unregistered_worker(
+        self, router, query
+    ):
+        from src.core.kernel.component_keys import AGENT_KEYS
+
+        decision = await router.route(query, {})
+        assert set(decision.agent_allocation.worker_types) <= set(AGENT_KEYS)

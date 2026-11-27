@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -63,7 +63,12 @@ from .adaptive_state_store import (
     empty_adaptive_snapshot,
 )
 from .cost_optimizer import CostOptimizer, OptimizationResult, OptimizationStrategy
-from .query_analyzer import ComplexityAnalysis, ComplexityLevel, QueryComplexityAnalyzer
+from .query_analyzer import (
+    ComplexityAnalysis,
+    ComplexityLevel,
+    QueryComplexityAnalyzer,
+    QueryDomain,
+)
 from .routing_cache import RoutingCacheManager
 from .routing_metrics import RoutingMetricsCollector
 from .routing_observability import observe_effective_state
@@ -85,6 +90,8 @@ from .routing_types import (
     RoutingExecutionPolicy,
     RoutingMetrics,
     RoutingStrategy,
+    WorkflowShape,
+    WorkflowShapeUnsupportedError,
 )
 
 logger = get_logger()
@@ -149,6 +156,15 @@ class MASRouter:
     # penalty changes, revisit this constant and the fast-path tests.
     _FAST_PATH_UNCERTAINTY_CEILING = 0.3
 
+    # Registered agent names (AGENT_KEYS). A domain absent here gets no worker
+    # rather than an unregistered label.
+    _FAST_PATH_WORKERS = {
+        "research": "literature_review",
+        "content": "drafting",
+        "analytics": "data_analysis",
+        "finance": "financial_analysis",
+    }
+
     def __init__(
         self,
         config: dict[str, Any] | None = None,
@@ -212,6 +228,8 @@ class MASRouter:
                 failure_threshold=self.config.get("circuit_failure_threshold", 5),
                 success_threshold=self.config.get("circuit_success_threshold", 2),
                 timeout=self.config.get("circuit_timeout_seconds", 60.0),
+                # A caller's query not fitting a workflow is not a router fault.
+                exclude_exceptions=(WorkflowShapeUnsupportedError,),
             ),
         )
 
@@ -312,9 +330,15 @@ class MASRouter:
         strategy: RoutingStrategy | None = None,
         constraints: dict[str, Any] | None = None,
         execution_policy: RoutingExecutionPolicy | None = None,
+        shape: WorkflowShape | None = None,
     ) -> RoutingDecision:
         """
         Route a query through intelligent analysis and optimization.
+
+        With ``shape`` the catalogue entry is the authority: strategy, domains,
+        mode, workers and provider allowlist come from it, the query analysis
+        only decides whether the query fits, and no fallbacks are proposed.
+        Un-shaped routing is unchanged.
 
         Args:
             query: The input query to route
@@ -327,6 +351,12 @@ class MASRouter:
         """
         start_time = datetime.now()
         query_id = str(uuid.uuid4())
+        if shape is not None:
+            strategy = RoutingStrategy(shape.strategy)
+            constraints = {
+                **(constraints or {}),
+                "provider_allowlist": list(shape.provider_allowlist),
+            }
         effective_policy = execution_policy or (
             RoutingExecutionPolicy.fixture()
             if self.fixture_mode
@@ -370,6 +400,7 @@ class MASRouter:
                         None
                         if self.adaptive_routing_enabled
                         or effective_policy.fixture_mode
+                        or shape is not None
                         else self.cache_manager.check_cache(
                             query, context, strategy, constraints
                         )
@@ -398,6 +429,10 @@ class MASRouter:
                     complexity_analysis = await self.complexity_analyzer.analyze(
                         query, context
                     )
+                    if shape is not None:
+                        complexity_analysis = self._fit_to_shape(
+                            complexity_analysis, shape
+                        )
 
                     # Step 2: Optimize model selection.
                     # ``strategy`` may arrive as a bare string when the caller used a
@@ -419,9 +454,22 @@ class MASRouter:
                     )
 
                     # Step 3: Determine collaboration mode
-                    collaboration_mode = self._determine_collaboration_mode(
-                        complexity_analysis, optimization_result
+                    collaboration_mode = (
+                        shape.collaboration_mode
+                        if shape is not None
+                        else self._determine_collaboration_mode(
+                            complexity_analysis, optimization_result
+                        )
                     )
+
+                    if (
+                        shape is not None
+                        or collaboration_mode == CollaborationMode.FAST_PATH
+                    ):
+                        # The plan admits no provider substitution.
+                        optimization_result = replace(
+                            optimization_result, fallback_models=[]
+                        )
 
                     # Step 3.5: Query episodic memory for routing prior (if enabled)
                     episodic_prior = (
@@ -457,6 +505,13 @@ class MASRouter:
                         )
                     )
 
+                    if shape is not None:
+                        agent_allocation = replace(
+                            agent_allocation,
+                            worker_count=len(shape.worker_types),
+                            worker_types=list(shape.worker_types),
+                        )
+
                     # Step 5: Calculate performance predictions
                     predictions = self._predict_performance(
                         complexity_analysis, optimization_result, agent_allocation
@@ -490,7 +545,8 @@ class MASRouter:
 
                     # Cache decision
                     if (
-                        not self.adaptive_routing_enabled
+                        shape is None
+                        and not self.adaptive_routing_enabled
                         and not effective_policy.fixture_mode
                     ):
                         self.cache_manager.cache_decision(
@@ -545,6 +601,8 @@ class MASRouter:
                 # call() records success/failure and gates OPEN/HALF_OPEN.
                 return await self._routing_circuit_breaker.call(_route)
 
+            except WorkflowShapeUnsupportedError:
+                raise
             except Exception as e:
                 logger.error(f"Routing failed for {query_id}: {e}")
                 # Update trace with error metadata. Exception messages may contain
@@ -634,6 +692,27 @@ class MASRouter:
             and complexity_analysis.uncertainty <= self._FAST_PATH_UNCERTAINTY_CEILING
             and "critical" not in complexity_analysis.priority_level
         )
+
+    @staticmethod
+    def _fit_to_shape(
+        analysis: ComplexityAnalysis, shape: WorkflowShape
+    ) -> ComplexityAnalysis:
+        """Reject queries outside the entry's domains; label the rest with them.
+
+        ``general`` fits because it is the analyzer's default for a query with
+        no domain signal; any other domain is a real mismatch.
+        """
+        names = {MASRouter._domain_name(d) for d in analysis.domains}
+        if not names <= {*shape.domains, "general"}:
+            raise WorkflowShapeUnsupportedError(
+                f"query domain {sorted(names)} is outside the workflow's "
+                f"domain {list(shape.domains)}"
+            )
+        return replace(analysis, domains=[QueryDomain(d) for d in shape.domains])
+
+    @staticmethod
+    def _domain_name(domain: Any) -> str:
+        return str(getattr(domain, "value", domain))
 
     def _determine_collaboration_mode(
         self,
@@ -1494,11 +1573,15 @@ class MASRouter:
 
         # Base allocation by collaboration mode
         if collaboration_mode == CollaborationMode.FAST_PATH:
-            # Fast path: no supervisor, single LLM call
+            # One registered worker; the compiled plan requires exactly one.
             return AgentAllocation(
                 supervisor_type=primary_supervisor,  # Placeholder (not used)
                 worker_count=1,
-                worker_types=[],  # No workers (direct LLM call)
+                worker_types=[
+                    self._FAST_PATH_WORKERS[name]
+                    for name in [self._domain_name(complexity_analysis.domains[0])]
+                    if name in self._FAST_PATH_WORKERS
+                ],
                 max_parallel=1,
                 timeout_seconds=SHORT_TIMEOUT,
                 retry_attempts=MIN_RETRY_ATTEMPTS,

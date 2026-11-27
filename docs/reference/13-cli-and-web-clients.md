@@ -147,13 +147,13 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 
 ### Pages
 
-> **Not wired.** The workflows, runs, run detail and memory pages call routes the API does not mount. The API mounts no `/api/v1/workflows`, no `/api/v1/runs` list, create or detail route, no `/api/v1/runs/{id}/cancel`, no `/api/v1/memory/nodes` and no `/api/v1/agents/{id}/logs`. The only run route it mounts is `GET /api/v1/runs/{run_id}/events`, which streams server-sent events rather than returning a JSON collection. The dashboard, QA, costs and benchmarks pages never call the API: the dashboard holds its figures in the component, and the QA, costs and benchmarks clients return fixed values with the real call commented out. The settings page has inputs and a switch with no handlers.
+> **Not wired.** The workflows, runs, run detail and memory pages call routes the API does not mount. The API mounts `GET /api/v1/workflows` (the catalogue listing) but no `/api/v1/runs` list, create or detail route, no `/api/v1/runs/{id}/cancel`, no `/api/v1/memory/nodes` and no `/api/v1/agents/{id}/logs`. The only run route it mounts is `GET /api/v1/runs/{run_id}/events`, which streams server-sent events rather than returning a JSON collection. The dashboard, QA, costs and benchmarks pages never call the API: the dashboard holds its figures in the component, and the QA, costs and benchmarks clients return fixed values with the real call commented out. The settings page has inputs and a switch with no handlers.
 
 | Route | Page | Backend calls | Backed |
 |---|---|---|---|
 | `/` | `Landing` | none | static |
 | `/app` | redirect to `/app/workflows` | none | static |
-| `/app/workflows` | `Workflows` | `GET /api/v1/workflows`; `POST /api/v1/runs` from the run form | No. The page shows an unavailable notice and substitutes no data. |
+| `/app/workflows` | `Workflows` | `GET /api/v1/workflows`; `POST /api/v1/runs` from the run form | Partly. `GET /api/v1/workflows` is mounted; `POST /api/v1/runs` is not, so the page cannot start a run. |
 | `/app/runs` | `Runs` | `GET /api/v1/runs`; `POST /api/v1/runs/{id}/cancel` | No. The page shows an unavailable notice. |
 | `/app/runs/:id` | `RunDetail` | `GET /api/v1/runs/{id}`, `/tasks`, `/events`, `/evidence`, `/artifacts`, `/evaluations` | No. Only `/events` is mounted, and it streams. |
 | `/app/dashboard` | `Dashboard` | none | static; fixed values in the component |
