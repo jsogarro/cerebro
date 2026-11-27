@@ -177,7 +177,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
-            texlive-latex-base poppler-utils
+            texlive-latex-base texlive-latex-recommended texlive-latex-extra \
+            poppler-utils
 
       # The flags turn "engine missing" skips into failures, so the PDF and
       # TeX hardening tests cannot pass by not running.
