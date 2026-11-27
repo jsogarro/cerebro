@@ -23,7 +23,7 @@ from src.middleware.tenant_context import (
     owner_ids,
 )
 from src.models.db.generated_report import GeneratedReport
-from src.models.db.session import get_session, get_session_factory, tenant_session
+from src.models.db.session import SessionDep, get_session_factory, tenant_session
 from src.models.report import (
     CitationStyle,
     ReportConfiguration,
@@ -271,7 +271,7 @@ def get_report_services(
 async def generate_report(
     request: CreateReportRequest,
     background_tasks: BackgroundTasks,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> ReportResponse:
     """
@@ -387,7 +387,7 @@ async def generate_report(
 async def get_report_statistics(
     user_id: UUID | None = Query(None, description="Filter by user ID"),
     days: int = Query(30, ge=1, le=365, description="Days to look back"),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> ReportStatisticsResponse:
     """Get report generation statistics."""
@@ -438,7 +438,7 @@ async def get_report_statistics(
 @router.get("/{report_id}", response_model=ReportResponse)
 async def get_report(
     report_id: UUID,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> ReportResponse:
     """Get report details by ID."""
@@ -488,7 +488,7 @@ async def get_report(
 async def download_report(
     report_id: UUID,
     format_type: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> StreamingResponse:
     """Download report in specific format."""
@@ -561,7 +561,7 @@ async def list_reports(
     report_type: str | None = Query(None, description="Filter by report type"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Page size"),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> ReportListResponse:
     """List reports with filtering and pagination."""
@@ -616,7 +616,7 @@ async def list_reports(
 @router.post("/search", response_model=ReportListResponse)
 async def search_reports(
     request: ReportSearchRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> ReportListResponse:
     """Search reports by text and filters."""
@@ -676,7 +676,7 @@ async def search_reports(
 async def delete_report(
     report_id: UUID,
     delete_files: bool = Query(True, description="Also delete associated files"),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> None:
     """Delete a report and optionally its files."""
@@ -721,7 +721,7 @@ async def delete_report(
 @router.get("/{report_id}/integrity")
 async def verify_report_integrity(
     report_id: UUID,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant_context: TenantContext = Depends(get_tenant_context),
 ) -> dict[str, Any]:
     """Verify the integrity of a report and its files."""

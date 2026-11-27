@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.models import PersonalAccessTokenPayload, TokenPayload
 from src.middleware.auth_middleware import get_current_token
-from src.models.db.session import get_session
+from src.models.db.session import SessionDep
 
 
 @dataclass(frozen=True)
@@ -103,7 +103,7 @@ async def get_tenant_identity(
 
 async def get_tenant_context(
     token_payload: TokenPayload = Depends(get_current_token),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
 ) -> TenantContext:
     """Resolve authenticated tenant context and set DB session context."""
     organization_id = require_organization_id(token_payload)

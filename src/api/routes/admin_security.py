@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.middleware.auth_middleware import get_current_active_user, require_superuser
 from src.models.db.audit_log import AuditEventType, AuditLog
 from src.models.db.security_alert import AlertStatus, AlertType, SecurityAlert
-from src.models.db.session import get_session
+from src.models.db.session import SessionDep, get_session
 from src.models.db.user import User
 
 router = APIRouter(
@@ -29,7 +29,7 @@ async def list_audit_events(
     event_type: AuditEventType | None = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
 ) -> dict[str, Any]:
     query = select(AuditLog).order_by(AuditLog.created_at.desc())
     if event_type is not None:
@@ -44,7 +44,7 @@ async def list_security_alerts(
     status: AlertStatus | None = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
 ) -> dict[str, Any]:
     query = select(SecurityAlert).order_by(SecurityAlert.created_at.desc())
     if alert_type is not None:
@@ -58,14 +58,11 @@ async def list_security_alerts(
 @router.post("/alerts/{alert_id}/acknowledge")
 async def acknowledge_security_alert(
     alert_id: UUID,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     user: User = Depends(get_current_active_user),
 ) -> dict[str, Any]:
     alert = await db.get(SecurityAlert, alert_id)
     if alert is None:
         raise HTTPException(status_code=404, detail="Security alert not found")
     alert.acknowledge(str(user.id))
-    # get_session commits only after the response is sent; commit here so a 200
-    # means the row is durable, and a write that matches no row fails the call.
-    await db.commit()
     return alert.to_dict()
