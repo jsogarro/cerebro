@@ -8,7 +8,7 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 |---|---|---|---|
 | Query analysis and complexity scoring | Active | `MASRouter.route` | `src/ai_brain/router/query_analyzer.py` (`QueryComplexityAnalyzer`) |
 | Multi-domain decomposition | Active (analysis only) | `QueryComplexityAnalyzer.analyze` | `src/ai_brain/router/query_decomposer.py` (`QueryDecomposer`) |
-| `MASR_COMPLEXITY_WEIGHTS`, `MASR_COMPLEXITY_THRESHOLDS` | Not wired | `settings_to_router_config` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) |
+| `MASR_COMPLEXITY_WEIGHTS`, `MASR_COMPLEXITY_THRESHOLDS` | Active | `settings_to_router_config` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) |
 | Collaboration mode selection and fast path | Active | `MASRouter.route` | `src/ai_brain/router/masr.py` (`MASRouter._determine_collaboration_mode`) |
 | Routing strategies | Active | `MASRouter.route`, `POST /api/v1/masr/route` | `src/ai_brain/router/routing_types.py` (`RoutingStrategy`) |
 | Model selection and cost estimate | Active | `MASRouter.route` | `src/ai_brain/router/cost_optimizer.py` (`CostOptimizer`) |
@@ -32,12 +32,12 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 
 ## Query analysis
 
-`QueryComplexityAnalyzer.analyze` (`src/ai_brain/router/query_analyzer.py`) lower-cases and normalises the query, scores seven factors (linguistic, reasoning, domain, data, output, time, quality) and combines them as a weighted sum capped at 1.0. The analyzer's default weights are 0.15, 0.25, 0.20, 0.15, 0.15, 0.05 and 0.05. A score below 0.12 is `simple`, below 0.22 is `moderate` and anything higher is `complex` (`ComplexityLevel`). The analysis also carries:
+`QueryComplexityAnalyzer.analyze` (`src/ai_brain/router/query_analyzer.py`) lower-cases and normalises the query, scores seven factors (linguistic, reasoning, domain, data, output, time, quality) and combines them as a weighted sum capped at 1.0. The analyzer's default weights are 0.15, 0.25, 0.20, 0.15, 0.15, 0.05 and 0.05. With the default thresholds a score below 0.12 is `simple`, below 0.22 is `moderate` and anything higher is `complex` (`ComplexityLevel`). The analysis also carries:
 
 - `domains`: a list of `QueryDomain` values (`research`, `content`, `analytics`, `service`, `general`, `multimodal`, `finance`) matched by regular expressions.
 - `subtask_count`, `uncertainty`, `reasoning_types`, `recommended_agents`, `estimated_tokens` and `priority_level` (`low`, `normal`, `high`, `critical`).
 
-> **Not wired.** `settings_to_router_config` maps `MASR_COMPLEXITY_WEIGHTS` and `MASR_COMPLEXITY_THRESHOLDS` into `complexity_analyzer.weights` and `complexity_analyzer.thresholds`. Changing them does not change analysis: `QueryComplexityAnalyzer` reads the key `complexity_weights`, which the mapping never sets, and it has no thresholds key (the level cutoffs above are constants in `_determine_complexity_level`).
+`settings_to_router_config` maps `MASR_COMPLEXITY_WEIGHTS` and `MASR_COMPLEXITY_THRESHOLDS` into the analyzer's `complexity_weights` and `complexity_thresholds` keys. The `simple` and `moderate` thresholds default to 0.12 and 0.22.
 
 `QueryDecomposer.decompose_query` runs when the analysis finds more than one domain and `general` is not among them. It matches keyword lists for five domains (`research`, `content`, `analytics`, `service`, `finance`) and returns a `QueryDecomposition` with per-domain sub-queries, a `research` to `content` dependency when both are detected and the `is_multi_domain` property. The result is stored on `ComplexityAnalysis.decomposition`. No production code reads `decomposition` or `is_multi_domain`, so the decomposition does not alter routing.
 
@@ -47,7 +47,7 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 
 | Mode | Plan compilation | Notes |
 |---|---|---|
-| `fast_path` | Implemented | One worker, executed exactly like `direct` |
+| `fast_path` | Implemented | One registered worker, executed exactly like `direct` |
 | `direct` | Implemented | One worker |
 | `parallel` | Implemented | Workers run side by side |
 | `hierarchical` | Implemented | Supervisor-style layout |
@@ -56,7 +56,7 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 
 `MASRouter._determine_collaboration_mode` chooses a mode in this order:
 
-1. `fast_path` when `_should_use_fast_path` is true: the setting `MASR_FAST_PATH_ENABLED` (default `true`, read at call time) is on, complexity is `simple`, exactly one domain and one subtask were found, `uncertainty` is at most 0.3 and the priority is not `critical`.
+1. `fast_path` when `_should_use_fast_path` is true: the setting `MASR_FAST_PATH_ENABLED` (default `true`, read at call time) is on, complexity is `simple`, exactly one domain with a registered fast-path worker and one subtask were found, `uncertainty` is at most 0.3 and the priority is not `critical`.
 2. `direct` for any other `simple` query.
 3. `parallel` when more than two domains were found.
 4. `debate` when `uncertainty` is above 0.7.
@@ -88,7 +88,7 @@ The strategy maps to a cost-optimizer strategy: `speed_first` to `latency_optimi
 
 | Mode | Worker count | Worker types |
 |---|---|---|
-| `fast_path` | 1 | none |
+| `fast_path` | 1 | one registered worker for the domain (`research` and `general`: `literature_review`, `content`: `drafting`, `analytics`: `data_analysis`, `finance`: `financial_analysis`); `supervisor_type` is `None` and the optimizer's fallback models are cleared |
 | `direct` | 1 | one per detected domain |
 | `parallel` | `min(domains + 1, max_parallel_workers)`, then the strategy budget | one per detected domain |
 | `hierarchical` | `min(subtask_count, max_agents)`, then the strategy budget | reasoning specialists, domain specialists and `validation_specialist` |

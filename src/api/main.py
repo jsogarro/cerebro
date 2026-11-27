@@ -51,6 +51,7 @@ from src.api.routes import (
     talkhier_api,
     users,
     websocket,
+    workflows,
 )
 from src.api.services.event_publisher import event_publisher
 from src.api.websocket.connection_manager import websocket_manager
@@ -538,6 +539,7 @@ app.include_router(users.router, prefix="/api/v1")
 app.include_router(admin_security.router, prefix="/api/v1")
 app.include_router(research.router, prefix="/api/v1", tags=["research"])
 app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
+app.include_router(workflows.router, prefix="/api/v1", tags=["workflows"])
 app.include_router(documents.router, prefix="/api/v1")
 app.include_router(critiques.router, prefix="/api/v1")
 app.include_router(similarity_checks.router, prefix="/api/v1")

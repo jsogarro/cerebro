@@ -17,6 +17,7 @@ The FastAPI application in `src/api/main.py` serves the HTTP and WebSocket API u
 | MASR routing | Active | `/api/v1/masr/*` | `src/api/routes/masr_api.py` (`router`) |
 | Supervisors | Active | `/api/v1/supervisors/*` | `src/api/routes/supervisor_api.py` (`router`) |
 | TalkHier sessions | Active | `/api/v1/talkhier/*` | `src/api/routes/talkhier_api.py` (`router`) |
+| Workflow catalogue | Active | `GET /api/v1/workflows` | `src/api/routes/workflows.py` (`list_workflows`) |
 | Run event stream (SSE) | Active | `GET /api/v1/runs/{run_id}/events` | `src/api/routes/run_stream.py` (`stream_run_events`) |
 | WebSockets | Active | `/ws`, `/ws/projects/{project_id}`, `/ws/cli/{project_id}`, `/ws/runs/{run_id}` | `src/api/routes/websocket.py` (`router`) |
 | Idempotency keys | Active | `Idempotency-Key` header on `POST /api/v1/query/*` | `src/api/middleware/idempotency.py` (`IdempotencyMiddleware`) |
@@ -78,6 +79,7 @@ The domain routers add `get_current_token` as a router-level or route-level depe
 | `/api/v1/masr` | `src/api/routes/masr_api.py` | `get_current_token` | no | [MASR](#masr) |
 | `/api/v1/supervisors` | `src/api/routes/supervisor_api.py` | none; `get_current_token` on each HTTP route | per route | [Supervisors](#supervisors) |
 | `/api/v1/talkhier` | `src/api/routes/talkhier_api.py` | none; `get_current_token` on each HTTP route | per route | [TalkHier](#talkhier) |
+| `/api/v1` (`/workflows`) | `src/api/routes/workflows.py` | none; route uses `get_current_token` | no | [Workflows](#workflows) |
 | `/api/v1` (`/runs/{run_id}/events`) | `src/api/routes/run_stream.py` | none; route uses `get_current_token` | yes | [Run events](#run-events) |
 | none (`/ws...`) | `src/api/routes/websocket.py` | none; query-token dependency on WebSocket routes | per route | [WebSockets](#websockets) |
 
@@ -314,6 +316,14 @@ Mounted at `/api/v1/talkhier`. `get_current_token` is a dependency on every HTTP
 | `POST` | `/coordinate` | `get_tenant_context` | Coordinate several sessions. | 404, 500 |
 | `GET` | `/health` | `get_tenant_context` | Service health. | none |
 
+## Workflows
+
+| Method | Path | Purpose | Success status | Notable errors |
+|---|---|---|---|---|
+| `GET` | `/api/v1/workflows` | Lists the enabled entries of the trusted workflow catalogue (`workflow_id`, `workflow_version`, `name`, `description`, `task_types`, `input_schema`, `output_schema`, `routing_policy_id`, `supports_dry_run`) and the catalogue's `catalog_hash`. | 200 | 401 |
+
+The catalogue is deployment configuration (`src/api/services/workflow_catalog.py`), validated at first use without a model call: an enabled entry whose collaboration mode is unsupported, whose worker is not registered or whose budget disagrees with its policy raises `WorkflowCatalogError`. `WorkflowLaunchService.select` (`src/api/services/workflow_launch_service.py`) resolves a `WorkflowLaunchRequest` against it. The request rejects unknown fields and ownership or authority keys (`user_id`, `tenant_id`, `authority_id` and the others in `RESERVED_LAUNCH_KEYS`), also inside `inputs`. Rejections carry `WorkflowLaunchRejectedError.http_status`: 400 missing idempotency key, 404 unknown or disabled workflow, 422 for a mode other than the workflow's (so `debate` is refused), a provider policy the workflow does not pin, or a budget above the catalogue ceiling. `dry_run` is part of the request and of the launch digest. No route launches a run yet.
+
 ## Run events
 
 | Method | Path | Purpose | Success status | Notable errors |
@@ -414,7 +424,7 @@ These routes return values that do not come from live computation.
 ## Source map
 
 - `src/api/main.py`: application, middleware registration, router mounts, exception handlers, `docs_url`.
-- `src/api/routes/`: one module per router: `health.py`, `users.py`, `research.py`, `reports.py`, `query_api.py`, `agent_api.py`, `masr_api.py`, `supervisor_api.py`, `talkhier_api.py`, `run_stream.py`, `websocket.py`.
+- `src/api/routes/`: one module per router: `health.py`, `users.py`, `research.py`, `reports.py`, `query_api.py`, `agent_api.py`, `masr_api.py`, `supervisor_api.py`, `talkhier_api.py`, `run_stream.py`, `workflows.py`, `websocket.py`.
 - `src/api/auth/auth_router.py`: `/api/v1/auth` routes.
 - `src/api/middleware/error_envelope.py`: error envelope, status-to-code map, handlers.
 - `src/api/middleware/idempotency.py`: `Idempotency-Key` handling and stores.

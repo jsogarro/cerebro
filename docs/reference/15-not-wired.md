@@ -105,7 +105,7 @@ Tests that exercise them live in `tests/unit/core/claims/`. `src/core/acquisitio
 
 ## Unbacked web pages
 
-The web workbench pages for workflows, runs, run detail and memory call API routes that are not mounted and its dashboard, QA, costs and benchmarks pages show fixed values. The page-by-page table is in [CLI and web clients](13-cli-and-web-clients.md).
+The web workbench pages for runs, run detail and memory, and the run form on the workflows page, call API routes that are not mounted (`GET /api/v1/workflows` is) and its dashboard, QA, costs and benchmarks pages show fixed values. The page-by-page table is in [CLI and web clients](13-cli-and-web-clients.md).
 
 ## Source map
 

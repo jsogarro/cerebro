@@ -73,12 +73,17 @@ async def test_report_request_creates_a_tenant_owned_row(client, db, new_account
     assert (row["organization_id"], row["user_id"]) == (alice.org_id, alice.user_id)
 
 
-@_missing("P02", "GET /api/v1/workflows missing (static trusted catalogue)")
 async def test_workflow_catalogue_is_served(client, new_account):
-    await require_operation(
-        client, await new_account("alice"), "GET", "/api/v1/workflows"
+    response = await client.get(
+        "/api/v1/workflows", headers=(await new_account("alice")).headers
     )
-    pytest.fail("catalogue landed: assert the golden-run workflow is listed")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["catalog_hash"]) == 64
+    workflow = next(
+        w for w in body["workflows"] if w["workflow_id"] == "research.single-worker"
+    )
+    assert workflow["supports_dry_run"] is True
 
 
 @_missing("P08", "POST /api/v1/runs missing (start a dry run)")
