@@ -109,38 +109,6 @@ class EventPublisher:
 
         logger.info("Event publisher shutdown complete")
 
-    async def publish_project_event(
-        self, project_id: Any, event: dict[str, Any]
-    ) -> None:
-        """Publish a project-scoped event with an untyped dict payload.
-
-        Generic compatibility shim absorbed from the deleted
-        ``src/api/websocket/event_publisher.py`` stub. Logs only — does
-        NOT broadcast over WebSocket. Behavior matches the original stub.
-
-        **Migration:** new code should call one of the typed methods
-        below, which both broadcast over WebSocket and publish to Redis:
-
-        - progress updates → ``publish_progress_update(project_id, ProgressUpdate)``
-        - agent lifecycle  → ``publish_agent_started`` / ``publish_agent_progress``
-                             / ``publish_agent_completed`` / ``publish_agent_failed``
-        - project lifecycle → ``publish_project_started`` / ``publish_project_completed``
-                              / ``publish_project_failed`` / ``publish_project_cancelled``
-        - workflow phases   → ``publish_workflow_phase_started``
-                              / ``publish_workflow_phase_completed``
-
-        Current callers to migrate:
-        - ``DirectExecutionService.publish_progress_update`` — should call
-          ``publish_progress_update`` with a typed ``ProgressUpdate`` model.
-        """
-        logger.debug(
-            "Project event published (untyped)",
-            project_id=str(project_id),
-            keys=list(event.keys())
-            if isinstance(event, dict)
-            else type(event).__name__,
-        )
-
     async def publish_event(
         self,
         event_type: str,

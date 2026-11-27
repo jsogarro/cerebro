@@ -1,4 +1,4 @@
-"""Deployment contracts for canonical in-process and legacy MASR modes."""
+"""Deployment contracts: MASR runs in-process in the api container only."""
 
 from __future__ import annotations
 
@@ -28,20 +28,6 @@ def test_default_api_has_no_standalone_masr_dependency_or_url() -> None:
     assert all(not item.startswith("MASR_SERVICE_URL=") for item in environment)
 
 
-def test_standalone_masr_requires_explicit_legacy_profile() -> None:
-    service = _compose()["services"]["masr-router"]
-
-    assert service["profiles"] == ["legacy-masr-service"]
-    assert "9100:9100" in service["ports"]
-
-
-def test_legacy_service_cannot_enable_thompson_from_ambient_environment() -> None:
-    environment = _compose()["services"]["masr-router"]["environment"]
-
-    assert "ADAPTIVE_ROUTING_ENABLED=false" in environment
-    assert any(item.startswith("MASR_ENABLE_ADAPTIVE=") for item in environment)
-
-
 def test_default_api_keeps_thompson_dark_and_provider_key_optional() -> None:
     environment = _compose()["services"]["api"]["environment"]
 
@@ -60,9 +46,6 @@ def test_production_default_topology_has_no_standalone_masr_dependency() -> None
         assert all(not item.startswith("MASR_SERVICE_URL=") for item in environment)
 
 
-def test_production_standalone_masr_is_explicit_legacy_diagnostics() -> None:
-    service = _production_compose()["services"]["masr-router"]
-
-    assert service["profiles"] == ["legacy-masr-service"]
-    assert "9100:9100" in service["ports"]
-    assert "ADAPTIVE_ROUTING_ENABLED=false" in service["environment"]
+def test_neither_compose_file_defines_a_standalone_masr_service() -> None:
+    assert "masr-router" not in _compose()["services"]
+    assert "masr-router" not in _production_compose()["services"]

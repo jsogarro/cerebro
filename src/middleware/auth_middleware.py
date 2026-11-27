@@ -1,7 +1,7 @@
 """
 Authentication middleware for request authentication and authorization.
 
-Provides JWT validation, user context injection, and permission checking.
+Provides JWT validation and user context injection.
 """
 
 import inspect
@@ -19,7 +19,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import HTTPConnection
 from starlette.responses import Response
 
-from src.api.client_ip import client_ip as resolve_client_ip
 from src.api.middleware.error_envelope import build_error_payload
 from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
 from src.auth.models import TokenPayload
@@ -339,87 +338,6 @@ async def get_current_active_user(
     return current_user
 
 
-def require_roles(roles: list[str]) -> Callable[..., Any]:
-    """
-    Dependency to require specific roles.
-
-    Args:
-        roles: List of required roles (user must have at least one)
-
-    Returns:
-        Dependency function
-    """
-
-    async def role_checker(
-        token_payload: TokenPayload = Depends(get_current_token),
-        current_user: User = Depends(get_current_active_user),
-    ) -> User:
-        """Check if user has required roles."""
-        # Superusers bypass role checks
-        if current_user.is_superuser:
-            return current_user
-
-        # Check if user has any of the required roles
-        if not token_payload.has_any_role(roles):
-            logger.warning(
-                "Access denied - insufficient roles",
-                user_id=str(current_user.id),
-                required_roles=roles,
-                user_roles=token_payload.roles,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Requires one of roles: {', '.join(roles)}",
-            )
-
-        return current_user
-
-    return role_checker
-
-
-def require_permissions(permissions: list[str]) -> Callable[..., Any]:
-    """
-    Dependency to require specific permissions.
-
-    Args:
-        permissions: List of required permissions (user must have all)
-
-    Returns:
-        Dependency function
-    """
-
-    async def permission_checker(
-        token_payload: TokenPayload = Depends(get_current_token),
-        current_user: User = Depends(get_current_active_user),
-    ) -> User:
-        """Check if user has required permissions."""
-        # Superusers have all permissions
-        if current_user.is_superuser or "*" in token_payload.permissions:
-            return current_user
-
-        # Check if user has all required permissions
-        missing_permissions = [
-            perm for perm in permissions if not token_payload.has_permission(perm)
-        ]
-
-        if missing_permissions:
-            logger.warning(
-                "Access denied - insufficient permissions",
-                user_id=str(current_user.id),
-                required_permissions=permissions,
-                missing_permissions=missing_permissions,
-                user_permissions=token_payload.permissions,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Missing permissions: {', '.join(missing_permissions)}",
-            )
-
-        return current_user
-
-    return permission_checker
-
-
 def require_superuser() -> Callable[..., Any]:
     """
     Dependency to require superuser privileges.
@@ -444,87 +362,3 @@ def require_superuser() -> Callable[..., Any]:
         return current_user
 
     return superuser_checker
-
-
-def optional_user() -> Callable[..., Any]:
-    """
-    Dependency for optional authentication.
-
-    Returns user if authenticated, None otherwise.
-
-    Returns:
-        Dependency function
-    """
-
-    async def optional_user_getter(
-        credentials: HTTPAuthorizationCredentials | None = Depends(security),
-        db: AsyncSession = Depends(get_session),
-        jwt_service: JWTService = Depends(get_jwt_service),
-    ) -> User | None:
-        """Get user if authenticated."""
-        if not credentials:
-            return None
-
-        try:
-            token_payload = await jwt_service.validate_token(credentials.credentials)
-
-            user_repo = UserRepository(db)
-            user = await user_repo.get(token_payload.sub)
-
-            return user if user and user.is_active else None
-
-        except (JWTError, JWTServiceUnavailableError):
-            return None
-
-    return optional_user_getter
-
-
-class RateLimitMiddleware:
-    """
-    Rate limiting middleware based on user or IP.
-
-    Integrates with authentication to apply user-specific limits.
-    """
-
-    def __init__(
-        self,
-        requests_per_minute: int = 60,
-        requests_per_hour: int = 1000,
-    ):
-        """
-        Initialize rate limit middleware.
-
-        Args:
-            requests_per_minute: Max requests per minute
-            requests_per_hour: Max requests per hour
-        """
-        self.requests_per_minute = requests_per_minute
-        self.requests_per_hour = requests_per_hour
-
-    async def __call__(
-        self,
-        request: Request,
-        current_user: User | None = Depends(optional_user()),
-    ) -> None:
-        """
-        Check rate limits for request.
-
-        Args:
-            request: Incoming request
-            current_user: Authenticated user if available
-
-        Raises:
-            HTTPException: If rate limit exceeded
-        """
-        if current_user:
-            identifier = f"user:{current_user.id}"
-            # Use user-specific limits if configured
-            limit = current_user.api_rate_limit or self.requests_per_hour
-        else:
-            # Use IP address for anonymous users
-            identifier = f"ip:{resolve_client_ip(request)}"
-            limit = self.requests_per_minute
-
-        # In production, implement actual rate limiting with Redis
-        # For now, just log the check
-        logger.debug("Rate limit check", identifier=identifier, limit=limit)

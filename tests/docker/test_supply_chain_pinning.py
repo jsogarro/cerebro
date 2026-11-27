@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DOCKERFILES = ["Dockerfile", "docker/Dockerfile.masr", "cerebro/web/Dockerfile"]
+DOCKERFILES = ["Dockerfile", "cerebro/web/Dockerfile"]
 
 HARDENED = os.environ.get("CEREBRO_DOCKER_HARDENED", "1") != "0"
 

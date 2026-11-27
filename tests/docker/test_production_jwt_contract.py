@@ -11,7 +11,6 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from src.auth.jwt_service import JWTService
 from src.core.config import settings
-from src.core.production_config import ProductionValidation
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION_COMPOSE = REPO_ROOT / "docker-compose.production.yml"
@@ -57,60 +56,6 @@ def test_production_compose_requires_one_read_only_api_keypair() -> None:
     assert compose["secrets"]["jwt_public_key"]["file"].startswith(
         "${JWT_PUBLIC_KEY_FILE:?"
     )
-
-
-def test_legacy_production_config_constructs_without_shared_jwt_secret(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    private_path, public_path = _write_synthetic_keypair(tmp_path)
-    monkeypatch.setenv("DB_PASSWORD", "synthetic-production-db-password")
-    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(private_path))
-    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(public_path))
-    monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.delenv("TEMPORAL_HOST", raising=False)
-
-    from config.production import ProductionConfig
-
-    production = ProductionConfig()
-
-    assert production.security.jwt_secret_key is None
-    assert production.security.jwt_algorithm == "RS256"
-    assert production.security.jwt_private_key_path == str(private_path)
-    assert production.security.jwt_public_key_path == str(public_path)
-    assert production.gemini.api_key is None
-
-
-def test_production_readiness_uses_pem_and_in_process_contract(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    private_path, public_path = _write_synthetic_keypair(tmp_path)
-    monkeypatch.setenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://synthetic:synthetic@database/research",
-    )
-    monkeypatch.setenv("REDIS_URL", "redis://cache/0")
-    monkeypatch.setenv("SECRET_KEY", "synthetic-app-secret-that-is-long-enough")
-    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(private_path))
-    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(public_path))
-    monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.delenv("TEMPORAL_HOST", raising=False)
-
-    validations = ProductionValidation.validate_environment()
-
-    assert validations["env_DATABASE_URL"] is True
-    assert validations["env_REDIS_URL"] is True
-    assert validations["env_SECRET_KEY"] is True
-    assert validations["env_JWT_PRIVATE_KEY_PATH"] is True
-    assert validations["env_JWT_PUBLIC_KEY_PATH"] is True
-    assert validations["jwt_key_pair_valid"] is True
-    assert "env_GEMINI_API_KEY" not in validations
-    assert "env_JWT_SECRET_KEY" not in validations
-    assert "env_TEMPORAL_HOST" not in validations
-    assert "temporal_target_valid" not in validations
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from src.models.base import Base
+from src.models.db.base import Base
 from src.models.db.research_project import ProjectStatus, ResearchProject
 from src.models.db.research_result import ResearchResult
 from src.models.db.user import User

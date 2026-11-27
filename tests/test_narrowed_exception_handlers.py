@@ -13,9 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 import redis.asyncio as redis
-from jose import JWTError
 from sqlalchemy.exc import OperationalError
-from starlette.requests import Request
 from websockets.exceptions import ConnectionClosedError
 
 from src.auth.jwt_service import JWTService
@@ -24,8 +22,6 @@ from src.cli.websocket_client import CLIWebSocketClient
 from src.core import telemetry, tracing
 from src.mcp.academic_filters import AcademicSearchFilters
 from src.mcp.tools.academic_search_tool import AcademicSearchTool
-from src.middleware import auth_middleware
-from src.models.db.migrations import MigrationManager
 from src.models.db.session import DatabaseManager
 from src.prompts.manager import PromptManager
 
@@ -169,41 +165,6 @@ class TestAcademicSearchBackends:
         assert await tool._search_arxiv("q", 5, AcademicSearchFilters()) == []
 
 
-def _request() -> Request:
-    return Request(
-        {
-            "type": "http",
-            "method": "GET",
-            "path": "/private",
-            "headers": [(b"authorization", b"Bearer tok")],
-            "app": SimpleNamespace(dependency_overrides={}),
-        }
-    )
-
-
-class TestAuthMiddleware:
-    async def test_optional_user_invalid_token_is_anonymous(self) -> None:
-        getter = auth_middleware.optional_user()
-        service = SimpleNamespace(validate_token=AsyncMock(side_effect=JWTError("bad")))
-        creds = SimpleNamespace(credentials="tok")
-        assert await getter(creds, MagicMock(), service) is None
-
-    async def test_optional_user_database_error_propagates(self) -> None:
-        getter = auth_middleware.optional_user()
-        service = SimpleNamespace(
-            validate_token=AsyncMock(return_value=SimpleNamespace(sub="u1"))
-        )
-        repo = MagicMock()
-        repo.get = AsyncMock(
-            side_effect=OperationalError("select", {}, Exception("db"))
-        )
-        with (
-            patch.object(auth_middleware, "UserRepository", return_value=repo),
-            pytest.raises(OperationalError),
-        ):
-            await getter(SimpleNamespace(credentials="tok"), MagicMock(), service)
-
-
 class TestDatabase:
     async def test_connection_failure_reports_false(self) -> None:
         engine = MagicMock()
@@ -220,14 +181,6 @@ class TestDatabase:
         engine = MagicMock()
         engine.begin.side_effect = OperationalError("select", {}, Exception("nope"))
         assert await DatabaseManager(engine).get_slow_queries() == []
-
-    def test_verify_migration_failure_propagates(self) -> None:
-        manager = object.__new__(MigrationManager)
-        with (
-            patch.object(manager, "check_migration_status", side_effect=OSError("x")),
-            pytest.raises(OSError),
-        ):
-            manager.verify_migration()
 
 
 class TestPromptManager:

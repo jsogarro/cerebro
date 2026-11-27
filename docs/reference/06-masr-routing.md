@@ -23,7 +23,6 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 | Memory-informed routing | Not wired | `MEMORY_INFORMED_ROUTING_ENABLED=true` | `src/ai_brain/router/masr.py` (`MASRouter._get_episodic_routing_prior`) |
 | Routing outcome recorder | Not wired | none | `src/ai_brain/router/outcome_recorder.py` (`RoutingOutcomeRecorder`) |
 | Adaptive routing metrics | Active | Prometheus registry | `src/ai_brain/router/routing_observability.py` |
-| Standalone MASR service | Off by default | `make legacy-masr` | `src/ai_brain/router/masr_service.py` (`MASRService`) |
 
 ## Role in execution
 
@@ -247,12 +246,6 @@ Two offline scripts evaluate the allocation policy without enabling it; see the 
 - `routing_observability.py` exports the Prometheus series `cerebro_masr_adaptive_effective_state` (one-hot gauge over `disabled`, `fixture_off`, `cold`, `degraded`, `active`), `cerebro_masr_outcomes_total` and `cerebro_masr_outcome_metric_availability_total`. The gauge is updated by the router; the two counters are updated only by `RoutingOutcomeRecorder.record`. Labels are fixed enumerations. See [security, audit and observability](12-security-audit-observability.md).
 - When `LANGFUSE_ENABLED` is `true`, `MASRouter.route` is wrapped in `trace_masr_routing` (`src/core/tracing.py`), which sends a redacted, length-capped query prefix and routing metadata.
 
-## Legacy standalone MASR service
-
-> **Off by default.** `MASRService` (`src/ai_brain/router/masr_service.py`) is a separate FastAPI application that serves routing decisions on `MASR_HOST` (default `0.0.0.0`) and `MASR_PORT` (default 9100). It is not on the production request path. Start it with `make legacy-masr`, which brings up the `masr-router` service of the `legacy-masr-service` compose profile (`docker/Dockerfile.masr`, command `python -m src.ai_brain.router.masr_service`).
-
-It exposes `POST /route`, `GET /health`, `GET /metrics`, `GET /stats` and the FastAPI `/docs` and `/redoc` pages. Its routes declare no authentication dependency, and CORS origins come from `CORS_ORIGINS` (default `*`). It builds its router with `settings_to_router_config` and forces `adaptive_routing_enabled` to `False`, and it passes `model_config_manager=None`. `make logs-masr` follows its logs, and `docker-compose.production.yml` defines the same profile.
-
 ## Source map
 
 - `src/ai_brain/router/masr.py`: `MASRouter`, `RoutingDecision`, mode selection, allocation, adaptive state handling
@@ -269,7 +262,6 @@ It exposes `POST /route`, `GET /health`, `GET /metrics`, `GET /stats` and the Fa
 - `src/ai_brain/router/adaptive_state_store.py`: in-memory and Redis adaptive state stores
 - `src/ai_brain/router/routing_observability.py`: Prometheus series
 - `src/ai_brain/router/execution_plan_compiler.py`: `ExecutionPlanCompiler`
-- `src/ai_brain/router/masr_service.py`: standalone service
 - `src/ai_brain/experimentation/core/adaptive_allocation_engine.py`: `AdaptiveAllocationEngine`
 - `src/ai_brain/experimentation/eval/adaptive_routing_eval.py`, `adaptive_routing_promotion.py`: offline evaluation and promotion gate
 - `src/reliability/retry_strategies.py`: `CircuitBreaker`

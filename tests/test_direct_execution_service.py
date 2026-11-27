@@ -234,7 +234,6 @@ def execution_service():
     bridge.execute_execution_plan.return_value = plan_result
 
     publisher = AsyncMock()
-    publisher.publish_project_event.return_value = None
 
     supervisor_factory = Mock()
     supervisor_factory.health_check = AsyncMock(return_value={"status": "healthy"})

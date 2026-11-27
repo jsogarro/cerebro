@@ -18,7 +18,7 @@ Every research execution admitted through `DirectExecutionService` is recorded i
 | WebSocket run event stream | Active | `/ws/runs/{run_id}` | `src/api/routes/websocket.py` (`run_event_stream_endpoint`) |
 | Project progress WebSockets | Active | `/ws`, `/ws/projects/{project_id}`, `/ws/cli/{project_id}` | `src/api/routes/websocket.py` |
 | WebSocket health endpoint | Active | `GET /ws/health` | `src/api/routes/websocket.py` (`websocket_health`) |
-| `publish_project_event` and `publish_event` logging shims | Not wired | none | `src/api/services/event_publisher.py` |
+| `publish_event` logging shim | Not wired | none | `src/api/services/event_publisher.py` |
 
 ## Lifecycle model
 
@@ -239,7 +239,7 @@ These endpoints deliver progress updates for a research project. They are separa
 
 **Progress publication.** `DirectExecutionService._publish_progress_update` builds a `ProgressUpdate` (`progress_percentage`, `current_phase`, `current_agent`) and calls `EventPublisher.publish_progress_update`, which broadcasts a `progress` message to the project's local subscribers and publishes it to the Redis channel `research_platform:events` with an `_origin` instance id. Each instance subscribes to that channel and rebroadcasts messages from other instances to its local connections. Without Redis the publisher runs in local-only mode. Progress updates are the only message type the application publishes; the typed `publish_agent_*`, `publish_project_*`, `publish_workflow_phase_*`, `publish_error`, `publish_warning` and `publish_info` methods have no caller outside `event_publisher.py`.
 
-> **Not wired.** `EventPublisher.publish_project_event` and `EventPublisher.publish_event` log a debug line and deliver nothing. The only caller of `publish_event` is `RealTimeDashboard` in the experimentation package, which no other module imports.
+> **Not wired.** `EventPublisher.publish_event` logs a debug line and delivers nothing. Its only caller is `RealTimeDashboard` in the experimentation package, which no other module imports.
 
 **Health.** `GET /ws/health` responds `{"status": "healthy", "websocket_stats": <get_stats()>, "timestamp": "2024-01-01T00:00:00Z"}`. The `timestamp` value is a fixed string, not the current time.
 

@@ -24,7 +24,6 @@ Cerebro reads configuration from process environment variables, optional dotenv 
 | Report variables | Active | `create_report_settings()` | `src/services/report_config.py` (`ReportSettings`) |
 | CLI variables (`RESEARCH_*`) | Active | `research-cli` | `src/cli/config.py` (`CLIConfig.from_env`) |
 | Memory encryption key | Not wired | `MemoryEncryption` | `src/core/memory_encryption.py` (`MemoryEncryption`) |
-| Legacy MASR service variables | Off by default | `make legacy-masr` | `src/ai_brain/router/masr_service.py` |
 | Compose-level variables | Active | `docker compose` | `docker-compose.yml`, `docker-compose.production.yml` |
 
 ## How configuration loads
@@ -214,11 +213,6 @@ The table lists 96 rows: 95 fields of `Settings` and `OTEL_EXPORTER_OTLP_ENDPOIN
 | `CHECK_PASSWORD_BREACHES` | `true` | Authentication, sessions and OAuth |
 | `SESSION_SECRET_KEY` | unset | Authentication, sessions and OAuth |
 | `SESSION_EXPIRE_HOURS` | `24` | Authentication, sessions and OAuth |
-| `MAX_SESSIONS_PER_USER` | `5` | Authentication, sessions and OAuth |
-| `GOOGLE_CLIENT_ID` | unset | Authentication, sessions and OAuth |
-| `GOOGLE_CLIENT_SECRET` | unset | Authentication, sessions and OAuth |
-| `GITHUB_CLIENT_ID` | unset | Authentication, sessions and OAuth |
-| `GITHUB_CLIENT_SECRET` | unset | Authentication, sessions and OAuth |
 | `RATE_LIMIT_REQUESTS` | `100` | Authentication, sessions and OAuth |
 | `RATE_LIMIT_PERIOD` | `60` | Authentication, sessions and OAuth |
 | `ENABLE_MFA` | `false` | Authentication, sessions and OAuth |
@@ -373,12 +367,6 @@ See [CLI and web clients](13-cli-and-web-clients.md) for the commands.
 
 > **Not wired.** `MemoryEncryption` reads `MEMORY_ENCRYPTION_KEY` to encrypt memory payloads with Fernet. Its only consumers are `WorkingMemoryManager` and `EpisodicMemoryManager`, which no production code constructs.
 
-### Legacy MASR service
-
-> **Off by default.** `src/ai_brain/router/masr_service.py` is a standalone FastAPI service that the API process does not use. Start it with `make legacy-masr` (compose profile `legacy-masr-service`).
-
-It reads these process variables directly: `MASR_HOST` (default `0.0.0.0`), `MASR_PORT` (`9100`), `ENVIRONMENT` (`development`), `CORS_ORIGINS` (`*`, comma-separated), `LOG_LEVEL` (`info`), and, when `ENVIRONMENT` is `production`, `MASR_WORKERS` (`2`), `MASR_MAX_REQUESTS` (`1000`) and `MASR_MAX_REQUESTS_JITTER` (`50`). It also builds its own `Settings()`.
-
 ### Database migrations
 
 `alembic/env.py` reads `DATABASE_URL` from the process environment, rewrites a `postgres://` or `postgresql://` scheme to `postgresql+asyncpg://` and falls back to `sqlalchemy.url` in `alembic.ini` and then to the local development URL. It does not read `.env` files; the container entrypoint (`docker/entrypoint.sh`) runs `alembic upgrade head` before starting the application and refuses to start when the migration fails.
@@ -404,7 +392,7 @@ Compose interpolates these variables from the shell or an `.env` file next to th
 | `GRAFANA_PASSWORD` | none | `docker-compose.production.yml` | Grafana admin password |
 | `JWT_PRIVATE_KEY_FILE`, `JWT_PUBLIC_KEY_FILE` | none; compose stops with an error when either is unset | `docker-compose.production.yml` | host paths of the RSA key pair, exposed to the API as compose secrets and mounted at `/run/secrets` |
 
-Both compose files also set literal environment entries that no code reads: `MASR_MAX_AGENTS` and `MASR_QUALITY_THRESHOLD` (the `masr-router` service in both files, and the production `api` service), `MASR_ENABLE_LEARNING` (the `masr-router` service in the development file, the `api` service in the production file) and `MASR_ENABLE_ROUTING` (production `api` service only). The production image starts `uvicorn` with `--workers 1`.
+The production compose file also sets literal environment entries that no code reads: `MASR_ENABLE_ROUTING`, `MASR_ENABLE_LEARNING`, `MASR_MAX_AGENTS` and `MASR_QUALITY_THRESHOLD`, all on the `api` service. The production image starts `uvicorn` with `--workers 1`.
 
 ## Example environment files
 
@@ -450,7 +438,6 @@ The file also sets values that differ from the code defaults: `DEBUG=true` (defa
 - `src/cli/config.py`: `CLIConfig` and `RESEARCH_*` variables
 - `src/core/memory_encryption.py`: `MEMORY_ENCRYPTION_KEY` reader
 - `src/ai_brain/router/factory.py`: maps `Settings` onto the MASR router configuration
-- `src/ai_brain/router/masr_service.py`: legacy standalone service and its direct environment reads
 - `alembic/env.py`: `DATABASE_URL` for migrations
 - `.env.example`, `.env.production.example`, `.env.cli.example`: environment templates
 - `docker-compose.yml`, `docker-compose.production.yml`: compose-level variables and literal service environment

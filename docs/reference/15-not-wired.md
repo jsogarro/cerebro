@@ -11,7 +11,6 @@ This page lists code and settings present in the repository that no production p
 | Learning and self-improvement | Not wired | none | `src/ai_brain/learning/supervision_feedback.py` |
 | Model configuration manager | Not wired | none | `src/ai_brain/config/`, `configs/models/` |
 | Prompt manager and versioning | Not wired | none | `src/prompts/` |
-| Reliability service registry | Not wired | none | `src/reliability/service_registry.py` |
 | Stub packages | Not wired | none | `src/research_platform/` |
 | Citation binding and PDF text extraction | Not wired | none | `src/core/claims/citation_*.py`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py` |
 | Orphan modules | Not wired | none | see [Orphan modules](#orphan-modules) |
@@ -54,7 +53,7 @@ Tests that exercise it: `tests/unit/ai_brain/experimentation/test_continuous_bet
 
 > **Not wired.** `ModelConfigManager` in `src/ai_brain/config/model_config_manager.py` loads `configs/models/base.yaml` and an environment file (`development.yaml` or `production.yaml`). It is constructed only by `ConfigurationIntegrationService` (`integration_service.py`) and by the module-level `get_model_config_manager`, and no production code calls either. `MASRouter`, `CostOptimizer` and the providers accept an optional `model_config_manager` argument that production code never passes, so the YAML files are never loaded.
 
-Other modules in the group: `legacy_adapter.py` (`LegacyConfigurationAdapter`, `LegacyProviderWrapper`), which nothing imports. `model_schemas.py` is in use: `ModelTier` and `RoutingStrategy` are imported by `MASRRoutingService` and `src/models/masr_api_models.py`. `supervisor_config.py` is imported by `MASRRoutingService`, which stores a `SupervisorConfigurationManager` in `self.config_manager`; nothing reads that attribute.
+Other modules in the group: `model_schemas.py` is in use: `ModelTier` and `RoutingStrategy` are imported by `MASRRoutingService` and `src/models/masr_api_models.py`. `supervisor_config.py` is imported by `MASRRoutingService`, which stores a `SupervisorConfigurationManager` in `self.config_manager`; nothing reads that attribute.
 
 ## Prompt manager and versioning
 
@@ -63,12 +62,6 @@ Other modules in the group: `legacy_adapter.py` (`LegacyConfigurationAdapter`, `
 `src/prompts/versioning.py` (`PromptVersionManager`) is imported by `UnifiedExperimentManager`, which is itself not wired, and re-exported by `src/prompts/__init__.py`, which loads whenever `src.prompts.manager` is imported. No code constructs or calls it. The prompts the agents send come from Python modules under `src/services/prompts/`, imported by `src/agents/base.py`, `src/agents/literature_review_agent.py`, `src/agents/comparative_analysis_agent.py` and `src/services/gemini_service.py`. Prompt identity pinning is part of the tool boundary; see [tool boundary and evidence](09-tool-boundary-and-evidence.md).
 
 Tests that exercise it: `tests/test_prompt_safety.py`, `tests/test_cache_ttl_expiry.py`.
-
-## Reliability service registry
-
-> **Not wired.** `src/reliability/service_registry.py` defines `ServiceRegistry`, `ServiceDiscovery`, `LoadBalancer` and the helpers `initialize_service_registry`, `get_service_registry` and `get_service_discovery`. `src/reliability/__init__.py` re-exports them, and no code constructs or calls any of them.
-
-The one part of `src/reliability/` in production use is `retry_strategies.CircuitBreaker`, which `MASRouter` uses as its routing circuit breaker.
 
 ## Stub packages
 
@@ -95,16 +88,9 @@ Tests that exercise them live in `tests/unit/core/claims/` and `tests/unit/core/
 | Module | What it holds | Imported by |
 |---|---|---|
 | `src/agents/delegation_contract.py` | `DelegationContract` | `tests/test_fast_path.py` |
-| `src/api/services/masr_analytics.py` | `MASRAnalyticsService` | nothing |
-| `src/core/production_config.py` and the top-level `config/` package | `ProductionSettings` and per-environment settings classes | `config/` is imported by `production_config.py` and tests; `production_config.py` by `tests/docker/test_production_jwt_contract.py` |
-| `src/services/gemini_metrics.py` | Prometheus series and `GeminiMetrics` for the Gemini service | nothing |
-| `src/services/hallucination_detector.py`, `src/services/evaluation_regression.py` | Offline claim and citation checks, and golden-dataset regression scoring | `tests/regression/` |
+| `src/services/evaluation_regression.py` | Golden-dataset regression scoring | `tests/regression/` |
 | `src/services/visualization_generator.py` | `VisualizationGenerator` (Plotly and NetworkX) | `tests/test_visualization*.py` |
 | `src/services/text_alignment/` | Deterministic span alignment over source text | `tests/unit/services/test_text_alignment.py` |
-| `src/services/parsers/base_parser.py` | Base parser utilities | `tests/test_gemini_parsers.py` |
-| `src/models/base.py` | A SQLAlchemy `declarative_base()` | `tests/utils/db_utils.py` |
-| `src/models/db/migrations.py` | `MigrationManager` | nothing |
-| `src/ai_brain/router/masr_service.py` | The standalone MASR service (see [configuration](02-configuration.md)) | nothing in `src`; it runs only as the command of the `legacy-masr-service` compose profile, and `KNOWN_UNREACHABLE` in `tests/architecture/test_module_reachability.py` lists it |
 
 ## Dead execution attributes
 
@@ -131,7 +117,6 @@ The web workbench pages for workflows, runs, run detail and memory call API rout
 - `src/ai_brain/learning/supervision_feedback.py`: `SupervisionFeedbackLearner`
 - `src/ai_brain/config/`, `configs/models/`: model configuration manager and YAML files
 - `src/prompts/`: `PromptManager`, versioning, templates
-- `src/reliability/`: `service_registry.py` (not wired) and `retry_strategies.py` (used)
 - `src/research_platform/`: stub packages
 - `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py`: citation and PDF text modules (the rest of `src/core/claims/` is the live claim-support path)
 - `tests/architecture/test_module_reachability.py`: import-graph test that lists the modules no entry point reaches

@@ -2867,11 +2867,7 @@ class DirectExecutionService:
         """Broadcast a progress update to subscribed WebSocket clients.
 
         Uses the typed ``EventPublisher.publish_progress_update`` path, which
-        actually fans out over WebSocket via
-        ``connection_manager.broadcast_to_project``. The previous
-        ``publish_project_event`` call was a logs-only compatibility shim, so
-        no PROGRESS event ever reached a subscribed ``/ws`` client during a
-        live query.
+        fans out over WebSocket via ``connection_manager.broadcast_to_project``.
         """
 
         if not self.event_publisher:

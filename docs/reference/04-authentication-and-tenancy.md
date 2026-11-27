@@ -19,8 +19,8 @@ Callers authenticate with RS256-signed JWTs issued by the `/api/v1/auth` routes 
 | Postgres row-level security policies | Active | `tenant_isolation_<table>` policies, created on Postgres only | `alembic/versions/` (see [Tenancy](#tenancy)) |
 | User data erasure | Active | `DELETE /api/v1/users/{user_id}/gdpr` | `src/api/routes/users.py` (`delete_user_gdpr`) |
 | Memory-tier purge during erasure | Not wired | `app.state.memory_system` | `src/api/routes/users.py` (`get_memory_system`) |
-| Role, permission and superuser dependencies | Not wired | `require_roles`, `require_permissions`, `require_superuser` | `src/middleware/auth_middleware.py` |
-| MFA, OAuth, session limits, breach-check setting | Not wired | settings only | `src/core/config.py` (`Settings`) |
+| Superuser dependency | Active | `require_superuser()` on the `/admin` router | `src/middleware/auth_middleware.py`, `src/api/routes/admin_security.py` |
+| MFA, session lifetime, breach-check setting | Not wired | settings only | `src/core/config.py` (`Settings`) |
 
 ## Request authentication
 
@@ -97,7 +97,7 @@ All routes are in `src/api/auth/auth_router.py`, mounted at `/api/v1/auth`.
 
 ## Roles and permissions
 
-> **Not wired.** `require_roles`, `require_permissions` and `require_superuser` are defined in `src/middleware/auth_middleware.py`; `src/middleware/__init__.py` re-exports `require_roles` and `require_permissions` but not `require_superuser`. No route depends on them. The module also defines `optional_user` and a second class named `RateLimitMiddleware` that nothing imports; the rate limiter that runs is the one in `src/api/middleware/rate_limiter.py`.
+`require_superuser()` in `src/middleware/auth_middleware.py` guards the `/admin` router in `src/api/routes/admin_security.py`; it returns `403` unless the user record has `is_superuser`. No other route checks roles or permissions.
 
 Tokens carry `roles` and `permissions` lists (see [Auth endpoints](#auth-endpoints) for what login and register put in them). Most routes require authentication only. The checks that read the user record are:
 
@@ -133,7 +133,7 @@ Tokens carry `roles` and `permissions` lists (see [Auth endpoints](#auth-endpoin
 
 ## Settings with no effect
 
-> **Not wired.** These settings are declared in `src/core/config.py` (`Settings`) and read nowhere in `src`: `ENABLE_MFA`, `MFA_ISSUER`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET_KEY`, `SESSION_EXPIRE_HOURS`, `MAX_SESSIONS_PER_USER`, `JWT_ALGORITHM`, `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_PERIOD`. There are no MFA or OAuth routes, no session-count limit and no session lifetime other than the token lifetimes.
+> **Not wired.** These settings are declared in `src/core/config.py` (`Settings`) and read nowhere in `src`: `ENABLE_MFA`, `MFA_ISSUER`, `SESSION_SECRET_KEY`, `SESSION_EXPIRE_HOURS`, `JWT_ALGORITHM`, `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_PERIOD`. There are no MFA or OAuth login routes, no session-count limit and no session lifetime other than the token lifetimes.
 
 `SECRET_KEY` is validated at startup (at least 32 characters; the placeholder value is rejected when `ENVIRONMENT` is `production`) and is not used for token signing, which uses the RSA key pair.
 
