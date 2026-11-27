@@ -1,7 +1,14 @@
 """``claims.coverage``: did claim support run for the claims, not whether it held.
 
 A run with no claims, no report, or only unexamined claims abstains rather than
-passes, so absence of work is never read as success.
+passes, so absence of work is never read as success. A lookup the capability
+check refused never ran, so it counts as unexamined; one that failed makes the
+evaluation an error, because we cannot say whether the claim was covered.
+
+The denominator is the claim-support rows of the artifact. The resolver writes
+exactly one per material claim (it refuses an incomplete resolution), and no
+separate durable claim inventory exists, so zero rows abstains as
+``no_material_claims`` instead of passing.
 """
 
 from collections.abc import Sequence
@@ -10,10 +17,17 @@ from src.core.contracts import AbsentEvidenceReason, EvaluationResult, Evaluatio
 from src.core.evaluation.registry import ClaimView, EvaluationContext
 
 
+_UNEXAMINED = {AbsentEvidenceReason.NOT_ATTEMPTED, AbsentEvidenceReason.CAPABILITY_DENIED}
+
+
 def _is_not_attempted(claim: ClaimView) -> bool:
+    return claim.status == "unsupported" and claim.absent_evidence_reason in _UNEXAMINED
+
+
+def _is_retrieval_failed(claim: ClaimView) -> bool:
     return (
         claim.status == "unsupported"
-        and claim.absent_evidence_reason == AbsentEvidenceReason.NOT_ATTEMPTED
+        and claim.absent_evidence_reason == AbsentEvidenceReason.RETRIEVAL_FAILED
     )
 
 
@@ -26,7 +40,8 @@ class ClaimsCoverageEvaluator:
     async def evaluate(self, ctx: EvaluationContext) -> Sequence[EvaluationResult]:
         total = len(ctx.claims)
         missing = sum(_is_not_attempted(claim) for claim in ctx.claims)
-        status, code, score = self._verdict(ctx, total, missing)
+        failed = sum(_is_retrieval_failed(claim) for claim in ctx.claims)
+        status, code, score = self._verdict(ctx, total, missing, failed)
         return [
             EvaluationResult(
                 evaluation_result_id=ctx.result_id(self),
@@ -44,6 +59,7 @@ class ClaimsCoverageEvaluator:
                     "material_claims": total,
                     "attempted": total - missing,
                     "not_attempted": missing,
+                    "retrieval_failed": failed,
                 },
                 trigger=ctx.trigger,
                 completed_at=ctx.completed_at,
@@ -52,13 +68,15 @@ class ClaimsCoverageEvaluator:
 
     @staticmethod
     def _verdict(
-        ctx: EvaluationContext, total: int, missing: int
+        ctx: EvaluationContext, total: int, missing: int, failed: int
     ) -> tuple[EvaluationStatus, str | None, float | None]:
         abstained = EvaluationStatus.ABSTAINED
         if ctx.artifact_id is None:
             return abstained, "no_final_report", None
         if total == 0:
             return abstained, "no_material_claims", None
+        if failed:
+            return EvaluationStatus.ERROR, "claim_retrieval_failed", None
         if missing == total:
             return abstained, "claim_support_not_attempted", None
         if missing:

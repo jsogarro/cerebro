@@ -37,7 +37,14 @@ class EvaluationResultRepository:
     async def record_evaluation(
         self, result: EvaluationResult, *, organization_id: OrganizationId
     ) -> AgentEvaluationResult:
-        """Append one outcome, or return the row already stored under its id.
+        """Append one outcome, or return the row already stored under its id."""
+        row, _ = await self.append_evaluation(result, organization_id=organization_id)
+        return row
+
+    async def append_evaluation(
+        self, result: EvaluationResult, *, organization_id: OrganizationId
+    ) -> tuple[AgentEvaluationResult, bool]:
+        """Like :meth:`record_evaluation`, also saying whether a row was written.
 
         Redelivery of the same evaluation therefore never writes a second row;
         an intentional re-evaluation carries a new id and appends.
@@ -64,7 +71,7 @@ class EvaluationResultRepository:
             result.evaluation_result_id, organization_id=organization
         )
         if existing is not None:
-            return existing
+            return existing, False
 
         row = AgentEvaluationResult(
             evaluation_result_id=result.evaluation_result_id,
@@ -83,16 +90,16 @@ class EvaluationResultRepository:
             rationale=redact(result.rationale),
             rubric_sha256=result.rubric_sha256,
             judge_model_id=result.judge_model_id,
-            dataset_version=result.dataset_version,
+            dataset_version=redact(result.dataset_version),
             subject_id=result.subject_id,
             input_sha256=result.input_sha256,
-            trigger=result.trigger,
+            trigger=redact(result.trigger),
             completed_at=result.completed_at,
         )
         self.session.add(row)
         await self.session.flush()
         await self.session.refresh(row)
-        return row
+        return row, True
 
     async def get_evaluation(
         self, evaluation_result_id: str, *, organization_id: OrganizationId

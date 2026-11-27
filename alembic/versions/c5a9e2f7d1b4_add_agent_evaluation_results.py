@@ -73,7 +73,11 @@ def upgrade() -> None:
             server_default="1.0",
         ),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("evaluation_result_id"),
+        sa.UniqueConstraint(
+            "organization_id",
+            "evaluation_result_id",
+            name="uq_agent_evaluation_result_org_id",
+        ),
         sa.ForeignKeyConstraint(["run_id"], ["agent_runs.run_id"]),
         sa.ForeignKeyConstraint(["task_id"], ["agent_run_tasks.task_id"]),
         sa.ForeignKeyConstraint(["artifact_id"], ["agent_artifacts.artifact_id"]),

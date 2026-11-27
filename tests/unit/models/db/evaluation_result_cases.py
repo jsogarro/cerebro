@@ -48,5 +48,9 @@ VIOLATIONS: list[tuple[str, dict[str, Any]]] = [
         "ck_agent_evaluation_result_judge_fields_together",
         {"deterministic": False, "judge_model_id": "j"},
     ),
+    (
+        "ck_agent_evaluation_result_judge_fields_together",
+        {"deterministic": False, "rubric_sha256": "a" * 64},
+    ),
     ("ck_agent_evaluation_result_trigger_non_empty", {"trigger": ""}),
 ]

@@ -145,6 +145,14 @@ async def test_a_raising_evaluator_becomes_an_error_row_and_siblings_still_recor
         {"run_id": "other-run"},
         {"evaluator_version": "9"},
         {"trigger": "someone-else"},
+        {"dimension": "someone-elses-dimension"},
+        {"artifact_id": "artifact-9"},
+        # No judge path exists yet, so a model-judged result is refused.
+        {
+            "deterministic": False,
+            "judge_model_id": "judge-1",
+            "rubric_sha256": "a" * 64,
+        },
     ],
 )
 async def test_a_result_for_another_run_version_or_trigger_is_a_contract_violation(
@@ -213,8 +221,9 @@ async def test_an_evaluator_that_errors_again_adds_no_second_error_row(
 
     probe = _Probe(behaviour=always)
     dispatcher = _dispatcher(factory, probe)
-    await _run(dispatcher)
-    await _run(dispatcher)
+    assert await _run(dispatcher) == 1
+    # The repeated error resolves to the stored row, so nothing new is recorded.
+    assert await _run(dispatcher) == 0
 
     assert probe.calls == 2
     assert len(await _rows(factory)) == 1
@@ -292,3 +301,43 @@ async def test_coverage_reads_the_runs_claim_supports_for_the_given_artifact(
     assert rows["t-1"].error_code == "claim_support_not_attempted"
     assert rows["t-1"].status == "abstained"
     assert rows["t-2"].error_code == "no_final_report"
+
+
+async def test_claims_of_another_artifact_are_not_counted(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with factory() as session:
+        await seed_artifact(
+            session, organization_id=ORG, artifact_id="artifact-2", content_sha256="b" * 64
+        )
+        claims = ClaimSupportRepository(session)
+        for artifact, claim, reason in (
+            ("artifact-1", "c1", AbsentEvidenceReason.NO_SOURCE_FOUND),
+            ("artifact-2", "c2", AbsentEvidenceReason.NOT_ATTEMPTED),
+        ):
+            await claims.record_claim_support(
+                ClaimSupport(
+                    claim_support_id=f"s-{claim}",
+                    run_id="run-1",
+                    artifact_id=artifact,
+                    claim_id=claim,
+                    claim_text="A claim.",
+                    status=ClaimSupportStatus.UNSUPPORTED,
+                    absent_evidence_reason=reason,
+                    evaluator_id="claims.resolver",
+                    evaluator_version="1",
+                    producer_kind=ProducerKind.SYSTEM,
+                    explanation="x",
+                    evaluated_at=NOW,
+                ),
+                organization_id=ORG,
+            )
+        await session.commit()
+    dispatcher = EvaluationDispatcher(
+        session_factory=factory, registry=build_default_registry(), clock=lambda: NOW
+    )
+
+    await _run(dispatcher, artifact_id="artifact-1")
+
+    (row,) = await _rows(factory)
+    assert (row.status, row.details["material_claims"]) == ("passed", 1)

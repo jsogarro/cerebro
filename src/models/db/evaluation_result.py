@@ -25,6 +25,7 @@ from sqlalchemy import (
     Index,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -44,9 +45,7 @@ class AgentEvaluationResult(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(), primary_key=True, default=uuid.uuid4, nullable=False
     )
-    evaluation_result_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, unique=True
-    )
+    evaluation_result_id: Mapped[str] = mapped_column(String(255), nullable=False)
     run_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("agent_runs.run_id"), nullable=False, index=True
     )
@@ -91,6 +90,12 @@ class AgentEvaluationResult(Base):
     )
 
     __table_args__ = (
+        # Per tenant: a globally unique id would let one tenant pre-claim another's.
+        UniqueConstraint(
+            "organization_id",
+            "evaluation_result_id",
+            name="uq_agent_evaluation_result_org_id",
+        ),
         status_check(
             column="status",
             statuses=EvaluationStatus,
@@ -102,7 +107,8 @@ class AgentEvaluationResult(Base):
             "OR (error_code IS NOT NULL AND length(error_code) > 0)",
             name="ck_agent_evaluation_result_non_verdict_requires_reason",
         ),
-        # Explicit IS NULL: a bare range over NULL is NULL, which a CHECK accepts.
+        # A CHECK rejects only FALSE, so a bare range would also admit NULL; IS NULL
+        # just says so.
         CheckConstraint(
             "score IS NULL OR (score >= 0 AND score <= 1)",
             name="ck_agent_evaluation_result_score_range",

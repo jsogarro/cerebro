@@ -149,6 +149,18 @@ async def test_the_migration_rejects_what_the_orm_declares_invalid(
 
 
 @pytest.mark.usefixtures("seeded")
+@pytest.mark.usefixtures("seeded")
+async def test_result_ids_are_unique_per_organization_not_globally(
+    connection: AsyncConnection,
+) -> None:
+    await _insert(connection)
+    await _insert(connection, organization_id="00000000-0000-0000-0000-0000000000bb")
+    with pytest.raises(IntegrityError):
+        async with connection.begin_nested():
+            await _insert(connection)
+
+
+@pytest.mark.usefixtures("seeded")
 async def test_the_trigger_rejects_raw_update_and_delete(
     connection: AsyncConnection,
 ) -> None:

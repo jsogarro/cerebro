@@ -23,6 +23,11 @@ must never be countable as one.
 """
 
 
+# A dimension judged per subject reads as its worst row, so a later pass on one
+# claim cannot hide a failure on another.
+_SEVERITY = {"passed": 0, "abstained": 1, "failed": 2, "error": 3}
+
+
 @dataclass(frozen=True)
 class ClaimView:
     """The latest support judgment for one claim of the evaluated artifact."""
@@ -57,6 +62,7 @@ class EvaluationContext:
         if subject_id is not None:
             fold += f"|subject:{subject_id}"
         return derive_evaluation_result_id(
+            organization_id=self.organization_id,
             run_id=self.run_id,
             evaluator_id=evaluator.evaluator_id,
             evaluator_version=evaluator.evaluator_version,
@@ -108,16 +114,19 @@ def evaluation_states(
 ) -> Mapping[tuple[str, str, str], str]:
     """Status per registered ``(evaluator, version, dimension)``.
 
-    ``canonical_rows`` is the latest-only view. A registered evaluator with no
+    ``canonical_rows`` is the latest-only view; several rows for one dimension
+    (one per subject) reduce to the worst. A registered evaluator with no
     row reads ``not_attempted``, so an evaluation that never ran cannot be
     mistaken for one that passed.
     """
-    stored = {
-        (row.evaluator_id, row.evaluator_version, row.dimension): row.status  # type: ignore[attr-defined]
-        for row in canonical_rows
-    }
+    worst: dict[tuple[str, str, str], str] = {}
+    for row in canonical_rows:
+        key = (row.evaluator_id, row.evaluator_version, row.dimension)  # type: ignore[attr-defined]
+        status: str = row.status  # type: ignore[attr-defined]
+        if key not in worst or _SEVERITY[status] > _SEVERITY[worst[key]]:
+            worst[key] = status
     return {
-        (e.evaluator_id, e.evaluator_version, e.dimension): stored.get(
+        (e.evaluator_id, e.evaluator_version, e.dimension): worst.get(
             (e.evaluator_id, e.evaluator_version, e.dimension), NOT_ATTEMPTED
         )
         for e in registry.evaluators()

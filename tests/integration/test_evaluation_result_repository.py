@@ -260,3 +260,57 @@ async def test_claim_supports_for_a_run_are_ordered_and_tenant_scoped(
     assert [row.claim_support_id for row in every] == ["s-2", "s-3", "s-1"]
     assert [row.claim_support_id for row in latest] == ["s-3", "s-1"]
     assert other == []
+
+
+async def test_another_tenant_holding_the_same_result_id_cannot_block_the_owner(
+    repo: EvaluationResultRepository, db_session: AsyncSession
+) -> None:
+    await seed_run_task_attempt(
+        db_session,
+        organization_id=OTHER_ORG,
+        run_id="run-b",
+        task_id="task-b",
+        attempt_id="attempt-b",
+    )
+    await repo.record_evaluation(
+        _result(run_id="run-b"), organization_id=OTHER_ORG
+    )
+
+    mine = await repo.record_evaluation(_result(), organization_id=ORG)
+
+    assert mine.organization_id == ORG
+    assert (await repo.get_evaluation("evaluation-1", organization_id=ORG)) is not None
+
+
+async def test_trigger_and_dataset_version_are_redacted_on_write(
+    repo: EvaluationResultRepository,
+) -> None:
+    secret = "sk-ant-api03-" + "A" * 40
+    row = await repo.record_evaluation(
+        _result(trigger=f"rerun {secret}", dataset_version=f"ds@{secret}"),
+        organization_id=ORG,
+    )
+
+    assert secret not in row.trigger
+    assert secret not in (row.dataset_version or "")
+
+
+async def test_claim_supports_are_ordered_by_database_time_not_evaluator_time(
+    repo: EvaluationResultRepository, db_session: AsyncSession
+) -> None:
+    claims = ClaimSupportRepository(db_session)
+    await claims.record_claim_support(
+        _support("claim-a", "s-1", evaluated_at=NOW + timedelta(hours=1)),
+        organization_id=ORG,
+    )
+    await db_session.commit()
+    await claims.record_claim_support(
+        _support("claim-a", "s-2", evaluated_at=NOW), organization_id=ORG
+    )
+    await db_session.commit()
+
+    latest = await claims.list_claim_supports_for_run(
+        "run-1", organization_id=ORG, latest_per_claim=True
+    )
+
+    assert [row.claim_support_id for row in latest] == ["s-2"]

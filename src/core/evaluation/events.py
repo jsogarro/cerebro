@@ -11,6 +11,7 @@ _NAMESPACE: Final = uuid.UUID("5b0f5f0e-7a52-4c3e-9d5e-3b7c1e0a4f21")
 
 def derive_evaluation_result_id(
     *,
+    organization_id: uuid.UUID | str,
     run_id: str,
     evaluator_id: str,
     evaluator_version: str,
@@ -20,10 +21,14 @@ def derive_evaluation_result_id(
 ) -> str:
     """Return a stable id so a redelivered evaluation is recognised, not repeated.
 
+    The organization is part of it so one tenant can never pre-claim an id
+    another tenant's dispatcher will derive.
+
     The version is part of the id on purpose: a new evaluator version is a new
     judgment, and must append rather than collide with the old one.
     """
     parts = (
+        str(organization_id),
         run_id,
         evaluator_id,
         evaluator_version,

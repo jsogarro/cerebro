@@ -56,3 +56,13 @@ def test_result_ids_are_unique(session: Session) -> None:
     session.add(AgentEvaluationResult(**valid_row()))
     with pytest.raises(IntegrityError):
         session.commit()
+
+
+def test_the_same_result_id_may_exist_in_two_organizations(session: Session) -> None:
+    session.add(AgentEvaluationResult(**valid_row()))
+    session.add(
+        AgentEvaluationResult(
+            **valid_row(organization_id="00000000-0000-0000-0000-0000000000bb")
+        )
+    )
+    session.commit()

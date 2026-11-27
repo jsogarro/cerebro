@@ -152,10 +152,12 @@ class EvaluationDispatcher:
                 )
             ]
         try:
+            written = 0
             for result in results:
-                await repository.record_evaluation(
+                _, is_new = await repository.append_evaluation(
                     result, organization_id=ctx.organization_id
                 )
+                written += is_new
             await ctx.session.commit()
         except Exception:
             await ctx.session.rollback()
@@ -165,7 +167,7 @@ class EvaluationDispatcher:
                 run_id=ctx.run_id,
             )
             return 0
-        return len(results)
+        return written
 
     @staticmethod
     def _validated(
@@ -183,12 +185,23 @@ class EvaluationDispatcher:
             len(ids) != len(stamped)
             or len(subjects) != len(stamped)
             or any(
-                (r.run_id, r.evaluator_id, r.evaluator_version, r.trigger)
+                (
+                    r.run_id,
+                    r.evaluator_id,
+                    r.evaluator_version,
+                    r.dimension,
+                    r.artifact_id,
+                    r.trigger,
+                    r.deterministic,
+                )
                 != (
                     ctx.run_id,
                     evaluator.evaluator_id,
                     evaluator.evaluator_version,
+                    evaluator.dimension,
+                    ctx.artifact_id,
                     ctx.trigger,
+                    True,  # no judge path exists yet; model-judged results are refused
                 )
                 for r in stamped
             )

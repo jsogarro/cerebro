@@ -70,6 +70,7 @@ def test_exception_codes_are_frozen() -> None:
 
 
 _BASE_ID_INPUTS: dict[str, Any] = {
+    "organization_id": ORG,
     "run_id": "run-1",
     "evaluator_id": "e",
     "evaluator_version": "1",
@@ -84,6 +85,7 @@ def test_derived_ids_are_stable_and_discriminated() -> None:
 
     assert base == derive_evaluation_result_id(**_BASE_ID_INPUTS)
     for field, changed in {
+        "organization_id": uuid.UUID("00000000-0000-0000-0000-0000000000bb"),
         "run_id": "run-2",
         "evaluator_id": "f",
         "evaluator_version": "2",
@@ -248,6 +250,7 @@ def test_coverage_details_count_the_claims() -> None:
         "material_claims": 2,
         "attempted": 1,
         "not_attempted": 1,
+        "retrieval_failed": 0,
     }
 
 
@@ -255,6 +258,7 @@ def test_the_coverage_id_is_reproducible_by_other_callers() -> None:
     ctx = _ctx(_claims(ClaimView("x", "supported", None)))
 
     assert _coverage(ctx).evaluation_result_id == derive_evaluation_result_id(
+        organization_id=ORG,
         run_id="run-1",
         evaluator_id="claims.coverage",
         evaluator_version="1.0.0",
@@ -294,3 +298,73 @@ def test_core_evaluation_does_not_import_experiment_tooling() -> None:
             assert not any(
                 n == "src.evals" or n.startswith("src.evals.") for n in names
             ), f"{file.name} imports experiment tooling"
+
+
+# --- review fixes ---------------------------------------------------------------
+
+
+def test_the_context_id_depends_on_the_organization() -> None:
+    other = EvaluationContext(
+        **{**_ctx().__dict__, "organization_id": uuid.UUID(int=7)}
+    )
+
+    assert _ctx().result_id(_Fake("e")) != other.result_id(_Fake("e"))
+
+
+def test_a_denied_lookup_is_not_coverage() -> None:
+    denied = ClaimView("c", "unsupported", "capability_denied")
+
+    result = _coverage(_ctx(_claims(denied, denied)))
+
+    assert (result.status, result.error_code) == (
+        EvaluationStatus.ABSTAINED,
+        "claim_support_not_attempted",
+    )
+
+
+def test_a_denied_lookup_beside_an_examined_claim_is_a_coverage_gap() -> None:
+    result = _coverage(
+        _ctx(_claims(ClaimView("d", "unsupported", "capability_denied"),
+                     ClaimView("x", "supported", None)))
+    )
+
+    assert result.error_code == "claim_coverage_gap"
+
+
+def test_a_failed_retrieval_makes_the_evaluation_an_error_not_coverage() -> None:
+    result = _coverage(
+        _ctx(_claims(ClaimView("f", "unsupported", "retrieval_failed"),
+                     ClaimView("x", "supported", None)))
+    )
+
+    assert (result.status, result.error_code) == (
+        EvaluationStatus.ERROR,
+        "claim_retrieval_failed",
+    )
+    assert result.score is None
+
+
+class _Row:
+    def __init__(self, status: str, subject_id: str | None) -> None:
+        self.evaluator_id, self.evaluator_version, self.dimension = "a", "1", "fake"
+        self.status, self.subject_id = status, subject_id
+
+
+@pytest.mark.parametrize(
+    ("statuses", "expected"),
+    [
+        (["failed", "passed"], "failed"),
+        (["passed", "failed"], "failed"),
+        (["passed", "abstained"], "abstained"),
+        (["abstained", "failed", "error", "passed"], "error"),
+        (["passed", "passed"], "passed"),
+    ],
+)
+def test_per_subject_rows_reduce_worst_first(
+    statuses: list[str], expected: str
+) -> None:
+    registry = EvaluatorRegistry()
+    registry.register(_Fake("a"))
+    rows = [_Row(status, f"c{i}") for i, status in enumerate(statuses)]
+
+    assert evaluation_states(registry, rows)[("a", "1", "fake")] == expected
