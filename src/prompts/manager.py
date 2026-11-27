@@ -321,7 +321,6 @@ class PromptManager:
 
         template.metadata.usage_count += 1
 
-        # Update success rate (exponential moving average)
         alpha = 0.1
         template.metadata.success_rate = (
             1 - alpha
