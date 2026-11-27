@@ -45,6 +45,9 @@ _DESTINATION_NAME = re.compile(r"[a-z][a-z0-9_.-]{0,63}")
 
 OutboxHandler = Callable[[AgentRunEventOutbox], Awaitable[bool]]
 _DEFAULT_CLAIM_LEASE_SECONDS = 60.0
+# Well under the lease: a handler still running when the lease lapses would be
+# reclaimed by another relay and run twice.
+_DEFAULT_HANDLER_TIMEOUT_SECONDS = 20.0
 
 
 class OutboxRelay:
@@ -92,6 +95,7 @@ class OutboxRelay:
         claim_lease_seconds: float = _DEFAULT_CLAIM_LEASE_SECONDS,
         stream_hub: RunStreamHub | None = None,
         handlers: Mapping[str, OutboxHandler] | None = None,
+        handler_timeout_seconds: float = _DEFAULT_HANDLER_TIMEOUT_SECONDS,
     ) -> None:
         """``handlers`` maps extra destination names to async delivery callables.
 
@@ -103,6 +107,7 @@ class OutboxRelay:
             if name in _BUILTIN_DESTINATIONS or not _DESTINATION_NAME.fullmatch(name):
                 raise ValueError(f"invalid outbox destination name {name!r}")
         self.handlers = dict(handlers or {})
+        self.handler_timeout_seconds = handler_timeout_seconds
         self._handler_errors: dict[int, str] = {}
         self.session_factory = session_factory
         self.event_publisher = event_publisher
@@ -151,16 +156,26 @@ class OutboxRelay:
             await self._dead_letter_abandoned_claims(session)
             await session.commit()
 
+        # Built-in destinations go first and serially; handler rows then run
+        # concurrently, each bounded by the handler timeout, so a slow handler
+        # delays neither them nor the other handlers past the claim lease.
+        core = [r for r in rows if r.destination not in self.handlers]
+        custom = [r for r in rows if r.destination in self.handlers]
         delivered = 0
-        for row in rows:
-            ok = await self._deliver(row)
-            async with self.session_factory() as session:
-                await self._finalize(session, row, delivered=ok)
-                await session.commit()
-            if ok:
-                delivered += 1
+        for row in core:
+            delivered += await self._deliver_and_finalize(row)
+        delivered += sum(
+            await asyncio.gather(*(self._deliver_and_finalize(r) for r in custom))
+        )
         self._notify_stream_subscribers(rows)
         return delivered
+
+    async def _deliver_and_finalize(self, row: AgentRunEventOutbox) -> int:
+        ok = await self._deliver(row)
+        async with self.session_factory() as session:
+            await self._finalize(session, row, delivered=ok)
+            await session.commit()
+        return int(ok)
 
     def _notify_stream_subscribers(self, rows: list[AgentRunEventOutbox]) -> None:
         """Wake local stream subscribers for every run this batch touched.
@@ -291,7 +306,9 @@ class OutboxRelay:
         handler = self.handlers.get(row.destination)
         if handler is not None:
             try:
-                return await handler(row)
+                return await asyncio.wait_for(
+                    handler(row), timeout=self.handler_timeout_seconds
+                )
             except Exception as exc:
                 # Class name only: the message may carry payload or credentials.
                 self._handler_errors[row.id] = type(exc).__name__

@@ -1,18 +1,23 @@
 """Outbox handler registration and the evaluation handler, against real Postgres."""
 
+import asyncio
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from src.api.services.evaluation_outbox_handler import EvaluationOutboxHandler
 from src.api.services.outbox_relay import OutboxRelay
 from src.core.config import settings
 from src.core.contracts import RunStatus
-from src.core.evaluation.registry import build_default_registry, evaluation_states
+from src.core.evaluation.registry import (
+    EvaluatorRegistry,
+    build_default_registry,
+    evaluation_states,
+)
 from src.models.db.evaluation_result import AgentEvaluationResult
 from src.models.db.run_event import AgentRunEventOutbox, EventDeliveryStatus
 from src.models.db.run_lifecycle import AgentRun
@@ -256,3 +261,126 @@ async def test_append_event_requests_evaluation_only_when_enabled(
 
     assert await destinations("a-off", False) == ["redis"]
     assert await destinations("a-on", True) == ["evaluation", "redis"]
+
+
+class _Flaky:
+    evaluator_id = "flaky"
+    evaluator_version = "1"
+    dimension = "flaky"
+    reads_claim_support = False
+
+    def __init__(self, *, fails: int) -> None:
+        self.fails = fails
+
+    async def evaluate(self, ctx: Any) -> list[Any]:
+        if self.fails:
+            self.fails -= 1
+            raise RuntimeError("evaluator down")
+        from src.core.contracts import EvaluationResult, EvaluationStatus
+
+        return [
+            EvaluationResult(
+                evaluation_result_id=ctx.result_id(self),
+                run_id=ctx.run_id,
+                evaluator_id=self.evaluator_id,
+                evaluator_version=self.evaluator_version,
+                dimension=self.dimension,
+                status=EvaluationStatus.PASSED,
+                deterministic=True,
+                completed_at=ctx.completed_at,
+            )
+        ]
+
+
+async def _due_now(factory: async_sessionmaker[AsyncSession], event_id: str) -> None:
+    async with factory() as session:
+        await session.execute(
+            update(AgentRunEventOutbox)
+            .where(AgentRunEventOutbox.event_id == event_id)
+            .values(available_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+        await session.commit()
+
+
+def _flaky_handler(
+    factory: async_sessionmaker[AsyncSession], evaluator: _Flaky
+) -> EvaluationOutboxHandler:
+    registry = EvaluatorRegistry()
+    registry.register(evaluator)  # type: ignore[arg-type]
+    return EvaluationOutboxHandler(session_factory=factory, registry=registry)
+
+
+@pytest.mark.asyncio
+async def test_a_failing_evaluator_is_retried_then_dead_lettered(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    event_id = await _seed(factory, run_id="f-dead")
+    relay = _relay(
+        factory,
+        {"evaluation": _flaky_handler(factory, _Flaky(fails=99))},
+        max_attempts=2,
+    )
+    assert await relay.run_once() == 0
+    first = await _outbox(factory, event_id)
+    assert first.status == EventDeliveryStatus.FAILED.value
+    assert first.attempts == 1 and "dead-lettered" not in (first.last_error or "")
+    await _due_now(factory, event_id)
+    assert await relay.run_once() == 0
+    assert "dead-lettered" in ((await _outbox(factory, event_id)).last_error or "")
+
+
+@pytest.mark.asyncio
+async def test_a_recovered_evaluator_completes_the_retried_delivery(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    event_id = await _seed(factory, run_id="f-recover")
+    relay = _relay(factory, {"evaluation": _flaky_handler(factory, _Flaky(fails=1))})
+    assert await relay.run_once() == 0
+    await _due_now(factory, event_id)
+    assert await relay.run_once() == 1
+    assert (await _outbox(factory, event_id)).status == (
+        EventDeliveryStatus.DELIVERED.value
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_hanging_handler_times_out_without_holding_other_destinations(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async def hang(row: AgentRunEventOutbox) -> bool:
+        await asyncio.sleep(3600)
+        return True
+
+    slow = await _seed(factory, run_id="t-slow")  # lower id: claimed first
+    fast = await _seed(factory, run_id="t-fast", destinations=("redis",))
+    publisher = _Publisher()
+    calls: list[str] = []
+
+    async def publish(**kw: Any) -> bool:
+        calls.append(kw["event_id"])
+        return True
+
+    publisher.publish_run_event = publish  # type: ignore[method-assign]
+    relay = OutboxRelay(
+        session_factory=factory,
+        event_publisher=publisher,  # type: ignore[arg-type]
+        handlers={"evaluation": hang},
+        claim_lease_seconds=1.0,
+        handler_timeout_seconds=0.2,
+    )
+
+    assert await asyncio.wait_for(relay.run_once(), timeout=5) == 1
+    await asyncio.sleep(1.1)  # past the lease: a second relay may reclaim
+    other = OutboxRelay(
+        session_factory=factory,
+        event_publisher=publisher,  # type: ignore[arg-type]
+        handlers={"evaluation": hang},
+        claim_lease_seconds=1.0,
+        handler_timeout_seconds=0.2,
+    )
+    await asyncio.wait_for(other.run_once(), timeout=5)
+
+    assert calls == [fast]
+    row = await _outbox(factory, slow)
+    assert row.status == EventDeliveryStatus.FAILED.value
+    assert "TimeoutError" in (row.last_error or "")

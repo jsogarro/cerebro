@@ -116,6 +116,8 @@ class Settings(BaseSettings):
 
     # Runs the registered evaluators over each succeeded run, off the outbox.
     EVALUATION_DISPATCH_ENABLED: bool = False
+    # Per-call bound on outbox handlers; keep it well under the 60 s claim lease.
+    OUTBOX_HANDLER_TIMEOUT_SECONDS: float = 20.0
 
     # Context Compaction Settings (Dark Launch)
     ENABLE_CONSTRAINT_PINNING: bool = (

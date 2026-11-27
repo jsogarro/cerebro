@@ -358,6 +358,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 session_factory=maintenance_session_factory,
                 event_publisher=event_publisher,
                 handlers=outbox_handlers,
+                handler_timeout_seconds=settings.OUTBOX_HANDLER_TIMEOUT_SECONDS,
             )
             outbox_relay.start()
             resources.push_async_callback(

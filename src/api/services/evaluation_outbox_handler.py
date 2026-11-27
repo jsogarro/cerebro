@@ -16,12 +16,14 @@ from contextlib import AbstractAsyncContextManager
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
+from src.core.contracts import EvaluationStatus
 from src.core.evaluation.dispatcher import EvaluationDispatcher
 from src.core.evaluation.events import EVALUATION_TRIGGER_EVENT
 from src.core.evaluation.registry import EvaluatorRegistry
 from src.models.db.run_event import AgentRunEventOutbox
 from src.models.db.session import tenant_session
 from src.repositories.artifact_repository import ArtifactRepository
+from src.repositories.evaluation_result_repository import EvaluationResultRepository
 
 logger = get_logger()
 
@@ -65,4 +67,22 @@ class EvaluationOutboxHandler:
             trigger=EVALUATION_TRIGGER_EVENT,
             artifact_id=reports[-1].artifact_id if reports else None,
         )
-        return True
+        # The dispatcher records an evaluator failure as an ``error`` row rather
+        # than raising, so delivery succeeds only once every evaluator has a
+        # non-error row; otherwise the relay retries, then dead-letters.
+        async with tenant_session(self._session_factory, organization) as session:
+            rows = await EvaluationResultRepository(session).list_evaluations_for_run(
+                row.run_id,
+                organization_id=organization,
+                trigger=EVALUATION_TRIGGER_EVENT,
+                limit=10_000,
+            )
+        done = {
+            (r.evaluator_id, r.evaluator_version)
+            for r in rows
+            if r.status != EvaluationStatus.ERROR.value
+        }
+        return all(
+            (e.evaluator_id, e.evaluator_version) in done
+            for e in self._registry.evaluators()
+        )

@@ -445,4 +445,4 @@ The file also sets values that differ from the code defaults: `DEBUG=true` (defa
 - `.env.example`, `.env.production.example`, `.env.cli.example`: environment templates
 - `docker-compose.yml`, `docker-compose.production.yml`: compose-level variables and literal service environment
 
-`EVALUATION_DISPATCH_ENABLED` (default `false`) adds an `evaluation` outbox destination to each `run.succeeded` event and registers the evaluation handler on the relay. See [durable runs and events](08-durable-runs-and-events.md).
+`EVALUATION_DISPATCH_ENABLED` (default `false`) adds an `evaluation` outbox destination to each `run.succeeded` event and registers the evaluation handler on the relay. `OUTBOX_HANDLER_TIMEOUT_SECONDS` (default `20`) bounds each registered outbox handler call. See [durable runs and events](08-durable-runs-and-events.md).
