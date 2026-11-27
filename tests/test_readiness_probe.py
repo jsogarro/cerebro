@@ -51,6 +51,12 @@ class _Task:
         return self._done
 
 
+def _dependency_checks(response: Any) -> dict[str, str]:
+    # ``providers`` is informational and never gates readiness.
+    checks = response.json()["checks"]
+    return {k: v for k, v in checks.items() if k != "providers"}
+
+
 @pytest.fixture
 def probe(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     """Return ``call(db_error, redis_error)`` hitting /ready on the real app."""
@@ -95,7 +101,7 @@ def probe(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
 def test_ready_when_both_dependencies_answer(probe: Any) -> None:
     response, clients = probe()
     assert response.status_code == 200
-    assert response.json()["checks"] == {
+    assert _dependency_checks(response) == {
         "database": "ok",
         "redis": "ok",
         "audit_logger": "ok",
@@ -107,7 +113,7 @@ def test_ready_when_both_dependencies_answer(probe: Any) -> None:
 def test_database_failure_is_503(probe: Any) -> None:
     response, _ = probe(db_error=ConnectionError("db down"))
     assert response.status_code == 503
-    assert response.json()["checks"] == {
+    assert _dependency_checks(response) == {
         "database": "unavailable",
         "redis": "ok",
         "audit_logger": "ok",
@@ -118,7 +124,7 @@ def test_database_failure_is_503(probe: Any) -> None:
 def test_redis_failure_is_503(probe: Any) -> None:
     response, clients = probe(redis_error=ConnectionError("redis down"))
     assert response.status_code == 503
-    assert response.json()["checks"] == {
+    assert _dependency_checks(response) == {
         "database": "ok",
         "redis": "unavailable",
         "audit_logger": "ok",

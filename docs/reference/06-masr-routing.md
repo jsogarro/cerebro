@@ -118,7 +118,7 @@ The supervisor type comes from the first detected domain: `research`, `content`,
 - Pick: `cost_minimized` takes the cheapest, `performance_optimized` the highest quality, `latency_optimized` the lowest latency and `balanced` the best weighted score (cost 0.4, quality 0.4, latency 0.2).
 - Up to two fallback models are chosen by availability and then cost.
 
-The application constructs `MASRouter` with `model_config_manager=None` (`create_masr_router`), so the optimizer uses `_initialize_models_legacy`, a fixed set of five model specifications in the `basic`, `standard`, `premium` and `specialized` tiers (including `llama-3.3-70b`, `deepseek-v3`, `gemini-pro` and `qwen3-72b`). The optimizer's thresholds are constructor defaults; no setting feeds them.
+The application constructs `MASRouter` with `model_config_manager=None` (`create_masr_router`), so the optimizer uses `_initialize_models_legacy`, a fixed set of three model specifications (`llama-3.3-70b`, `deepseek-v3` and `gemini-pro`) whose `provider` values are the dispatchable adapter names `llama`, `deepseek` and `gemini`. The optimizer's thresholds are constructor defaults; no setting feeds them.
 
 `MAX_PARALLEL_WORKERS` (default 5) and `AGENTS_MAX_WORKERS_PER_SUPERVISOR` (default 10) are mapped by `settings_to_router_config` to `max_parallel` and `max_agents`, which bound `parallel` and `hierarchical` allocations.
 
@@ -191,8 +191,8 @@ The models are in `src/models/masr_api_models.py`. The handlers are in `src/api/
 
 `RouterStatus` fields: `status`, `uptime_seconds`, `total_routes`, `average_latency_ms`, `success_rate`, `active_supervisors`, `performance_metrics`, `model_availability`, `learning_metrics`, `last_error` and `last_error_time`.
 
-- `status` is `degraded` when the average success rate is below 0.8 or any entry of `model_availability` is false, otherwise `healthy`.
-- `model_availability` comes from `_check_model_availability`, which returns a fixed map (`deepseek`, `llama` and `gemini` all `true`); it does not probe providers.
+- `status` is `degraded` when the average success rate is below 0.8 or every entry of `model_availability` is false, otherwise `healthy`.
+- `model_availability` comes from `_check_model_availability`, which maps `deepseek`, `gemini`, `llama` and `openrouter` to `false` when the provider is disabled or lacks a key, and to `null` (unknown) when it is configured: nothing probes providers, so a configured provider is never reported available.
 - `learning_metrics` is `MASRouter.get_adaptive_status()` (see [Adaptive routing](#adaptive-routing)).
 - `performance_metrics` has one entry per strategy with `requests`, `success_rate`, `avg_cost`, `avg_latency_ms` and `avg_quality`. Only `POST /route` updates `requests` and `success_rate` (a moving average with weight 0.1); the other three keep their initial values.
 - `active_supervisors` is always 0 because the bridge has no `active_supervisor_count` attribute.

@@ -76,16 +76,19 @@ def _service() -> MASRRoutingService:
 def test_model_availability_reflects_configuration(
     monkeypatch: pytest.MonkeyPatch, deepseek: bool, llama: bool, gemini: bool
 ) -> None:
+    # Configured providers are unprobed, so their readiness is unknown (None).
     monkeypatch.setattr(settings, "DEEPSEEK_ENABLED", deepseek)
     monkeypatch.setattr(settings, "DEEPSEEK_API_KEY", "k" if deepseek else None)
     monkeypatch.setattr(settings, "LLAMA_ENABLED", llama)
     monkeypatch.setattr(settings, "GEMINI_ENABLED", gemini)
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "k" if gemini else None)
+    monkeypatch.setattr(settings, "OPENROUTER_ENABLED", False)
 
     assert _service()._check_model_availability() == {
-        "deepseek": deepseek,
-        "llama": llama,
-        "gemini": gemini,
+        "deepseek": None if deepseek else False,
+        "gemini": None if gemini else False,
+        "llama": None if llama else False,
+        "openrouter": False,
     }
 
 

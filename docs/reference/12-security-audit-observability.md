@@ -155,7 +155,7 @@ All four probes are in the public-route allowlist.
 |---|---|
 | `GET /health` | `200` `{"status": "healthy", "service": "research-platform-api"}` |
 | `GET /live` | `200` `{"status": "alive"}` |
-| `GET /ready` | `200` `{"status": "ready", "service": ..., "checks": {"database": "ok", "redis": "ok", "audit_logger": "ok", "jwt_keys": "ok"}}` when a `SELECT 1` on Postgres, a `PING` on Redis, a running audit-logger flush task and a loadable JWT key pair each succeed within 2 seconds. Otherwise `503` with `"status": "not_ready"` and `"unavailable"` for each failed check. |
+| `GET /ready` | `200` `{"status": "ready", "service": ..., "checks": {"database": "ok", "redis": "ok", "audit_logger": "ok", "jwt_keys": "ok", "providers": "unknown"}}` when a `SELECT 1` on Postgres, a `PING` on Redis, a running audit-logger flush task and a loadable JWT key pair each succeed within 2 seconds. Otherwise `503` with `"status": "not_ready"` and `"unavailable"` for each failed check. `providers` is `unknown` or `unconfigured`, is never probed and never changes the status code. |
 | `GET /ws/health` | `200` `{"status": "healthy", "websocket_stats": ..., "timestamp": ...}`. `websocket_stats` comes from the connection manager. `timestamp` is a fixed string, not the current time (see [durable runs and events](08-durable-runs-and-events.md#project-progress-websockets)). |
 
 ## Tracing

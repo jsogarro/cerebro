@@ -23,8 +23,8 @@ from src.ai_brain.router.query_analyzer import (
     ComplexityLevel,
     QueryDomain,
 )
-from src.core.config import settings
 from src.core.kernel import TypedRegistry
+from src.core.provider_readiness import provider_readiness
 from src.models.masr_api_models import (
     AvailableStrategy,
     ComplexityAnalysisRequest,
@@ -562,7 +562,9 @@ class MASRRoutingService:
         )
 
         # Determine overall status
-        if avg_success_rate < 0.8 or not any(model_availability.values()):
+        if avg_success_rate < 0.8 or all(
+            v is False for v in model_availability.values()
+        ):
             status = "degraded"
         else:
             status = "healthy"
@@ -1023,10 +1025,6 @@ class MASRRoutingService:
         else:
             return f"Selected strategy better optimizes for {self._get_optimization_focus(selected)}"
 
-    def _check_model_availability(self) -> dict[str, bool]:
-        """Report which providers are configured; this does not probe them."""
-        return {
-            "deepseek": bool(settings.DEEPSEEK_ENABLED and settings.DEEPSEEK_API_KEY),
-            "llama": bool(settings.LLAMA_ENABLED),
-            "gemini": bool(settings.GEMINI_ENABLED and settings.GEMINI_API_KEY),
-        }
+    def _check_model_availability(self) -> dict[str, bool | None]:
+        """Configured providers are unknown (None): readiness is never probed here."""
+        return provider_readiness()
