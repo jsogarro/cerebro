@@ -138,7 +138,11 @@ def _pytest_in(
     (tmp_path / "pytest.ini").write_text(
         "[pytest]\nmarkers = requires_linux_sandbox: x\n"
     )
-    env = {k: v for k, v in os.environ.items() if k != "CI"}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in {"CI", "CEREBRO_REQUIRED_LINUX_MODULES"}
+    }
     env.update(PYTHONPATH=str(ROOT), CEREBRO_DISABLE_DOTENV="1")
     if ci:
         env["CI"] = "1"
