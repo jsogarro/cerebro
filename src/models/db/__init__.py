@@ -12,6 +12,7 @@ from src.models.db.base import Base, BaseModel
 from src.models.db.capability import AgentCapabilityApproval, AgentCapabilityGrant
 from src.models.db.claim_support import AgentClaimSupport
 from src.models.db.document_critique import CritiqueFinding, DocumentCritique
+from src.models.db.evaluation_result import AgentEvaluationResult
 from src.models.db.evidence import AgentEvidence
 from src.models.db.execution_authority import AgentExecutionAuthority
 from src.models.db.experiment import (
@@ -53,6 +54,7 @@ __all__ = [
     "AgentCapabilityApproval",
     "AgentCapabilityGrant",
     "AgentClaimSupport",
+    "AgentEvaluationResult",
     "AgentEvidence",
     "AgentExecutionAuthority",
     "AgentRun",
