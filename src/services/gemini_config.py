@@ -6,9 +6,11 @@ This module contains configuration settings for the Gemini API integration.
 
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from src.core.environment import load_environment
+
+_Number = TypeVar("_Number", int, float)
 
 
 @dataclass(frozen=True)
@@ -65,16 +67,27 @@ class GeminiConfig:
         return cls(
             api_key=api_key,
             model_name=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-            temperature=float(os.getenv("GEMINI_TEMPERATURE", "0.7")),
-            top_p=float(os.getenv("GEMINI_TOP_P", "0.9")),
-            top_k=int(os.getenv("GEMINI_TOP_K", "40")),
-            max_output_tokens=int(os.getenv("GEMINI_MAX_TOKENS", "32768")),
-            rate_limit=int(os.getenv("GEMINI_RATE_LIMIT", "10")),
-            rate_period=int(os.getenv("GEMINI_RATE_PERIOD", "60")),
-            max_concurrent=int(os.getenv("GEMINI_MAX_CONCURRENT", cls.max_concurrent)),
+            temperature=_env_number("GEMINI_TEMPERATURE", cls.temperature),
+            top_p=_env_number("GEMINI_TOP_P", cls.top_p),
+            top_k=_env_number("GEMINI_TOP_K", cls.top_k),
+            max_output_tokens=_env_number("GEMINI_MAX_TOKENS", cls.max_output_tokens),
+            rate_limit=_env_number("GEMINI_RATE_LIMIT", cls.rate_limit),
+            rate_period=_env_number("GEMINI_RATE_PERIOD", cls.rate_period),
+            max_concurrent=_env_number("GEMINI_MAX_CONCURRENT", cls.max_concurrent),
             cache_enabled=os.getenv("GEMINI_CACHE_ENABLED", "true").lower() == "true",
-            cache_ttl=int(os.getenv("GEMINI_CACHE_TTL", "3600")),
+            cache_ttl=_env_number("GEMINI_CACHE_TTL", cls.cache_ttl),
         )
+
+
+def _env_number(name: str, default: _Number) -> _Number:
+    """Read a numeric env var; the error names the variable, never its value."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return type(default)(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be a valid {type(default).__name__}") from None
 
 
 def get_generation_config(config: GeminiConfig) -> dict[str, Any]:

@@ -6,6 +6,7 @@ import asyncio
 import ipaddress
 import os
 import socket
+import sys
 from collections.abc import AsyncGenerator, Generator
 from typing import Any
 
@@ -101,6 +102,15 @@ def pytest_terminal_summary(terminalreporter: Any) -> None:
             terminalreporter.line(f"skipped module: {nodeid}")
         for nodeid in _missing_modules():
             terminalreporter.line(f"not collected: {nodeid}")
+
+
+@pytest.fixture(autouse=True)
+def clear_plan_router_cache() -> Generator[None, None, None]:
+    """Plan-route routers are cached per process; tests patch ModelRouter."""
+    yield
+    module = sys.modules.get("src.agents.llm_worker_base")
+    if module is not None:
+        module._PLAN_ROUTERS.clear()
 
 
 @pytest.fixture(autouse=True)

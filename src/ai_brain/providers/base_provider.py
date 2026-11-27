@@ -9,6 +9,7 @@ Now supports dynamic model configuration loading from YAML files instead of
 hard-coded specifications.
 """
 
+import asyncio
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
@@ -196,6 +197,7 @@ class BaseProvider(ABC):
         self._provider_config: ProviderConfiguration | None = None
         self._model_specs: dict[str, ModelSpecification] = {}
         self._config_loaded = False
+        self._config_lock = asyncio.Lock()
 
         # Legacy support - will be populated from configuration
         self.supported_capabilities: list[ModelCapability] = []
@@ -224,6 +226,7 @@ class BaseProvider(ABC):
             # Fallback to legacy hard-coded configuration
             self.supported_capabilities = self._get_supported_capabilities_legacy()
             self.supported_models = self._get_supported_models_legacy()
+            self._config_loaded = True
             logger.warning(
                 "Provider using legacy configuration",
                 provider_name=self.provider_name,
@@ -301,6 +304,7 @@ class BaseProvider(ABC):
             # Fallback to legacy configuration
             self.supported_capabilities = self._get_supported_capabilities_legacy()
             self.supported_models = self._get_supported_models_legacy()
+            self._config_loaded = True
 
     def _get_supported_capabilities_legacy(self) -> list[ModelCapability]:
         """
@@ -440,8 +444,11 @@ class BaseProvider(ABC):
     async def ensure_configuration_loaded(self) -> None:
         """Ensure configuration is loaded before operations."""
 
-        if not self._config_loaded:
-            await self.load_configuration()
+        if self._config_loaded:
+            return
+        async with self._config_lock:
+            if not self._config_loaded:
+                await self.load_configuration()
 
     async def reload_configuration(self) -> None:
         """Reload configuration from the manager."""

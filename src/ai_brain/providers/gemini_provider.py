@@ -97,7 +97,7 @@ class GeminiProvider(BaseProvider):
     def _get_provider_name(self) -> str:
         return "gemini"
 
-    def _get_supported_capabilities(self) -> list[ModelCapability]:
+    def _get_supported_capabilities_legacy(self) -> list[ModelCapability]:
         return [
             ModelCapability.TEXT_GENERATION,
             ModelCapability.CHAT,
@@ -106,7 +106,7 @@ class GeminiProvider(BaseProvider):
             ModelCapability.MULTIMODAL,
         ]
 
-    def _get_supported_models(self) -> list[str]:
+    def _get_supported_models_legacy(self) -> list[str]:
         return list(self.model_specs.keys())
 
     def _get_model_context_window(self, model_name: str) -> int:
@@ -125,6 +125,8 @@ class GeminiProvider(BaseProvider):
         self, request: ModelRequest, model_name: str | None = None
     ) -> ModelResponse:
         """Generate response using Gemini models."""
+
+        await self.ensure_configuration_loaded()
 
         if not await self.validate_request(request):
             return self._create_error_response(

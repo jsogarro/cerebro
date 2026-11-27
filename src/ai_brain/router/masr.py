@@ -1885,7 +1885,7 @@ class MASRouter:
 
         fallback_model = ModelSpec(
             name="llama-3.3-70b",
-            provider="ollama",
+            provider="llama",
             tier=ModelTier.STANDARD,
             cost_per_1k_tokens=0.0008,
             avg_latency_ms=30,
