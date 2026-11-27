@@ -56,7 +56,7 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 
 `MASRouter._determine_collaboration_mode` chooses a mode in this order:
 
-1. `fast_path` when `_should_use_fast_path` is true: the setting `MASR_FAST_PATH_ENABLED` (default `true`, read at call time) is on, complexity is `simple`, exactly one domain with a registered fast-path worker and one subtask were found, `uncertainty` is at most 0.3 and the priority is not `critical`.
+1. `fast_path` when `_should_use_fast_path` is true: the setting `MASR_FAST_PATH_ENABLED` (default `true`, read at call time) is on, complexity is `simple`, exactly one domain and one subtask were found, `uncertainty` is at most 0.3 and the priority is not `critical`.
 2. `direct` for any other `simple` query.
 3. `parallel` when more than two domains were found.
 4. `debate` when `uncertainty` is above 0.7.
@@ -82,13 +82,17 @@ The strategy maps to a cost-optimizer strategy: `speed_first` to `latency_optimi
 
 `MASR_ENABLE_ADAPTIVE` (default `true`) controls only the history-based heuristic in `RoutingMetricsCollector.get_adaptive_strategy`. It never enables the Thompson-sampling allocation described under [Adaptive routing](#adaptive-routing); `settings_to_router_config` documents this and only `ADAPTIVE_ROUTING_ENABLED` can enable it. The heuristic reads up to 10,000 retained decisions from the last 24 hours and returns the strategy with the best average confidence. Because it labels every decision `balanced`, it returns `balanced` once the history holds at least 100 decisions and no context override is given. When none of the retained decisions is recent, it returns the default strategy.
 
+## Routing under a catalogue entry
+
+`MASRouter.route(..., shape=WorkflowShape)` (`src/ai_brain/router/routing_types.py`) routes a catalogue launch. The entry (`WorkflowCatalogEntry.shape()`) fixes strategy, domain, collaboration mode, workers and provider allowlist; the optimizer only considers models whose provider is in the allowlist, no fallbacks are proposed, and the decision cache is bypassed. The query analysis decides only whether the query fits: a domain other than the entry's (or `general`) raises `WorkflowShapeUnsupportedError`, which `route` re-raises instead of returning its fallback decision and which does not count against the routing circuit breaker. Routing without `shape` is unchanged.
+
 ## Worker allocation
 
 `MASRouter._allocate_agents` builds an `AgentAllocation` (`supervisor_type`, `worker_count`, `worker_types`, `max_parallel`, `timeout_seconds`, `retry_attempts`) from the mode:
 
 | Mode | Worker count | Worker types |
 |---|---|---|
-| `fast_path` | 1 | one registered worker for the domain (`research` and `general`: `literature_review`, `content`: `drafting`, `analytics`: `data_analysis`, `finance`: `financial_analysis`); the optimizer's fallback models are cleared |
+| `fast_path` | 1 | one registered worker for the domain (`research`: `literature_review`, `content`: `drafting`, `analytics`: `data_analysis`, `finance`: `financial_analysis`); `general`, `service` and `multimodal` get none rather than an unregistered label; the optimizer's fallback models are cleared |
 | `direct` | 1 | one per detected domain |
 | `parallel` | `min(domains + 1, max_parallel_workers)`, then the strategy budget | one per detected domain |
 | `hierarchical` | `min(subtask_count, max_agents)`, then the strategy budget | reasoning specialists, domain specialists and `validation_specialist` |

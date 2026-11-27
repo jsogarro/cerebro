@@ -158,3 +158,30 @@ async def test_out_of_domain_queries_do_not_trip_the_routing_breaker():
     assert decision.agent_allocation.worker_types == list(
         ENTRY.routing_policy.worker_types
     )
+
+
+@pytest.mark.asyncio
+async def test_routing_picks_only_from_the_shapes_provider_allowlist():
+    from dataclasses import replace
+
+    router = MASRouter(
+        config=settings_to_router_config(get_settings(), fixture_mode=True)
+    )
+    for provider in ("google", "deepseek"):
+        shape = replace(ENTRY.shape(), provider_allowlist=(provider,))
+        decision = await router.route("What is photosynthesis?", {}, shape=shape)
+        assert decision.optimization_result.primary_model.provider == provider
+        assert decision.optimization_result.fallback_models == []
+
+
+@pytest.mark.asyncio
+async def test_the_shapes_workers_replace_the_routers_choice():
+    from dataclasses import replace
+
+    router = MASRouter(
+        config=settings_to_router_config(get_settings(), fixture_mode=True)
+    )
+    shape = replace(ENTRY.shape(), worker_types=("synthesis",))
+    decision = await router.route("What is photosynthesis?", {}, shape=shape)
+    assert decision.agent_allocation.worker_types == ["synthesis"]
+    assert decision.agent_allocation.worker_count == 1
