@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
@@ -154,10 +155,8 @@ async def test_no_response_text_or_secret_is_exported(
     client: _Client, outcome: Any
 ) -> None:
     ctx = ModelInvocationContext(ledger=_ledger(), trace_parent="a" * 32)
-    try:
+    with contextlib.suppress(RuntimeError):
         await _run(ctx, _call(outcome))
-    except RuntimeError:
-        pass
     assert client.spans and SECRET not in repr(
         [(s.kwargs, s.updates) for s in client.spans]
     )
