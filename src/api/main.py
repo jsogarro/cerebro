@@ -36,6 +36,7 @@ from src.api.middleware.rate_limiter import (
     ResilientRateLimitStore,
 )
 from src.api.routes import (
+    admin_security,
     agent_api,
     documents,
     health,
@@ -514,6 +515,7 @@ app.mount("/metrics", metrics_app)
 app.include_router(health.router, tags=["health"])
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")
+app.include_router(admin_security.router, prefix="/api/v1")
 app.include_router(research.router, prefix="/api/v1", tags=["research"])
 app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
 app.include_router(documents.router, prefix="/api/v1")

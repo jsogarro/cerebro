@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import threading
+import time
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from enum import Enum
@@ -26,6 +27,10 @@ from src.models.db.audit_log import AuditEventType, AuditLog, AuditSeverity
 from src.models.db.security_alert import AlertSeverity, AlertType, SecurityAlert
 from src.models.db.user import User
 from src.services.cache.cache_manager import CacheManager
+
+_REJECTION_QUEUE_SIZE = 256
+_REJECTION_WINDOW = 60.0
+_ALERT_SUPPRESSION = 900.0
 
 
 class AuditPersistenceError(RuntimeError):
@@ -107,6 +112,17 @@ class AuditLogger:
         self.flush_task: asyncio.Task[None] | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
 
+        # Rejections arrive before the endpoint runs and cost nothing durable
+        # inline: they are sampled per caller and drained by one worker.
+        self._rejections: asyncio.Queue[tuple[Any, ...]] = asyncio.Queue(
+            maxsize=_REJECTION_QUEUE_SIZE
+        )
+        self._rejection_seen: dict[str, float] = {}
+        self._rejection_worker: asyncio.Task[None] | None = None
+        # ponytail: per-process alert suppression; a shared store if several
+        # workers must agree on "already alerted".
+        self._alerted_at: dict[tuple[Any, ...], float] = {}
+
         # Metrics
         self.metrics = {
             "events_logged": 0,
@@ -119,7 +135,9 @@ class AuditLogger:
         """Get default alert thresholds."""
         return {
             "failed_login_attempts": 5,  # Alert after 5 failed logins
-            "rate_limit_exceeded": 10,  # Alert after 10 rate limit hits
+            # Rejections are sampled to one event per caller per window, so
+            # a single event already means a sustained breach.
+            "rate_limit_exceeded": 1,
             "suspicious_activity": 3,  # Alert after 3 suspicious events
             "unauthorized_access": 1,  # Alert immediately
             "data_exfiltration": 1,  # Alert immediately
@@ -131,10 +149,15 @@ class AuditLogger:
         """Start the audit logger background tasks."""
         if not self.flush_task:
             self.flush_task = asyncio.create_task(self._periodic_flush())
+            self._rejection_worker = asyncio.create_task(self._drain_rejections())
             self.logger.info("Audit logger started")
 
     async def stop(self) -> None:
         """Stop the audit logger and flush remaining logs."""
+        if self._rejection_worker:
+            self._rejection_worker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._rejection_worker
         if self.flush_task:
             self.flush_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -143,6 +166,56 @@ class AuditLogger:
         # Final flush
         await self.flush_buffer()
         self.logger.info("Audit logger stopped", metrics=self.metrics)
+
+    def record_rejection(
+        self,
+        event_type: AuditEventType,
+        request: Request,
+        *,
+        key: str,
+        action: str,
+    ) -> None:
+        """Queue a sampled audit event for a request rejected before its endpoint.
+
+        Synchronous and non-blocking so the rejection path stays free of
+        durable writes: one event per ``key`` per window, and a full queue
+        drops rather than waits.
+        """
+        now = time.monotonic()
+        seen_key = f"{event_type.value}:{key}"
+        if now - self._rejection_seen.get(seen_key, -_REJECTION_WINDOW) < (
+            _REJECTION_WINDOW
+        ):
+            return
+        if len(self._rejection_seen) >= _REJECTION_QUEUE_SIZE * 4:
+            self._rejection_seen = {
+                k: t
+                for k, t in self._rejection_seen.items()
+                if now - t < _REJECTION_WINDOW
+            }
+        try:
+            self._rejections.put_nowait((event_type, request, action))
+        except asyncio.QueueFull:
+            return
+        self._rejection_seen[seen_key] = now
+
+    async def _drain_rejections(self) -> None:
+        while True:
+            event_type, request, action = await self._rejections.get()
+            try:
+                await self.log_event(
+                    event_type=event_type,
+                    action=action,
+                    request=request,
+                    result="failure",
+                    severity=AuditSeverity.WARNING,
+                )
+                await self.flush_buffer()
+            except AuditPersistenceError:
+                # Already counted and logged by ``flush_buffer``; the worker must keep draining.
+                pass
+            finally:
+                self._rejections.task_done()
 
     async def log_event(
         self,
@@ -384,10 +457,16 @@ class AuditLogger:
             await self._generate_security_alert(log_entry, AlertSeverity.CRITICAL)
             return
 
-        if event_type == AuditEventType.LOGIN_FAILED and user_id:
-            # Count recent failed login attempts
-            count = await self._count_recent_events(
-                user_id, AuditEventType.LOGIN_FAILED, minutes=15
+        if event_type == AuditEventType.LOGIN_FAILED:
+            # Keyed on the account the login route resolved. An address that
+            # matches no account has none, so it falls back to the source IP
+            # and the caller sees no difference.
+            identifier = user_id or log_entry.get("ip_address")
+            if not identifier:
+                return
+            # This event is still in the buffer, so it is not in the count.
+            count = 1 + await self._count_recent_events(
+                str(identifier), AuditEventType.LOGIN_FAILED, minutes=15
             )
 
             if count >= self.alert_threshold.get("failed_login_attempts", 5):
@@ -402,13 +481,17 @@ class AuditLogger:
             identifier = user_id or log_entry.get("ip_address")
             if not identifier:
                 return
-            count = await self._count_recent_events(
-                str(identifier),
-                AuditEventType.RATE_LIMIT_EXCEEDED,
-                minutes=5,
+            threshold = self.alert_threshold.get("rate_limit_exceeded", 1)
+            count = (
+                threshold
+                if threshold <= 1
+                else 1
+                + await self._count_recent_events(
+                    str(identifier), AuditEventType.RATE_LIMIT_EXCEEDED, minutes=5
+                )
             )
 
-            if count >= self.alert_threshold.get("rate_limit_exceeded", 10):
+            if count >= threshold:
                 await self._generate_security_alert(
                     log_entry, AlertSeverity.MEDIUM, alert_type=AlertType.API_RATE_LIMIT
                 )
@@ -508,6 +591,18 @@ class AuditLogger:
             else:
                 alert_type = AlertType.UNUSUAL_ACTIVITY
 
+        # One alert per subject per window: a burst is one incident, not one
+        # alert per event.
+        now = time.monotonic()
+        suppression_key = (
+            alert_type,
+            str(log_entry.get("user_id")),
+            log_entry.get("ip_address"),
+        )
+        last = self._alerted_at.get(suppression_key)
+        if last is not None and now - last < _ALERT_SUPPRESSION:
+            return
+
         alert = SecurityAlert.create_alert(
             alert_type=alert_type,
             title=f"{alert_type.value.replace('_', ' ').title()} Detected",
@@ -529,6 +624,10 @@ class AuditLogger:
             self.db_session.add(alert)
             await self.db_session.commit()
 
+        self._alerted_at = {
+            k: t for k, t in self._alerted_at.items() if now - t < _ALERT_SUPPRESSION
+        }
+        self._alerted_at[suppression_key] = now
         self.metrics["alerts_generated"] += 1
 
         self.logger.warning(

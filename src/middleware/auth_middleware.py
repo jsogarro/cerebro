@@ -24,9 +24,11 @@ from src.api.middleware.error_envelope import build_error_payload
 from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
 from src.auth.models import TokenPayload
 from src.core.config import settings
+from src.models.db.audit_log import AuditEventType
 from src.models.db.session import get_session
 from src.models.db.user import User
 from src.repositories.user_repository import UserRepository
+from src.security.audit_middleware import audit_rejection
 
 logger = structlog.get_logger(__name__)
 
@@ -164,6 +166,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         token = _extract_bearer_token(request)
         if token is None:
+            audit_rejection(request, AuditEventType.UNAUTHORIZED_ACCESS, "no token")
             return _authentication_response(401, "Authentication required")
 
         try:
@@ -175,6 +178,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         ):
             return _authentication_response(503, "Authentication service unavailable")
         except JWTError:
+            audit_rejection(
+                request, AuditEventType.UNAUTHORIZED_ACCESS, "invalid token"
+            )
             return _authentication_response(401, "Invalid authentication token")
         except Exception as exc:
             logger.error("Authentication validation unavailable", error=str(exc))

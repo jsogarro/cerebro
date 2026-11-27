@@ -10,6 +10,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
+from src.api.client_ip import client_ip
 from src.api.middleware.error_envelope import build_error_payload
 from src.models.db.audit_log import AuditEventType, AuditSeverity
 from src.security.audit_logger import AuditLogger
@@ -49,6 +50,9 @@ class AuditTrailMiddleware:
     def _event_type(request: Request, status_code: int | None) -> AuditEventType:
         """Map the request to an existing audit event type."""
         path = request.url.path.rstrip("/")
+        # The login throttle's lockout is a rate-limit hit, not a failed guess.
+        if status_code == 429:
+            return AuditEventType.RATE_LIMIT_EXCEEDED
         if path.endswith("/auth/login"):
             if status_code is None:
                 return AuditEventType.DATA_ACCESSED
@@ -61,8 +65,6 @@ class AuditTrailMiddleware:
             return AuditEventType.LOGOUT
         if status_code in (401, 403):
             return AuditEventType.UNAUTHORIZED_ACCESS
-        if status_code == 429:
-            return AuditEventType.RATE_LIMIT_EXCEEDED
         if request.method == "DELETE":
             return AuditEventType.DATA_DELETED
         if request.method in {"POST", "PUT", "PATCH"}:
@@ -99,6 +101,8 @@ class AuditTrailMiddleware:
             event_type=self._event_type(request, status_code),
             action=f"{request.method} {request.url.path}",
             request=request,
+            # Only the login route knows which account a failed login targeted.
+            user_id=getattr(request.state, "audit_subject_id", None),
             result=(
                 ("admitted" if phase == "admission" else "success")
                 if status_code is None or status_code < 400
@@ -227,4 +231,23 @@ async def log_rejected_requests(
     return response
 
 
-__all__ = ["AuditTrailMiddleware", "log_rejected_requests"]
+def audit_rejection(request: Request, event_type: AuditEventType, reason: str) -> None:
+    """Hand a rejection to the app's audit logger without touching the store.
+
+    Authentication and rate limiting call this on their reject path; see
+    ``AuditLogger.record_rejection`` for why it never blocks or writes.
+    """
+    audit_logger = getattr(request.app.state, "audit_logger", None)
+    record = getattr(audit_logger, "record_rejection", None)
+    if not callable(record):
+        return
+    subject = getattr(request.state, "user_id", None) or client_ip(request)
+    record(
+        event_type,
+        request,
+        key=str(subject),
+        action=f"{request.method} {request.url.path} ({reason})",
+    )
+
+
+__all__ = ["AuditTrailMiddleware", "audit_rejection", "log_rejected_requests"]

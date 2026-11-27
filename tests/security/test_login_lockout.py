@@ -16,7 +16,11 @@ from httpx import ASGITransport
 from src.api.auth import auth_router
 from src.api.middleware.rate_limiter import InMemoryRateLimitStore
 from src.auth.models import TokenPair
+from src.models.db.audit_log import AuditEventType
+from src.models.db.security_alert import AlertType, SecurityAlert
 from src.models.db.session import get_session
+from src.security.audit_logger import AuditLogger
+from src.security.audit_middleware import AuditTrailMiddleware
 from src.security.login_throttle import LoginThrottle
 
 PASSWORD = "CorrectHorse!Battery9"
@@ -237,3 +241,59 @@ async def test_lost_expire_does_not_lock_an_account_forever() -> None:
     await store.increment("k", 60)
 
     assert redis_client.ttls["rate_limit:k"] == 60
+
+
+class _AlertStore:
+    """Session factory that keeps only what is added, like a committed table."""
+
+    def __init__(self) -> None:
+        self.rows: list[Any] = []
+
+    def __call__(self) -> Any:
+        store = self
+
+        class _Session:
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_a: Any) -> None: ...
+
+            def add(self, row: Any) -> None:
+                store.rows.append(row)
+
+            async def commit(self) -> None: ...
+
+        return _Session()
+
+
+@pytest.mark.asyncio
+async def test_failed_login_burst_raises_one_alert_keyed_on_the_account(
+    app: FastAPI,
+) -> None:
+    store = _AlertStore()
+    audit = AuditLogger(
+        session_factory=store,
+        alert_threshold={"failed_login_attempts": MAX},
+    )
+    seen: dict[str, int] = {}
+
+    async def prior_failures(
+        identifier: str, event_type: Any, minutes: int = 15
+    ) -> int:
+        assert event_type is AuditEventType.LOGIN_FAILED
+        seen[identifier] = seen.get(identifier, 0) + 1
+        return seen[identifier] - 1
+
+    audit._count_recent_events = prior_failures  # type: ignore[method-assign]
+    app.state.audit_logger = audit
+    app.middleware("http")(AuditTrailMiddleware())
+
+    await _fail(app, "real@example.com", MAX)
+    await _fail(app, "ghost@example.com", MAX)
+
+    alerts = [r for r in store.rows if isinstance(r, SecurityAlert)]
+    real = _User.id
+    assert [a.user_id for a in alerts if a.user_id] == [real]
+    assert {a.alert_type for a in alerts} == {AlertType.FAILED_LOGIN_ATTEMPTS}
+    assert str(real) in seen
+    assert "real@example.com" not in seen

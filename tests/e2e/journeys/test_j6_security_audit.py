@@ -47,24 +47,16 @@ async def test_failed_logins_are_audited_and_the_account_is_locked_out(
     assert int(locked.headers["retry-after"]) > 0
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="P07-E: failed-login burst raises no security alert",
-)
-async def test_failed_login_burst_raises_an_alert(db, burst):
+async def test_failed_login_burst_raises_one_alert(db, burst):
     victim, _, _ = burst
     alerts = await db.fetchval(
-        "SELECT count(*) FROM security_alerts WHERE user_id = $1::uuid", victim.user_id
+        "SELECT count(*) FROM security_alerts "
+        "WHERE user_id = $1::uuid AND alert_type = 'failed_login_attempts'",
+        victim.user_id,
     )
-    assert alerts >= 1, alerts
+    assert alerts == 1, alerts
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="P07-E: RATE_LIMIT_EXCEEDED audit events are not emitted",
-)
 async def test_rate_limit_hit_is_audited(db, burst):
     _, codes, _ = burst
     assert 429 in codes
@@ -74,13 +66,36 @@ async def test_rate_limit_hit_is_audited(db, burst):
     assert limited >= 1, limited
 
 
+ADMIN_READS = ["/api/v1/admin/audit-events", "/api/v1/admin/alerts"]
+
+
+async def test_admin_reads_are_superuser_only(client, db, burst, new_account):
+    alice = await new_account("alice")
+    for path in ADMIN_READS:
+        denied = await client.get(path, headers=alice.headers)
+        assert denied.status_code == 403, (path, denied.status_code)
+
+    await db.execute(
+        "UPDATE users SET is_superuser = true WHERE id = $1::uuid", alice.user_id
+    )
+    victim, _, _ = burst
+    alerts = await client.get(
+        "/api/v1/admin/alerts",
+        headers=alice.headers,
+        params={"alert_type": "failed_login_attempts"},
+    )
+    assert alerts.status_code == 200, alerts.text
+    assert victim.user_id in {a["user_id"] for a in alerts.json()["items"]}
+    events = await client.get(ADMIN_READS[0], headers=alice.headers)
+    assert events.status_code == 200, events.text
+    assert events.json()["items"]
+
+
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="P07-E: no superuser audit/alert read or ack routes",
+    reason="P07-E wave 2: no security alert acknowledge route",
 )
-async def test_superuser_can_read_and_ack_alerts_but_a_normal_user_gets_403(
-    client, new_account
-):
-    await require_path_containing(client, await new_account("alice"), "alerts")
-    pytest.fail("routes landed: superuser reads and acks, a normal user gets 403")
+async def test_superuser_can_ack_alerts(client, new_account):
+    await require_path_containing(client, await new_account("alice"), "/ack")
+    pytest.fail("route landed: superuser acks an alert, a normal user gets 403")

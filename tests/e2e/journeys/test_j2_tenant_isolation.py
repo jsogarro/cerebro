@@ -175,11 +175,6 @@ _MISSING_READ_ROUTES = [
         marks=_missing("P16", "GET /api/v1/memory missing"),
         id="memory",
     ),
-    pytest.param(
-        "/api/v1/admin/alerts",
-        marks=_missing("P07-E", "GET /api/v1/admin/alerts missing"),
-        id="audit",
-    ),
 ]
 
 
@@ -189,6 +184,15 @@ async def test_read_route_exists_for_isolation_check(client, new_account, path):
     pytest.fail(
         "route landed: assert Bob cannot read Alice's rows through it, then drop the xfail"
     )
+
+
+@pytest.mark.parametrize("path", ["/api/v1/admin/alerts", "/api/v1/admin/audit-events"])
+async def test_a_tenant_user_cannot_read_global_audit_or_alerts(
+    client, new_account, path
+):
+    for name in ("alice", "bob"):
+        response = await client.get(path, headers=(await new_account(name)).headers)
+        assert response.status_code == 403, (name, response.status_code)
 
 
 @pytest.mark.xfail(
