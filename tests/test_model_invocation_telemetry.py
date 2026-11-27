@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from src.core.budget import BudgetLedger
+from src.core.budget import BudgetExceededError, BudgetLedger
 from src.core.contracts import ExecutionBudget
 from src.services.model_invocation import (
     CallPrice,
@@ -207,7 +207,7 @@ async def test_an_unusable_response_after_dispatch_settles_unknown_once_and_ends
     assert journal.names == ["reserve", "mark", "settle_unknown"]
     assert ledger.unknown_usage_calls == 1
     assert client.spans[0].ended == 1
-    with pytest.raises(Exception, match="budget|ceiling|cost"):
+    with pytest.raises(BudgetExceededError):
         await _run(ctx, _call(_response()))
 
 
