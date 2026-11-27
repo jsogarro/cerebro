@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -21,7 +22,9 @@ from src.models.db.similarity_check import EgressEvent
 from src.models.db.uploaded_document import UploadedDocument, UsageLedger
 from src.models.db.user import User
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint
-from src.security.audit_logger import AuditLogger
+from src.security.audit_logger import AuditLogger, AuditPersistenceError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -124,8 +127,10 @@ async def delete_user_gdpr(
     )
 
     # Record the erasure only once it is durable, so the audit trail never
-    # reports a deletion that rolled back.
+    # reports a deletion that rolled back. An audit failure after the commit
+    # must not turn a completed erasure into an error response.
     await db.commit()
+    audit_recorded = False
     if audit_logger is not None:
         await audit_logger.log_event(
             event_type=AuditEventType.ACCOUNT_DELETED,
@@ -135,7 +140,11 @@ async def delete_user_gdpr(
             resource_id=user_id_text,
             metadata={"erased_by": str(current_user.id)},
         )
-        await audit_logger.flush_buffer()
+        try:
+            await audit_logger.flush_buffer()
+            audit_recorded = True
+        except AuditPersistenceError:
+            logger.exception("ACCOUNT_DELETED audit event not persisted")
 
     not_erased = dict(_RETAINED)
     if memory_system is None:
@@ -144,6 +153,7 @@ async def delete_user_gdpr(
     return {
         "user_id": user_id_text,
         "not_erased": not_erased,
+        "audit_recorded": audit_recorded,
         "memory_purged": memory_system is not None,
         "deleted": {
             # SQLAlchemy 2.x: Result.rowcount is valid for DELETE/UPDATE; mypy stub gap.

@@ -112,7 +112,10 @@ async def test_agent_health_does_not_leak_other_tenants_load() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gdpr_erase_does_not_claim_memory_purged_when_none_attached() -> None:
+@pytest.mark.parametrize("flush_fails", [False, True])
+async def test_gdpr_erase_does_not_claim_memory_purged_when_none_attached(
+    flush_fails: bool,
+) -> None:
     from types import SimpleNamespace
     from uuid import uuid4
 
@@ -127,6 +130,7 @@ async def test_gdpr_erase_does_not_claim_memory_purged_when_none_attached() -> N
     from src.models.db.uploaded_document import UploadedDocument, UsageLedger
     from src.models.db.user import User
     from src.models.db.workflow_checkpoint import WorkflowCheckpoint
+    from src.security.audit_logger import AuditPersistenceError
 
     class _Jwt:
         async def revoke_all_user_tokens(self, user_id: str) -> None:
@@ -142,6 +146,8 @@ async def test_gdpr_erase_does_not_claim_memory_purged_when_none_attached() -> N
             return "id"
 
         async def flush_buffer(self) -> None:
+            if flush_fails:
+                raise AuditPersistenceError("audit store down")
             self.flushed = True
 
     audit = _Audit()
@@ -160,6 +166,16 @@ async def test_gdpr_erase_does_not_claim_memory_purged_when_none_attached() -> N
             await conn.run_sync(model.__table__.create)
     user_id = uuid4()
     async with AsyncSession(engine) as session:
+        session.add(
+            User(
+                id=user_id,
+                email="gone@example.com",
+                username="gone",
+                hashed_password="x",
+            )
+        )
+        await session.commit()
+    async with AsyncSession(engine) as session:
         body = await users.delete_user_gdpr(
             user_id,
             db=session,
@@ -168,7 +184,12 @@ async def test_gdpr_erase_does_not_claim_memory_purged_when_none_attached() -> N
             current_user=SimpleNamespace(id=user_id, is_superuser=False),  # type: ignore[arg-type]
             jwt_service=_Jwt(),  # type: ignore[arg-type]
         )
+    async with AsyncSession(engine) as session:
+        assert await session.get(User, user_id) is None
     await engine.dispose()
+
+    # The erasure is committed either way, so the response must not fail.
+    assert body["audit_recorded"] is (not flush_fails)
 
     assert body["memory_purged"] is False
     assert body["deleted"]["memory"] is None
@@ -177,7 +198,7 @@ async def test_gdpr_erase_does_not_claim_memory_purged_when_none_attached() -> N
     (event,) = audit.events
     assert event["event_type"] == AuditEventType.ACCOUNT_DELETED
     assert event["user_id"] == user_id
-    assert audit.flushed
+    assert audit.flushed is (not flush_fails)
 
 
 @pytest.mark.asyncio
