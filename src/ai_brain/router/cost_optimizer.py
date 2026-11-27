@@ -190,8 +190,8 @@ class CostOptimizer:
         models = {}
 
         # Basic tier models
-        models["llama-3.3-70b"] = ModelSpec(
-            name="llama-3.3-70b",
+        models["llama3.3:70b"] = ModelSpec(
+            name="llama3.3:70b",
             provider="llama",
             tier=ModelTier.STANDARD,
             cost_per_1k_tokens=0.0008,
@@ -438,7 +438,6 @@ class CostOptimizer:
 
         perfect_fits = {
             "deepseek-v3": ["analytical", "logical", "mathematical"],
-            "qwen3-72b": ["multilingual", "translation"],
             "gemini-pro": ["multimodal", "general"],
         }
 

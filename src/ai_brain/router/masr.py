@@ -1884,7 +1884,7 @@ class MASRouter:
         )
 
         fallback_model = ModelSpec(
-            name="llama-3.3-70b",
+            name="llama3.3:70b",
             provider="llama",
             tier=ModelTier.STANDARD,
             cost_per_1k_tokens=0.0008,
@@ -1894,7 +1894,7 @@ class MASRouter:
         )
 
         fallback_estimate = CostEstimate(
-            model_name="llama-3.3-70b",
+            model_name="llama3.3:70b",
             estimated_tokens=1000,
             cost_per_request=0.0008,
             total_monthly_cost=80.0,

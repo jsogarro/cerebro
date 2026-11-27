@@ -1,6 +1,7 @@
 """Provider catalog, vocabulary, readiness and plan-route behaviour that spends nothing."""
 
 import asyncio
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -10,22 +11,27 @@ from src.ai_brain.providers.base_provider import ModelRequest
 from src.core.config import settings
 from src.core.kernel.component_keys import PROVIDER_KEYS
 
-
-class _FakeService:
-    def __init__(self, *_a: Any, **_k: Any) -> None:
-        self.prompts: list[str] = []
-
-    async def generate_research_plan(self, query: str) -> str:
-        self.prompts.append(query)
-        return "stub answer"
+SENT_PROMPTS: list[str] = []
 
 
 @pytest.fixture
 def gemini_provider(monkeypatch: pytest.MonkeyPatch) -> Any:
-    from src.ai_brain.providers import gemini_provider as module
+    """The real GeminiService; only its network call is stubbed."""
+    from src.ai_brain.providers.gemini_provider import GeminiProvider
+    from src.services import gemini_service as service_module
 
-    monkeypatch.setattr(module, "GeminiServiceClass", _FakeService)
-    return module.GeminiProvider({"api_key": "k"})
+    SENT_PROMPTS.clear()
+
+    async def fake_generate(_self: Any, prompt: str) -> str:
+        SENT_PROMPTS.append(prompt)
+        return "stub answer"
+
+    monkeypatch.setattr(service_module, "ChatGoogleGenerativeAI", lambda **_k: None)
+    monkeypatch.setattr(
+        service_module.GeminiService, "_generate_content", fake_generate
+    )
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-env-model")
+    return GeminiProvider({"api_key": "k"})
 
 
 async def test_valid_gemini_request_reaches_the_service(gemini_provider: Any) -> None:
@@ -34,7 +40,10 @@ async def test_valid_gemini_request_reaches_the_service(gemini_provider: Any) ->
     )
 
     assert response.success, response.error_message
-    assert gemini_provider.gemini_service.prompts == ["hello"]
+    assert response.content == "stub answer"
+    assert SENT_PROMPTS == ["hello"]
+    # The service runs GEMINI_MODEL, so that is what is reported, not "gemini-pro".
+    assert response.model_name == "gemini-env-model"
 
 
 async def test_concurrent_first_calls_load_the_catalog_once(
@@ -64,7 +73,7 @@ async def test_unknown_gemini_model_fails_before_dispatch(gemini_provider: Any) 
     response = await gemini_provider.generate(ModelRequest(prompt="x"), "not-a-model")
 
     assert not response.success
-    assert gemini_provider.gemini_service.prompts == []
+    assert SENT_PROMPTS == []
 
 
 def test_optimizer_models_use_dispatchable_provider_names() -> None:
@@ -236,3 +245,173 @@ async def test_concurrent_first_calls_share_one_async_catalog_load(
     )
 
     assert calls == 1
+
+
+def test_every_model_the_optimizer_emits_is_in_its_providers_catalog() -> None:
+    from src.ai_brain.providers.model_router import ModelRouter
+    from src.ai_brain.router.cost_optimizer import CostOptimizer
+    from src.ai_brain.router.masr import MASRouter, RoutingStrategy
+
+    router = ModelRouter(
+        {
+            "providers": {
+                "llama": {"enabled": True},
+                "deepseek": {"enabled": True, "api_key": "k"},
+                "gemini": {"enabled": True, "api_key": "k"},
+            }
+        }
+    )
+    masr = MASRouter.__new__(MASRouter)
+    masr.default_strategy = RoutingStrategy("balanced")
+    fallback = masr._create_fallback_decision("q", "q", RuntimeError("x"))
+    emitted = [
+        (spec.provider, spec.name)
+        for spec in CostOptimizer({})._initialize_models_legacy().values()
+    ] + [
+        (
+            fallback.optimization_result.primary_model.provider,
+            fallback.optimization_result.primary_model.name,
+        )
+    ]
+
+    for provider_name, model in emitted:
+        provider = router.registry.providers[provider_name]
+        asyncio.run(provider.ensure_configuration_loaded())
+        assert provider.supports_model(model), (provider_name, model)
+
+
+class _Failing(_Unprobeable):
+    def __init__(self, error_type: str | None = None) -> None:
+        super().__init__()
+        self.error_type = error_type
+        self.calls = 0
+
+    async def generate(self, request: ModelRequest, model_name: str | None) -> Any:
+        from src.ai_brain.providers.base_provider import ModelResponse
+
+        self.calls += 1
+        return ModelResponse(
+            request_id=request.request_id,
+            provider="p",
+            success=False,
+            error_message="503",
+            error_type=self.error_type,
+        )
+
+
+def _router_with_provider(provider: Any) -> Any:
+    from src.ai_brain.providers.model_router import ModelRouter
+
+    router = ModelRouter({"providers": {}}, component_registry=object())  # type: ignore[arg-type]
+    router.registry.providers["p"] = provider
+    return router
+
+
+class _ProbeRaises(_Unprobeable):
+    async def health_check(self) -> Any:
+        raise RuntimeError("down")
+
+
+async def test_provider_whose_probe_raises_is_observed_unhealthy() -> None:
+    router = _router_with_provider(_ProbeRaises())
+
+    status = await router._get_provider_health("p")
+
+    assert not status.healthy
+    assert router._is_observed_unhealthy("p")
+
+
+async def test_failed_requests_stop_routing_to_the_provider_for_the_interval() -> None:
+    provider = _Failing("generation_error")
+    router = _router_with_provider(provider)
+
+    for _ in range(3):
+        await router.route_and_generate(ModelRequest(prompt="x"))
+
+    assert provider.calls == 1
+    assert router._is_observed_unhealthy("p")
+
+
+async def test_request_specific_rejections_do_not_mark_the_provider() -> None:
+    provider = _Failing("model_error")
+    router = _router_with_provider(provider)
+
+    for _ in range(3):
+        await router.route_and_generate(ModelRequest(prompt="x"))
+
+    assert provider.calls == 3
+    assert not router._is_observed_unhealthy("p")
+
+
+async def test_a_success_after_the_interval_clears_the_mark() -> None:
+    provider = _Failing("generation_error")
+    router = _router_with_provider(provider)
+    await router.route_and_generate(ModelRequest(prompt="x"))
+    router.registry.last_health_check["p"] -= timedelta(
+        seconds=router.health_check_interval + 1
+    )
+
+    ok = _Unprobeable()
+    router.registry.providers["p"] = ok  # type: ignore[assignment]
+    response = await router._try_provider(ModelRequest(prompt="x"), "p", "m")
+
+    assert response.success
+    assert not router._is_observed_unhealthy("p")
+
+
+def _plan_route(monkeypatch: pytest.MonkeyPatch, api_key: str) -> Any:
+    from src.agents import llm_worker_base
+
+    monkeypatch.setattr(
+        type(settings),
+        "get_ai_brain_config",
+        lambda _self: {"providers": {"gemini": {"api_key": api_key}}},
+    )
+    monkeypatch.setattr("src.ai_brain.providers.ModelRouter", lambda *a, **k: object())
+    worker = llm_worker_base.LLMWorkerAgentBase.__new__(
+        llm_worker_base.LLMWorkerAgentBase
+    )
+    worker.config = {}
+    return worker._build_plan_route(
+        {"primary": {"provider": "gemini", "model": "gemini-pro"}}
+    )
+
+
+def test_plan_router_cache_is_keyed_by_config_without_holding_the_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.agents import llm_worker_base
+
+    first = _plan_route(monkeypatch, "secret-key-one")
+    second = _plan_route(monkeypatch, "secret-key-two")
+
+    assert first.router is not second.router
+    assert not any(
+        "secret-key" in part
+        for key in llm_worker_base._PLAN_ROUTERS
+        for part in map(str, key)
+    )
+
+
+async def test_router_status_is_healthy_when_every_provider_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from src.api.services.masr_routing_service import MASRRoutingService
+
+    async def adaptive() -> dict[str, Any]:
+        return {}
+
+    monkeypatch.setattr(settings, "GEMINI_ENABLED", True)
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "k")
+    service = MASRRoutingService.__new__(MASRRoutingService)
+    service.start_time = datetime.now(UTC)
+    service.performance_metrics = {}
+    service.bridge = SimpleNamespace()
+    service.router = SimpleNamespace(get_adaptive_status=adaptive)
+
+    status = await service.get_router_status()
+
+    assert status.status == "healthy"

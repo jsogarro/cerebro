@@ -12,6 +12,7 @@ limit. Tool failures are returned as structured failures without a fabricated
 model answer.
 """
 
+import hashlib
 import json
 from dataclasses import dataclass
 from decimal import Decimal
@@ -364,7 +365,11 @@ class LLMWorkerAgentBase(BaseAgent):
         registry = self.config.get("component_registry")
         # A router per call would rebuild the provider and refetch its catalog
         # on every worker call; one per (provider, config, registry) is enough.
-        cache_key = (provider_name, repr(sorted(provider_config.items())), id(registry))
+        # Hashed so the cache never holds the provider credential itself.
+        fingerprint = hashlib.sha256(
+            repr(sorted(provider_config.items())).encode()
+        ).hexdigest()
+        cache_key = (provider_name, fingerprint, id(registry))
         router = _PLAN_ROUTERS.get(cache_key)
         if router is None:
             router = _PLAN_ROUTERS[cache_key] = ModelRouter(

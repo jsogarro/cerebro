@@ -27,6 +27,8 @@ from .base_provider import (
 
 logger = get_logger(__name__)
 
+_REQUEST_FAULTS = frozenset({"validation_error", "model_error"})
+
 
 @dataclass
 class ProviderRegistry:
@@ -208,11 +210,7 @@ class ModelRouter:
 
         response = await provider.generate(request, model_name)
 
-        health_status = self.registry.health_status.get(provider_name)
-        if not response.success and health_status is not None:
-            health_status.recent_errors.append(
-                f"{datetime.now()}: {response.error_message}"
-            )
+        self._record_outcome(provider_name, response)
 
         return response
 
@@ -268,6 +266,24 @@ class ModelRouter:
             ],
         }
 
+    def _record_outcome(self, provider_name: str, response: ModelResponse) -> None:
+        """Let real requests, not paid probes, tell us a provider is down.
+
+        Request-specific rejections say nothing about the provider, so they
+        neither mark nor clear it.
+        """
+        if response.error_type in _REQUEST_FAULTS:
+            return
+        now = datetime.now()
+        status = self.registry.health_status.setdefault(
+            provider_name, ProviderHealthStatus(provider_name=provider_name)
+        )
+        status.healthy = response.success
+        self.registry.last_health_check[provider_name] = now
+        if not response.success:
+            status.last_error = response.error_message
+            status.recent_errors.append(f"{now}: {response.error_message}")
+
     def _is_observed_unhealthy(self, provider_name: str) -> bool:
         """Whether an explicit probe recently found the provider down.
 
@@ -306,6 +322,7 @@ class ModelRouter:
                         provider_name=provider_name, healthy=False, last_error=str(e)
                     )
                     self.registry.health_status[provider_name] = health_status
+                    self.registry.last_health_check[provider_name] = now
 
         return self.registry.health_status.get(
             provider_name,

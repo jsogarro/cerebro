@@ -28,7 +28,7 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 
 `MASRouter.route` returns a `RoutingDecision` (`src/ai_brain/router/masr.py`). The research execution path treats that decision as a proposal: `DirectExecutionService._propose_routing` asks MASR for it, and `ExecutionPlanCompiler.compile` (`src/ai_brain/router/execution_plan_compiler.py`) compares it with the trusted execution authority and rejects any mismatch in strategy, collaboration mode, worker types, supervisor type (not checked for `fast_path` and `direct`, which have no supervisor node), domains or provider and model routes. MASR cannot supply the worker list, provider policy or budget that the compiled `ExecutionPlan` carries. See [research execution](05-research-execution.md).
 
-`route` catches every `Exception` raised while routing, including a rejection by an open circuit breaker, and `_create_fallback_decision` returns a `DIRECT` decision with one worker of type `general`, supervisor type `general`, `confidence_score` 0.3, `fallback_strategy` `error_recovery` and the `llama-3.3-70b` model specification.
+`route` catches every `Exception` raised while routing, including a rejection by an open circuit breaker, and `_create_fallback_decision` returns a `DIRECT` decision with one worker of type `general`, supervisor type `general`, `confidence_score` 0.3, `fallback_strategy` `error_recovery` and the `llama3.3:70b` model specification.
 
 ## Query analysis
 
@@ -118,7 +118,7 @@ The supervisor type comes from the first detected domain: `research`, `content`,
 - Pick: `cost_minimized` takes the cheapest, `performance_optimized` the highest quality, `latency_optimized` the lowest latency and `balanced` the best weighted score (cost 0.4, quality 0.4, latency 0.2).
 - Up to two fallback models are chosen by availability and then cost.
 
-The application constructs `MASRouter` with `model_config_manager=None` (`create_masr_router`), so the optimizer uses `_initialize_models_legacy`, a fixed set of three model specifications (`llama-3.3-70b`, `deepseek-v3` and `gemini-pro`) whose `provider` values are the dispatchable adapter names `llama`, `deepseek` and `gemini`. The optimizer's thresholds are constructor defaults; no setting feeds them.
+The application constructs `MASRouter` with `model_config_manager=None` (`create_masr_router`), so the optimizer uses `_initialize_models_legacy`, a fixed set of three model specifications (`llama3.3:70b`, `deepseek-v3` and `gemini-pro`) whose `provider` values are the dispatchable adapter names `llama`, `deepseek` and `gemini`. The optimizer's thresholds are constructor defaults; no setting feeds them.
 
 `MAX_PARALLEL_WORKERS` (default 5) and `AGENTS_MAX_WORKERS_PER_SUPERVISOR` (default 10) are mapped by `settings_to_router_config` to `max_parallel` and `max_agents`, which bound `parallel` and `hierarchical` allocations.
 
@@ -160,7 +160,7 @@ The models are in `src/models/masr_api_models.py`. The handlers are in `src/api/
 - `routing_id` is a new UUID, stored with the decision in an in-memory dictionary used by `/feedback`. It is not the router's internal `query_id`.
 - `domain` is the first detected domain, or `general`.
 - `supervisor_allocations` is always an empty list: the code reads a `supervisors` attribute that `AgentAllocation` does not have.
-- `selected_models` is the entries of a fixed three-model table (`deepseek-v3` premium, `llama-3.3-70b` standard, `gemini-pro` standard) whose tier matches the chosen primary model's tier.
+- `selected_models` is the entries of a fixed three-model table (`deepseek-v3` premium, `llama3.3:70b` standard, `gemini-pro` standard) whose tier matches the chosen primary model's tier.
 - `alternatives` lists up to three other strategies with the current decision's cost and latency multiplied by 0.9 and a rejection reason; they are not separate routing runs.
 
 ### `POST /estimate-cost`

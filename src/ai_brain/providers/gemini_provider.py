@@ -63,11 +63,6 @@ class GeminiProvider(BaseProvider):
 
         self.gemini_service: GeminiService | None = None
         if GEMINI_SERVICE_AVAILABLE and GeminiServiceClass is not None:
-            gemini_config_obj: dict[str, Any] = {
-                "api_key": self.api_key,
-                "model": self.default_model,
-            }
-            gemini_config_obj.update(config.get("gemini_service_config", {}))
             self.gemini_service = GeminiServiceClass(self.api_key)
         else:
             logger.warning("GeminiService not available, using direct API calls")
@@ -177,11 +172,9 @@ class GeminiProvider(BaseProvider):
             raise ValueError("GeminiService not available")
 
         try:
-            # This would use the existing GeminiService method
-            service_response = await self.gemini_service.generate_research_plan(
-                query=prompt
-            )
-            service_text = str(service_response)
+            service_text = await self.gemini_service.generate_content(prompt)
+            # The service runs its own configured model, whatever was requested.
+            model_name = self.gemini_service.model_name
 
             end_time = datetime.now()
             latency_ms = int((end_time - start_time).total_seconds() * 1000)

@@ -705,7 +705,7 @@ class MASRRoutingService:
             },
             {
                 "provider": "llama",
-                "model_id": "llama-3.3-70b",
+                "model_id": "llama3.3:70b",
                 "tier": ModelTier.STANDARD,
                 "cost_per_token": 0.001,
                 "max_tokens": 8192,
