@@ -91,7 +91,7 @@ def _plan(
         plan_version=plan_version,
         run_id="run-1",
         workflow_definition_id="workflow-1",
-        workflow_definition_version="1",
+        workflow_definition_version="2",
         routing_policy_id="policy-1",
         routing_policy_version="1",
         compiled_at=now,
