@@ -176,8 +176,8 @@ class Settings(BaseSettings):
         "quality": 0.05,
     }
     MASR_COMPLEXITY_THRESHOLDS: dict[str, float] = {
-        "simple": 0.3,
-        "moderate": 0.7,
+        "simple": 0.12,
+        "moderate": 0.22,
         "complex": 1.0,
     }
 

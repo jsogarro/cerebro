@@ -94,8 +94,8 @@ def settings_to_router_config(
         "adaptive_strategy_enabled": settings.MASR_ENABLE_ADAPTIVE,
         "fixture_mode": fixture_mode,
         "complexity_analyzer": {
-            "weights": dict(settings.MASR_COMPLEXITY_WEIGHTS),
-            "thresholds": dict(settings.MASR_COMPLEXITY_THRESHOLDS),
+            "complexity_weights": dict(settings.MASR_COMPLEXITY_WEIGHTS),
+            "complexity_thresholds": dict(settings.MASR_COMPLEXITY_THRESHOLDS),
         },
         "max_parallel": settings.MAX_PARALLEL_WORKERS,
         "max_agents": settings.AGENTS_MAX_WORKERS_PER_SUPERVISOR,

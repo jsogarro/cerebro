@@ -286,11 +286,11 @@ The table lists 96 rows: 95 fields of `Settings` and `OTEL_EXPORTER_OTLP_ENDPOIN
 | `DEV_MOCK_PROVIDERS` | `false` | Development switches |
 | `DEV_MOCK_MEMORY` | `false` | Development switches |
 | `MASR_COMPLEXITY_WEIGHTS` | `linguistic` 0.15, `reasoning` 0.25, `domain` 0.20, `data` 0.15, `output` 0.15, `time` 0.05, `quality` 0.05 | MASR |
-| `MASR_COMPLEXITY_THRESHOLDS` | `simple` 0.3, `moderate` 0.7, `complex` 1.0 | MASR |
+| `MASR_COMPLEXITY_THRESHOLDS` | `simple` 0.12, `moderate` 0.22, `complex` 1.0 | MASR |
 
 Notes on specific rows:
 
-- `MASR_COMPLEXITY_WEIGHTS` and `MASR_COMPLEXITY_THRESHOLDS` are mapped into `complexity_analyzer` keys that the analyzer does not read, so they change nothing. The real weights and cutoffs (0.12 and 0.22) are described in [MASR routing](06-masr-routing.md#query-analysis).
+- `MASR_COMPLEXITY_WEIGHTS` and `MASR_COMPLEXITY_THRESHOLDS` reach `QueryComplexityAnalyzer` through `settings_to_router_config`; the level cutoffs are the `simple` and `moderate` values ([MASR routing](06-masr-routing.md#query-analysis)).
 - `SECRET_KEY` is never used for signing or encryption. Its validator still runs: it rejects any value shorter than 32 characters in every environment, which includes the placeholder default (in production the placeholder also gets its own error message), so the application cannot import `src.core.config` without a `SECRET_KEY` of at least 32 characters.
 - `JWT_ALGORITHM` is not read; `JWTService` fixes the algorithm at RS256.
 - `LOG_LEVEL` is the minimum level of the structlog events the API process emits (`configure_logging` in `src/core/observability.py`, called when `src.api.main` is imported). It takes a standard level name in any case; any other value stops the process at startup. Uvicorn's own access and error logs do not follow it.

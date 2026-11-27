@@ -105,6 +105,13 @@ class QueryComplexityAnalyzer:
             },
         )
 
+        # Cutoffs are calibrated to the realistic score distribution produced by
+        # the factor analyzers (a weighted average where few factors fire at
+        # once); 0.3/0.7 left almost every query "simple".
+        self.thresholds = self.config.get(
+            "complexity_thresholds", {"simple": 0.12, "moderate": 0.22}
+        )
+
         # Query decomposer for multi-domain queries
         self.decomposer = QueryDecomposer(config=self.config.get("decomposer", {}))
 
@@ -461,12 +468,9 @@ class QueryComplexityAnalyzer:
 
     def _determine_complexity_level(self, score: float) -> ComplexityLevel:
         """Determine complexity level from score."""
-        # Thresholds calibrated to the realistic score distribution produced by
-        # the factor analyzers (a weighted average where few factors fire at
-        # once). The previous 0.3/0.7 cut-offs left almost every query "simple".
-        if score < 0.12:
+        if score < self.thresholds["simple"]:
             return ComplexityLevel.SIMPLE
-        elif score < 0.22:
+        elif score < self.thresholds["moderate"]:
             return ComplexityLevel.MODERATE
         else:
             return ComplexityLevel.COMPLEX
