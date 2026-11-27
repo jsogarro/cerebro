@@ -333,7 +333,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         else:
             direct_execution_service.execution_authority_resolver = None
 
-        if durable_session_factory is not None:
+        if (
+            durable_session_factory is not None
+            and maintenance_session_factory is not None
+        ):
             restored = await direct_execution_service.restore_active_executions()
             logger.info("Active executions restored from persistence", count=restored)
 
