@@ -1,29 +1,27 @@
 import { test, expect } from '@playwright/test';
 
+import { mockApi } from './helpers/mock-api';
+
 test.describe('Cerebro Web Application E2E User Journeys', () => {
     test('should load the dashboard successfully', async ({ page }) => {
-        await page.goto('/');
+        await mockApi(page);
+        // '/' is the marketing landing page; the app shell lives under /app.
+        await page.goto('/app/dashboard');
 
-        // Verify title and main dashboard elements
         await expect(page).toHaveTitle(/Cerebro/i);
-        // Assuming a Dashboard header or a known UI element exists
-        await expect(page.locator('text=Dashboard').first()).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Dashboard' }).first()).toBeVisible();
     });
 
     test('should navigate to research and agents pages', async ({ page }) => {
-        await page.goto('/');
+        await mockApi(page);
+        await page.goto('/app/dashboard');
+        const nav = page.getByRole('navigation', { name: 'Legacy and developer navigation' });
 
-        // Navigate to Research
-        // Assuming a sidebar navigation link for Research exists
-        await page.click('nav >> text=Research');
-        await expect(page).toHaveURL(/.*\/research/);
-        await expect(page.locator('text=Research').first()).toBeVisible();
+        await nav.getByRole('link', { name: 'Research' }).click();
+        await expect(page).toHaveURL(/\/app\/research/);
 
-        // Navigate to Agents
-        // Assuming a sidebar navigation link for Agents exists
-        await page.click('nav >> text=Agents');
-        await expect(page).toHaveURL(/.*\/agents/);
-        await expect(page.locator('text=Agents').first()).toBeVisible();
+        await nav.getByRole('link', { name: 'Agents' }).click();
+        await expect(page).toHaveURL(/\/app\/agents/);
     });
 
     test('should handle mock API failures gracefully', async ({ page }) => {
