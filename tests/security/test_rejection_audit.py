@@ -113,6 +113,9 @@ async def test_unauthenticated_rejection_is_audited_but_never_inline() -> None:
     assert [r.event_type for r in store.of(AuditLog)] == [
         AuditEventType.UNAUTHORIZED_ACCESS
     ]
+    assert [a.alert_type for a in store.of(SecurityAlert)] == [
+        AlertType.UNAUTHORIZED_API_ACCESS
+    ]
 
 
 async def test_a_full_queue_drops_events_instead_of_blocking_or_raising() -> None:
