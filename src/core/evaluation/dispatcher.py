@@ -6,15 +6,16 @@ evaluator already recorded for a trigger is not called again, and result ids
 are deterministic so a repeated write returns the stored row. An ``error`` row
 does not count as done, so the next delivery retries that evaluator.
 
-Delivery (outbox handler registration) is wired elsewhere; nothing here can
-authorize tools, edit the report, or change the run's state.
+Delivery is the outbox handler's job (``EvaluationOutboxHandler``); nothing
+here can authorize tools, edit the report, or change the run's state.
 """
 
 import uuid
 from collections.abc import Callable, Collection
+from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
 from src.core.contracts import EvaluationResult, EvaluationStatus
@@ -43,7 +44,7 @@ class EvaluationDispatcher:
     def __init__(
         self,
         *,
-        session_factory: async_sessionmaker[AsyncSession],
+        session_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
         registry: EvaluatorRegistry,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:

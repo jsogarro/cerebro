@@ -5,7 +5,8 @@ allocates the next per-run sequence transactionally (an ``UPDATE ...
 RETURNING`` against ``agent_runs.last_event_sequence``, which Postgres
 serializes per row so concurrent appends to the same run never collide or
 leave a gap), validates the result through the ``RunEvent`` contract, and
-inserts one outbox row per requested destination in the same flush. Nothing
+inserts one outbox row per requested destination in the same flush, plus an
+``evaluation`` row for a succeeded run while evaluation dispatch is enabled. Nothing
 here commits — the event row and its outbox rows land in the caller's
 transaction, so a failure on either one rolls both back together and an
 outbox row can never exist for an event that didn't.
@@ -19,7 +20,12 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.config import settings
 from src.core.contracts import RunEvent, RunEventCursor, delivery_idempotency_key
+from src.core.evaluation.events import (
+    EVALUATION_DESTINATION,
+    EVALUATION_TRIGGER_EVENT,
+)
 from src.models.db.run_event import AgentRunEvent, AgentRunEventOutbox
 from src.models.db.run_lifecycle import AgentRun
 from src.repositories.tenant_scope import (
@@ -86,6 +92,13 @@ class RunEventRepository:
                 f"run {run_id!r} does not belong to organization "
                 f"{normalized_organization_id}"
             )
+
+        if (
+            settings.EVALUATION_DISPATCH_ENABLED
+            and event_type == EVALUATION_TRIGGER_EVENT
+            and EVALUATION_DESTINATION not in destinations
+        ):
+            destinations = (*destinations, EVALUATION_DESTINATION)
 
         sequence = await self._allocate_sequence(run_id)
 

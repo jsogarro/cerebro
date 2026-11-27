@@ -114,6 +114,9 @@ class Settings(BaseSettings):
     MAX_REQUESTS_PER_MINUTE: int = 100
     ENABLE_CONTEXT_COMPACTION_TELEMETRY: bool = False
 
+    # Runs the registered evaluators over each succeeded run, off the outbox.
+    EVALUATION_DISPATCH_ENABLED: bool = False
+
     # Context Compaction Settings (Dark Launch)
     ENABLE_CONSTRAINT_PINNING: bool = (
         False  # Dark launch: extraction-only, no compaction

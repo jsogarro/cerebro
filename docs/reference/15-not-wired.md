@@ -82,6 +82,10 @@ Tests that exercise it: `tests/test_prompt_safety.py`, `tests/test_cache_ttl_exp
 
 Tests that exercise them live in `tests/unit/core/claims/`. `src/core/acquisition/pdf_text.py` is not in this group: `extract_pdf_text` is live through `extract_child.py` for document uploads; `build_extracted_text_artifact` in the same module has no caller outside tests.
 
+## Evaluation dispatch and results
+
+> **Dark by default; no reader.** With `EVALUATION_DISPATCH_ENABLED` false (the default) no `evaluation` outbox row is written and no handler is registered, so no `agent_evaluation_results` row exists. When it is true, only `ClaimsCoverageEvaluator` is registered. Nothing in production reads the stored rows: `evaluation_states` (`src/core/evaluation/registry.py`) and `EvaluationResultRepository.list_evaluations_for_run` are called only by the handler's dispatcher and by tests, and no route or report shows them.
+
 ## Orphan modules
 
 > **Not wired.** No production path imports these modules. Tests import most of them.

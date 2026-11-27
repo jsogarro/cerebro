@@ -22,7 +22,9 @@ destination.
 
 import asyncio
 import contextlib
+import re
 import uuid
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, or_, select, update
@@ -36,6 +38,12 @@ from src.models.db.run_event import AgentRunEventOutbox, EventDeliveryStatus
 logger = get_logger()
 
 _MAX_BACKOFF_SECONDS = 300
+_BUILTIN_DESTINATIONS = frozenset({"redis", "websocket"})
+# Destination names are stored in a 100-char column and echoed into logs and
+# idempotency keys, so a registered name is held to a short, lowercase token.
+_DESTINATION_NAME = re.compile(r"[a-z][a-z0-9_.-]{0,63}")
+
+OutboxHandler = Callable[[AgentRunEventOutbox], Awaitable[bool]]
 _DEFAULT_CLAIM_LEASE_SECONDS = 60.0
 
 
@@ -83,7 +91,19 @@ class OutboxRelay:
         max_attempts: int = 10,
         claim_lease_seconds: float = _DEFAULT_CLAIM_LEASE_SECONDS,
         stream_hub: RunStreamHub | None = None,
+        handlers: Mapping[str, OutboxHandler] | None = None,
     ) -> None:
+        """``handlers`` maps extra destination names to async delivery callables.
+
+        A handler returns ``True`` once the row is handled; ``False`` or any
+        exception counts as a failed attempt and takes the ordinary backoff and
+        dead-letter path, so a broken handler can only ever delay its own rows.
+        """
+        for name in handlers or {}:
+            if name in _BUILTIN_DESTINATIONS or not _DESTINATION_NAME.fullmatch(name):
+                raise ValueError(f"invalid outbox destination name {name!r}")
+        self.handlers = dict(handlers or {})
+        self._handler_errors: dict[int, str] = {}
         self.session_factory = session_factory
         self.event_publisher = event_publisher
         self.stream_hub = stream_hub if stream_hub is not None else run_stream_hub
@@ -268,6 +288,20 @@ class OutboxRelay:
                 organization_id=row.organization_id, run_id=row.run_id
             )
             return True
+        handler = self.handlers.get(row.destination)
+        if handler is not None:
+            try:
+                return await handler(row)
+            except Exception as exc:
+                # Class name only: the message may carry payload or credentials.
+                self._handler_errors[row.id] = type(exc).__name__
+                logger.warning(
+                    "outbox_relay_handler_failed",
+                    destination=row.destination,
+                    event_id=row.event_id,
+                    exception_class=type(exc).__name__,
+                )
+                return False
         logger.warning(
             "outbox_relay_unknown_destination",
             destination=row.destination,
@@ -353,6 +387,7 @@ class OutboxRelay:
         self, session: AsyncSession, row: AgentRunEventOutbox, *, delivered: bool
     ) -> None:
         now = datetime.now(UTC)
+        raised = self._handler_errors.pop(row.id, None)
         if delivered:
             await session.execute(
                 update(AgentRunEventOutbox)
@@ -364,6 +399,12 @@ class OutboxRelay:
             error = "redis publish unavailable or failed"
         elif row.destination == "websocket":
             error = "stream row has no organization to notify"
+        elif row.destination in self.handlers:
+            error = (
+                f"handler raised {raised}"
+                if raised
+                else f"handler for {row.destination!r} reported failure"
+            )
         else:
             error = f"unknown destination {row.destination!r}"
         if row.attempts >= self.max_attempts:

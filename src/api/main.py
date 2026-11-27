@@ -342,9 +342,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
             from src.api.services.outbox_relay import OutboxRelay
 
+            outbox_handlers = {}
+            if settings.EVALUATION_DISPATCH_ENABLED:
+                from src.api.services.evaluation_outbox_handler import (
+                    EvaluationOutboxHandler,
+                )
+                from src.core.evaluation.events import EVALUATION_DESTINATION
+                from src.core.evaluation.registry import build_default_registry
+
+                outbox_handlers[EVALUATION_DESTINATION] = EvaluationOutboxHandler(
+                    session_factory=durable_session_factory,
+                    registry=build_default_registry(),
+                )
             outbox_relay = OutboxRelay(
                 session_factory=maintenance_session_factory,
                 event_publisher=event_publisher,
+                handlers=outbox_handlers,
             )
             outbox_relay.start()
             resources.push_async_callback(
