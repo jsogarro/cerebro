@@ -372,6 +372,32 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Mocked UI contract specs; the real-backend golden run is in e2e-tests.yml.
+      - name: Playwright UI contract tests
+        env:
+          PLAYWRIGHT_ISOLATED: "1"
+          PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/playwright-contract.xml
+        run: npm run test:e2e:contract -- --reporter=list,junit
+
+      - name: Test summary
+        if: always()
+        working-directory: .
+        run: |
+          python scripts/ci_summary.py cerebro/web/test-results/playwright-contract.xml >> "$GITHUB_STEP_SUMMARY" \
+            || echo "Test summary unavailable for Playwright contract tests" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-contract-report
+          path: |
+            cerebro/web/test-results/
+            cerebro/web/playwright-report/
+
   all-checks:
     name: All CI Checks
     needs: [lint, test, linux-sandbox, test-cli, security, validate-docker, validate-k8s, frontend-ci]
