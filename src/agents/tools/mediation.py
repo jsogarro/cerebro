@@ -117,6 +117,13 @@ ATTEMPT_ID_CONTEXT_KEY: Final[str] = "attempt_id"
 ORGANIZATION_ID_CONTEXT_KEY: Final[str] = "organization_id"
 """Context key carrying the durable organization identifier for an agent task."""
 
+WORKER_SCOPE_CONTEXT_KEY: Final[str] = "worker_scope"
+"""Context key carrying the admitted ``<execution_plan_id>:<worker_id>`` scope.
+
+Set only by the plan executor from the frozen plan, so a worker's identical
+tool calls stay distinct from another worker's under the one root task.
+"""
+
 DEFAULT_GRANT_TTL: Final[timedelta] = timedelta(minutes=5)
 """How long a self-issued grant stays valid.
 
@@ -165,6 +172,8 @@ class ToolCallIdentity:
     identity are precisely the ones whose records an audit would otherwise
     read as complete.
     """
+    worker_scope: str | None = None
+    """``<execution_plan_id>:<worker_id>`` of the admitted worker, if any."""
 
     @property
     def durable(self) -> bool:
@@ -216,6 +225,11 @@ class ToolCallIdentity:
             run_id=run_id,
             task_id=task_id,
             attempt_id=attempt_id,
+            worker_scope=(
+                str(context[WORKER_SCOPE_CONTEXT_KEY])
+                if context.get(WORKER_SCOPE_CONTEXT_KEY)
+                else None
+            ),
             organization_id=organization_id
             or (
                 str(context[ORGANIZATION_ID_CONTEXT_KEY])
@@ -516,6 +530,7 @@ __all__ = [
     "SELF_ISSUED_SCOPE_PREFIX",
     "TASK_ID_CONTEXT_KEY",
     "UNBOUND_RUN_PREFIX",
+    "WORKER_SCOPE_CONTEXT_KEY",
     "InMemoryToolAuditStore",
     "SelfIssuedPolicy",
     "ToolCallIdentity",

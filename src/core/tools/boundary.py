@@ -370,6 +370,7 @@ class ToolBoundary:
         approvals: Sequence[ApprovalRef] = (),
         output_trust: TrustClassification | None = None,
         idempotency_key: str | None = None,
+        worker_scope: str | None = None,
         prompt: RenderedPrompt | None = None,
         pinned_versions: PinnedVersions | None = None,
         cancellation: CancellationToken | None = None,
@@ -405,6 +406,7 @@ class ToolBoundary:
             run_id=run_id,
             task_id=task_id,
             attempt_id=attempt_id,
+            worker_scope=worker_scope,
             capability_scope=capability_scope,
             input_sha256=prepared.input_sha256,
         )
@@ -1362,6 +1364,7 @@ class ToolBoundary:
         run_id: str,
         task_id: str,
         attempt_id: str,
+        worker_scope: str | None,
         capability_scope: str,
         input_sha256: str,
     ) -> str:
@@ -1371,10 +1374,18 @@ class ToolBoundary:
         same call. ``attempt_id`` is included, so a deliberate retry at the
         attempt level is a genuinely new invocation rather than a replay of the
         previous attempt's result.
+
+        ``worker_scope`` plays the same role one level down: workers of one plan
+        share the run's root task and attempt, so without it a second worker's
+        identical call would replay the first worker's result. It is omitted
+        from the digest when absent so keys recorded before it existed still
+        match.
         """
 
+        scope = {} if worker_scope is None else {"worker_scope": worker_scope}
         return boundary_digest(
             {
+                **scope,
                 "tool_name": spec.name,
                 "tool_version": spec.version,
                 "run_id": run_id,

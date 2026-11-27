@@ -141,10 +141,16 @@ async def test_a_worker_task_inherits_its_parent_s_durable_context() -> None:
         "task_id": "task-from-admission",
         "attempt_id": "attempt-from-admission",
         "organization_id": "org-from-admission",
+        # A scope smuggled in through the parent context is overwritten by the
+        # plan's own.
+        "worker_scope": "forged:worker",
     }
+    expected_scopes: dict[str, str] = {}
+    plan = _plan()
 
-    async def execute(_worker: WorkerAssignment, task: AgentTask) -> AgentResult:
+    async def execute(worker: WorkerAssignment, task: AgentTask) -> AgentResult:
         worker_tasks.append(task)
+        expected_scopes[task.id] = f"{plan.execution_plan_id}:{worker.worker_id}"
         return AgentResult(task.id, "success", {}, 1.0, 0.0)
 
     parent_task = AgentTask(
@@ -156,14 +162,18 @@ async def test_a_worker_task_inherits_its_parent_s_durable_context() -> None:
     await ExecutionPlanTopologyExecutor(
         worker_executor=execute,
         capability_checker=lambda _: True,
-    ).execute(_plan(), parent_task)
+    ).execute(plan, parent_task)
 
     assert len(worker_tasks) == 2
-    # Durable identity is inherited unchanged; the run's budget ledger rides along.
+    # Durable identity is inherited unchanged; the run's budget ledger and the
+    # worker's plan-derived invocation scope ride along.
     for worker_task in worker_tasks:
         context = dict(worker_task.context)
         assert isinstance(context.pop(BUDGET_LEDGER_CONTEXT_KEY), BudgetLedger)
-        assert context == parent_context
+        assert context.pop("worker_scope") == expected_scopes[worker_task.id]
+        assert context == {
+            k: v for k, v in parent_context.items() if k != "worker_scope"
+        }
 
 
 @pytest.mark.asyncio

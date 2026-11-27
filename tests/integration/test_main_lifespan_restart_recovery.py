@@ -279,3 +279,79 @@ async def test_main_lifespan_warms_authority_and_restores_active_executions(
     finally:
         db_session_module._engine = None
         db_session_module._async_session_factory = None
+
+
+@pytest.mark.asyncio
+async def test_main_lifespan_starts_and_stops_the_run_event_wakeup_subscriber(
+    test_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.api import main
+    from src.api.services import (
+        agent_execution_service,
+        masr_routing_service,
+        run_event_wakeup,
+        supervisor_coordination_service,
+        talkhier_session_service,
+    )
+    from src.models.db import session as db_session_module
+
+    db_session_module._engine = None
+    db_session_module._async_session_factory = None
+    monkeypatch.setattr(
+        main.settings,
+        "DATABASE_URL",
+        test_engine.url.render_as_string(hide_password=False),
+    )
+
+    class _Runtime:
+        router = SimpleNamespace(route=AsyncMock())
+
+        async def close(self) -> None:
+            return None
+
+    class _LifespanService:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def close(self) -> None:
+            return None
+
+    events: list[str] = []
+
+    class _RecordingSubscriber:
+        def __init__(self, *, redis_client: object, session_factory: object) -> None:
+            events.append("built")
+
+        def start(self) -> None:
+            events.append("start")
+
+        async def stop(self) -> None:
+            events.append("stop")
+
+    monkeypatch.setattr(main.MASRRuntime, "create", AsyncMock(return_value=_Runtime()))
+    monkeypatch.setattr(main.settings, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(main.event_publisher, "initialize", AsyncMock())
+    monkeypatch.setattr(main.event_publisher, "shutdown", AsyncMock())
+    monkeypatch.setattr(main.event_publisher, "redis_subscriber", object())
+    monkeypatch.setattr(
+        run_event_wakeup, "RunEventWakeupSubscriber", _RecordingSubscriber
+    )
+    monkeypatch.setattr(
+        agent_execution_service,
+        "configure_agent_execution_service",
+        lambda **_kwargs: AsyncMock(),
+    )
+    monkeypatch.setattr(masr_routing_service, "MASRRoutingService", _LifespanService)
+    monkeypatch.setattr(
+        talkhier_session_service, "TalkHierSessionService", _LifespanService
+    )
+    monkeypatch.setattr(
+        supervisor_coordination_service,
+        "SupervisorCoordinationService",
+        _LifespanService,
+    )
+
+    with TestClient(FastAPI(lifespan=main.lifespan)):
+        assert events == ["built", "start"]
+
+    assert events == ["built", "start", "stop"]

@@ -193,6 +193,7 @@ class ToolRegistry:
                 task_id=call_identity.task_id,
                 attempt_id=call_identity.attempt_id,
                 organization_id=call_identity.organization_id,
+                worker_scope=call_identity.worker_scope,
                 capability_scope=capability_scope,
                 arguments=params,
                 input_trust=input_trust,

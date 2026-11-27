@@ -45,7 +45,10 @@ from src.core.telemetry import count_tokens, telemetry_enabled
 from src.models.db.run_event import EVENT_ENVELOPE_VERSION
 from src.repositories.artifact_repository import ArtifactRepository
 from src.repositories.capability_repository import CapabilityRepository
-from src.repositories.checkpoint_repository import CheckpointRepository
+from src.repositories.checkpoint_repository import (
+    CheckpointIdentityError,
+    CheckpointRepository,
+)
 from src.repositories.claim_support_repository import ClaimSupportRepository
 from src.repositories.research_repository import ResearchRepository
 from src.repositories.run_config_snapshot_repository import (
@@ -581,6 +584,15 @@ class DirectExecutionService:
         """
         if not self.session_factory:
             return
+        run = execution_status._run
+        if run is None:
+            # A checkpoint's identity is its durable run's; the caller-visible
+            # owner on the status is not authority.
+            logger.warning(
+                "Skipping checkpoint for an execution with no durable run",
+                execution_id=execution_status.execution_id,
+            )
+            return
 
         try:
             async with self.session_factory() as session:
@@ -614,7 +626,8 @@ class DirectExecutionService:
                     phase=phase,
                     checkpoint_type="automatic",
                     execution_metrics=execution_metrics,
-                    run_id=execution_status.run_id,
+                    run_id=run.run_id,
+                    organization_id=run.tenant_id,
                 )
                 await session.commit()
 
@@ -624,6 +637,13 @@ class DirectExecutionService:
                     phase=phase,
                 )
 
+        except CheckpointIdentityError as e:
+            logger.error(
+                "checkpoint_identity_refused",
+                execution_id=execution_status.execution_id,
+                phase=phase,
+                error=str(e),
+            )
         except (SQLAlchemyError, OSError) as e:
             logger.warning(
                 "Failed to create checkpoint (degrading gracefully)",
@@ -2755,7 +2775,9 @@ class DirectExecutionService:
                 return None
 
             repository = CheckpointRepository(session)
-            checkpoint = await repository.get_recovery_point(project_id)
+            checkpoint = await repository.get_recovery_point(
+                project_id, organization_id=organization_id
+            )
 
             if not checkpoint:
                 logger.info(
@@ -2764,8 +2786,20 @@ class DirectExecutionService:
                 )
                 return None
 
+            if not await repository.identity_matches_run(
+                checkpoint, organization_id=organization_id
+            ):
+                logger.error(
+                    "Resume refused: checkpoint identity disagrees with its run",
+                    checkpoint_id=str(checkpoint.id),
+                    run_id=checkpoint.run_id,
+                )
+                return None
+
             # Restore checkpoint data
-            restored_data = await repository.restore_from_checkpoint(checkpoint.id)
+            restored_data = await repository.restore_from_checkpoint(
+                checkpoint.id, organization_id=organization_id
+            )
 
             if not restored_data:
                 logger.warning(
@@ -2795,6 +2829,7 @@ class DirectExecutionService:
                 errors=checkpoint_data.get("errors", []),
                 warnings=checkpoint_data.get("warnings", []),
                 retry_count=checkpoint_data.get("retry_count", 0),
+                run_id=checkpoint.run_id,
             )
 
             # Register in active executions

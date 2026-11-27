@@ -124,7 +124,7 @@ Columns: `project_id` (foreign key to `research_projects.id`), `result_type`, `c
 
 ### `workflow_checkpoints`
 
-Columns: `workflow_id`, `project_id` (foreign key to `research_projects.id`), `run_id` (nullable foreign key to `agent_runs.run_id`, added by migration `c3f5a1d7b209`), `checkpoint_data` (JSON), `phase`, `checkpoint_type` (default `automatic`), `checkpoint_version`, `is_recoverable` (default true), `recovery_metadata`, `execution_metrics`. `CheckpointRepository.create_checkpoint` has no `run_id` parameter, so rows created through the repository leave `run_id` null.
+Columns: `workflow_id`, `project_id` (foreign key to `research_projects.id`), `run_id` (nullable foreign key to `agent_runs.run_id`, added by migration `c3f5a1d7b209`), `checkpoint_data` (JSON), `phase`, `checkpoint_type` (default `automatic`), `checkpoint_version`, `is_recoverable` (default true), `recovery_metadata`, `execution_metrics`. A checkpoint has no organization column; its tenant is its project's organization. `CheckpointRepository.create_checkpoint` takes `run_id` and a required `organization_id` (see [durable runs and events](08-durable-runs-and-events.md)); rows written before runs were linked have a null `run_id`.
 
 ### `generated_reports` and `report_formats`
 

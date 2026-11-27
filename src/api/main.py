@@ -77,6 +77,9 @@ make_non_dumpable()
 configure_logging(settings.LOG_LEVEL)
 
 
+_RESOURCE_CLOSE_TIMEOUT_SECONDS = 10.0
+
+
 async def _close_lifespan_resource(
     resource_name: str,
     close: Callable[[], Awaitable[None]],
@@ -84,7 +87,9 @@ async def _close_lifespan_resource(
     """Close one lifespan-owned resource without blocking later cleanup."""
 
     try:
-        await close()
+        await asyncio.wait_for(close(), timeout=_RESOURCE_CLOSE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        logger.warning("lifespan_resource_shutdown_timed_out", resource=resource_name)
     except Exception as exc:
         logger.warning(
             "lifespan_resource_shutdown_failed",
@@ -166,11 +171,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             event_publisher.shutdown,
         )
 
-        from src.models.db.session import get_session_factory, init_db
+        from src.models.db import session as db_session
+        from src.models.db.session import close_db, get_session_factory, init_db
 
         database_initialized = False
         try:
+            opens_engine = db_session._engine is None
             await init_db()
+            if opens_engine:
+                # Pooled connections are bound to this event loop; a later
+                # lifespan in another loop must not inherit them.
+                resources.push_async_callback(
+                    _close_lifespan_resource, "database", close_db
+                )
             database_initialized = True
             logger.info("Database initialized")
 
@@ -325,6 +338,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 outbox_relay.stop,
             )
 
+            if event_publisher.redis_subscriber is not None:
+                from src.api.services.run_event_wakeup import RunEventWakeupSubscriber
+
+                wakeups = RunEventWakeupSubscriber(
+                    redis_client=event_publisher.redis_subscriber,
+                    session_factory=durable_session_factory,
+                )
+                wakeups.start()
+                resources.push_async_callback(
+                    _close_lifespan_resource,
+                    "run_event_wakeups",
+                    wakeups.stop,
+                )
+
         _start_document_purge(resources, app, durable_session_factory)
 
         app.state.document_jobs = set()
@@ -474,7 +501,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     "Langfuse shutdown timed out after 5 s — background export threads may still be running"
                 )
 
-            # await close_database()
             # await close_redis()
             # await close_temporal()
 
