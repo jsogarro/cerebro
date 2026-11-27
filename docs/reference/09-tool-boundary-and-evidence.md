@@ -21,7 +21,6 @@ Every tool call made by an agent goes through one mediator, `ToolBoundary`, whic
 | Source fetch tool, `acquire`, PDF text extraction | Not wired | none | `src/core/acquisition/fetch_tool.py`, `service.py`, `pdf_text.py` |
 | Final-report artifact and claim records | Active | `_persist_transition` on `succeeded` | `src/core/claims/resolution.py`, `recording.py` |
 | Citation validators | Not wired | none | `src/core/claims/citation_binding.py` |
-| MCP server (compose service) | Active | `mcp-server` service | `src/mcp/server.py` (`MCPServer`) |
 
 ## Tool boundary
 
@@ -121,7 +120,7 @@ When enabled (the default), `MASRSupervisorBridge._execute_plan_worker` builds, 
 
 Output trust is declared `external_untrusted`. A failed call returns `success=false`, `degraded=true` and the outcome's `error_code` and `retry`; with `enable_fallback=False` the stand-in payload is empty rather than invented. The default input trust is `user_supplied`.
 
-`MCPClient` constructs its own `MCPServer` in the same process and registers `AcademicSearchTool`, `CitationTool`, `StatisticsTool` and `KnowledgeGraphTool` on it. The calls do not reach the compose `mcp-server` service.
+`MCPClient` constructs its own `MCPServer` in the same process and registers `AcademicSearchTool`, `CitationTool`, `StatisticsTool` and `KnowledgeGraphTool` on it. No compose service runs an MCP server.
 
 Bridge construction: `DirectExecutionService` creates its bridge with its `session_factory`, so the path has a durable store there. `TalkHierSessionService`, `MASRRoutingService` and `SupervisorCoordinationService` construct `MASRSupervisorBridge(component_registry=...)` with neither a session factory nor an audit store; they never call `execute_execution_plan`, the method that reaches `_execute_plan_worker`. `AgentFactory.resolve_agent` also builds an `MCPIntegration` when an agent config contains `mcp.enabled`, using an in-memory store; no code under `src/` sets that key.
 
@@ -165,8 +164,6 @@ Trust labels (`TrustClassification`) are ordered `trusted_control`, `application
 ## MCP server
 
 `src/mcp/server.py` defines `MCPServer`, a wrapper over FastMCP (the optional `fastmcp` dependency, imported when a server is constructed). `register_tool` adds a `BaseMCPTool` to an internal `ToolRegistry` and exposes it on the FastMCP instance; `execute_tool` calls the tool through `BaseMCPTool.__call__`, which validates parameters and logs. The four tool classes in `src/mcp/tools/` are `AcademicSearchTool` (`search_academic`), `CitationTool` (`citation_formatter`), `StatisticsTool` (`statistics_analyzer`) and `KnowledgeGraphTool` (`knowledge_graph`).
-
-The `mcp-server` service in `docker-compose.yml` runs `MCPServer()` and then `server.mcp.run(transport="http", host="0.0.0.0", port=$MCP_PORT)` (default 9000). It calls no `register_tool`, so the process serves no tools. Its health check is a TCP connect to port 9000.
 
 ## Source map
 

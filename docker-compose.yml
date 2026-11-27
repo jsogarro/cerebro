@@ -51,55 +51,6 @@ services:
       retries: 12
       start_period: 30s
 
-  # FastMCP HTTP server
-  mcp-server:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: development
-    entrypoint: []
-    command:
-      - python
-      - -c
-      - |
-        import os
-        from src.mcp.server import MCPServer
-
-        server = MCPServer()
-        server.mcp.run(
-            transport="http",
-            host="0.0.0.0",
-            port=int(os.environ.get("MCP_PORT", "9000")),
-        )
-    volumes:
-      - ./src:/app/src
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY:-development-only-secret-key-32-chars}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - ENVIRONMENT=development
-      - LOG_LEVEL=DEBUG
-      - MCP_HOST=0.0.0.0
-      - MCP_PORT=9000
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - research-network
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(s.connect_ex(('127.0.0.1',9000)))",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
-
   # MASR Router Service (AI Brain Intelligence)
   masr-router:
     profiles:
@@ -182,13 +133,10 @@ services:
       - "${NGINX_HTTPS_HOST_PORT:-443}:443"
     volumes:
       - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./docker/nginx/conf.d:/etc/nginx/conf.d
     depends_on:
       api:
         condition: service_healthy
       web:
-        condition: service_healthy
-      mcp-server:
         condition: service_healthy
     networks:
       - research-network

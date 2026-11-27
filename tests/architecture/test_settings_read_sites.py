@@ -72,7 +72,6 @@ KNOWN_UNREAD: frozenset[str] = frozenset(
         "HIERARCHICAL_SCALE_UP_THRESHOLD",
         "JWT_ALGORITHM",
         "MAX_SESSIONS_PER_USER",
-        "MCP_PORT",
         "MCP_TOOLS_ENABLED",
         "MEMORY_CONSOLIDATION_INTERVAL",
         "MEMORY_ENABLE_CROSS_TIER",

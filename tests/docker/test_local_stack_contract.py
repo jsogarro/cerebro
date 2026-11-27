@@ -1,4 +1,4 @@
-"""Contracts for the default local six-service Compose stack.
+"""Contracts for the default local five-service Compose stack.
 
 These tests deliberately inspect the repository entrypoints that developers
 run. A rendered service list alone is not enough: a container can be declared,
@@ -25,7 +25,6 @@ EXPECTED_DEFAULT_SERVICES = {
     "postgres",
     "redis",
     "api",
-    "mcp-server",
     "web",
     "nginx",
 }
@@ -60,7 +59,7 @@ def _nginx_upstream_targets() -> dict[str, list[tuple[str, int]]]:
     }
 
 
-def test_default_topology_contains_exactly_six_startable_services() -> None:
+def test_default_topology_contains_exactly_five_startable_services() -> None:
     """The default profile must be the complete local application stack."""
 
     assert set(_default_services()) == EXPECTED_DEFAULT_SERVICES
@@ -90,7 +89,6 @@ def test_default_services_have_real_process_or_endpoint_healthchecks() -> None:
         "postgres": ("pg_isready", "research_db"),
         "redis": ("redis-cli", "ping"),
         "api": ("curl", "http://localhost:8000/health"),
-        "mcp-server": ("socket", "9000"),
         "web": ("wget", "http://127.0.0.1:8080/"),
         "nginx": ("wget", "http://localhost/health"),
     }
@@ -122,54 +120,12 @@ def test_api_uses_the_migration_entrypoint_and_explicit_uvicorn_command() -> Non
     ]
 
 
-def test_mcp_uses_a_real_http_server_without_running_database_migrations() -> None:
-    """MCP must use the installed runtime and must not run API migrations."""
-
-    mcp = _compose_services()["mcp-server"]
-    command = _command_text(mcp["command"])
-
-    assert mcp["entrypoint"] == []
-    assert command.startswith("python -c ")
-    assert "uv run" not in command
-    assert "--with" not in command
-    assert "from src.mcp.server import MCPServer" in command
-    assert ".mcp.run(" in command
-    assert 'transport="http"' in command
-    assert 'host="0.0.0.0"' in command
-    assert "MCP_PORT" in command
-    assert "DATABASE_URL" not in mcp.get("environment", [])
-
-
 def test_development_image_installs_the_mcp_extra_at_build_time() -> None:
     """The development image supplies MCP dependencies before container start."""
 
     dockerfile = DOCKERFILE_PATH.read_text(encoding="utf-8")
 
     assert 'RUN uv pip install -e ".[dev,mcp]"' in dockerfile
-
-
-def test_mcp_local_defaults_do_not_require_provider_credentials() -> None:
-    """The local MCP process has safe settings without a provider key."""
-
-    environment = _compose_services()["mcp-server"]["environment"]
-
-    assert "MCP_HOST=0.0.0.0" in environment
-    assert "MCP_PORT=9000" in environment
-    assert "SECRET_KEY=${SECRET_KEY:-development-only-secret-key-32-chars}" in (
-        environment
-    )
-    assert "GEMINI_API_KEY=${GEMINI_API_KEY:-}" in environment
-
-
-def test_mcp_is_internal_only_and_keeps_its_process_healthcheck() -> None:
-    """MCP stays on the Compose network without a host-published port."""
-
-    mcp = _compose_services()["mcp-server"]
-
-    assert "ports" not in mcp
-    healthcheck = mcp["healthcheck"]
-    assert "socket" in _command_text(healthcheck["test"])
-    assert "9000" in _command_text(healthcheck["test"])
 
 
 def test_nginx_does_not_expose_mcp_or_define_an_mcp_upstream() -> None:

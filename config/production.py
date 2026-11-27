@@ -46,10 +46,6 @@ class _ProductionEnv(BaseSettings):
 
     model_config = ENV_SETTINGS_CONFIG
 
-    # MCP
-    MCP_SERVER_HOST: str = "mcp-server"
-    MCP_SERVER_PORT: int = 9000
-
     # Database
     DB_HOST: str = "postgres"
     DB_PORT: int = 5432
@@ -196,8 +192,6 @@ class ProductionConfig(BaseConfig):
 
         self.mcp = MCPConfig(
             enabled=True,
-            server_host=env.MCP_SERVER_HOST,
-            server_port=env.MCP_SERVER_PORT,
             client_timeout=30,
             max_retries=3,
             retry_delay=1.0,

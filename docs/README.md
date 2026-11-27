@@ -7,7 +7,7 @@ These documents describe the implemented system: the FastAPI application, the ex
 | Page | Covers |
 |---|---|
 | [Architecture overview](reference/01-architecture-overview.md) | Processes, application assembly, middleware order, mounted routers, execution paths, the component registry and the contracts package |
-| [Configuration](reference/02-configuration.md) | The settings production code reads, the 102 declared settings that have no effect and components that read their own variables |
+| [Configuration](reference/02-configuration.md) | The settings production code reads, the 95 declared settings that have no effect and components that read their own variables |
 | [HTTP API](reference/03-http-api.md) | Conventions, the public-route allowlist, every mounted route group, error envelope and fixed responses |
 | [Authentication and tenancy](reference/04-authentication-and-tenancy.md) | RS256 JWTs, `AuthMiddleware`, WebSocket tokens, organization claims and tenant isolation |
 | [Research execution](reference/05-research-execution.md) | Execution authority, routing proposal, plan compilation, admission, topology execution, status, cancellation and checkpoints |

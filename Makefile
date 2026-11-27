@@ -244,7 +244,6 @@ status: ## Show development environment status
 	@echo ""
 	@echo "Health Checks:"
 	@curl -s http://localhost:8000/health || echo "❌ API not responding"
-	@curl -s http://localhost:9000/health || echo "❌ MCP not responding"
 	@echo ""
 
 # Environment Variables Help

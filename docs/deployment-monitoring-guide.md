@@ -44,7 +44,6 @@ Build locally with `docker compose build` (development stage, `docker-compose.ym
 |---|---|---|---|
 | `api` | `Dockerfile`, target `production` | 8000 | Memory limit 2G, `read_only: true`, `tmpfs` for `/tmp` and `/var/cache/nginx` |
 | `masr-router` | `docker/Dockerfile.masr` | 9100 | Profile `legacy-masr-service`; see [legacy MASR service](#legacy-standalone-masr-service) |
-| `mcp-server` | `Dockerfile`, target `production`, command `python -m src.mcp.server` | 9000 | Uses Redis database 2. `src/mcp/server.py` has no `__main__` block and `src/mcp` has no `__main__.py`, so that command imports the module and exits, nothing listens on 9000, and `restart: always` restarts it in a loop. The production target also installs the package without the `[mcp]` extra, and the service passes no `SECRET_KEY` or `DATABASE_URL` to the image entrypoint's `alembic upgrade head`. |
 | `postgres` | `postgres:16-alpine` | 5432 | Volume `postgres_data_prod`, user `research`, database `research_db` |
 | `redis` | `redis:7-alpine` | 6379 | Started with `--requirepass ${REDIS_PASSWORD}`, volume `redis_data_prod` |
 | `web` | `cerebro/web/Dockerfile` | none | Built with `VITE_API_URL=/api/v1` |
@@ -77,12 +76,12 @@ The `api` service mounts the named volume `source_snapshots_prod` at `/var/lib/c
 | `configmap.yaml` | `research-platform-config`: `ENVIRONMENT`, `LOG_LEVEL`, `MAX_REQUESTS_PER_MINUTE`, `ENABLE_RATE_LIMITING` and related values the API container loads with `envFrom` |
 | `external-secrets.yaml` | Three `ExternalSecret` resources (including `research-platform-metrics-token`, a bearer token for the `/metrics` scraper) that build `research-platform-secrets` (`GEMINI_API_KEY`, `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `TEMPORAL_HOST`) and `research-platform-jwt-keys` (`jwt_private.pem`, `jwt_public.pem`) from a `ClusterSecretStore` named `research-platform-secret-store` |
 | `deployment-api.yaml` | Deployment `research-api`: 3 replicas, non-root user 1000, read-only root filesystem, `/tmp` as an `emptyDir`, JWT keys mounted read-only at `/secrets`, resource requests 512Mi/250m and limits 2Gi/1000m |
-| `service.yaml` | `ClusterIP` services `research-api-service` (port 80 to 8000) and `mcp-service` (port 9000) |
+| `service.yaml` | `ClusterIP` services `research-api-service` (port 80 to 8000) |
 | `ingress.yaml` | A GCE ingress for `api.research-platform.example.com` and a managed certificate |
 | `hpa.yaml` | `research-api-hpa`: 3 to 20 replicas on 70% CPU and 80% memory |
 | `networkpolicy.yaml` | Ingress to the API pods on 8000; egress to Postgres (5432), Redis (6379), Temporal (7233), DNS and HTTPS outside the metadata address |
 
-No `secrets.yaml` exists in `k8s/`; secrets come from `external-secrets.yaml`, so the External Secrets Operator and the `ClusterSecretStore` must exist in the cluster first. `k8s/` has no Deployment for Postgres, Redis or an MCP server; `DATABASE_URL` and `REDIS_URL` come from the secret store, and `mcp-service` selects pods labelled `app: mcp-server`, which no manifest creates. The deployment mounts `/tmp`, the JWT keys and the ReadWriteMany claim `research-platform-source-snapshots` (`pvc-source-snapshots.yaml`) at `/var/lib/cerebro/source_snapshots`; set `storageClassName` in that file to a class that supports ReadWriteMany.
+No `secrets.yaml` exists in `k8s/`; secrets come from `external-secrets.yaml`, so the External Secrets Operator and the `ClusterSecretStore` must exist in the cluster first. `k8s/` has no Deployment for Postgres or Redis; `DATABASE_URL` and `REDIS_URL` come from the secret store. The deployment mounts `/tmp`, the JWT keys and the ReadWriteMany claim `research-platform-source-snapshots` (`pvc-source-snapshots.yaml`) at `/var/lib/cerebro/source_snapshots`; set `storageClassName` in that file to a class that supports ReadWriteMany.
 
 The image reference in `deployment-api.yaml` is `gcr.io/PROJECT_ID/research-platform-api:latest`. The Kustomize `images` entry changes only the tag, so `PROJECT_ID` stays literal until something replaces the whole name; `cd.yml` does this with `kustomize edit set image`. The deployment's probes call `/health` (liveness) and `/ready` (readiness) on port 8000.
 

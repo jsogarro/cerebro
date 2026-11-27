@@ -71,7 +71,6 @@ Services in `docker-compose.yml` and their host ports:
 | Service | Host port | Notes |
 |---|---|---|
 | `api` | `${API_HOST_PORT:-8000}` | Built from the `development` stage of `Dockerfile`; runs `uvicorn src.api.main:app` on container port 8000; healthcheck `curl http://localhost:8000/health` |
-| `mcp-server` | none published | Runs `MCPServer` from `src/mcp/server.py` over HTTP on container port 9000; `entrypoint: []`, so it does not run migrations |
 | `postgres` | `${POSTGRES_HOST_PORT:-5432}` | `postgres:16-alpine`, database `research_db`, user `research` |
 | `redis` | `${REDIS_HOST_PORT:-6379}` | `redis:7-alpine` with append-only persistence |
 | `web` | `${WEB_HOST_PORT:-3000}` | Static build of `cerebro/web`, served by an unprivileged nginx on container port 8080. It has no `/api` proxy. |
@@ -223,7 +222,6 @@ Targets whose recipes reference only files and services that exist:
 | Target | What is missing |
 |---|---|
 | `setup`, `env-help` | a Temporal service. They print `Temporal UI: http://localhost:8080` and `TEMPORAL_HOST=localhost:7233`; `docker-compose.yml` defines no Temporal service |
-| `status` | a published MCP port. It curls `http://localhost:9000/health`; the `mcp-server` service publishes no host port |
 
 ## Repository layout
 

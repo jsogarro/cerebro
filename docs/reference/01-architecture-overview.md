@@ -43,7 +43,6 @@ The `docker-compose.yml` stack runs these services.
 | `redis` | `redis:7-alpine` with `--appendonly yes`. The API's idempotency store and rate-limit store connect to it through `REDIS_URL`. |
 | `web` | The React workbench built from `cerebro/web`, served by its own nginx on container port 8080. |
 | `nginx` | A reverse proxy built from `docker/nginx/nginx.conf`. It answers `/health` itself, proxies `/api/` and `/ws` to the `api` upstream, serves `/docs` from its own static root and proxies every other path to the `web` upstream. |
-| `mcp-server` | A Python process that constructs `MCPServer` (`src/mcp/server.py`) and calls `server.mcp.run(transport="http", host="0.0.0.0", port=int(os.environ.get("MCP_PORT", "9000")))`. It depends on `redis`. |
 | `masr-router` | The standalone MASR service from `docker/Dockerfile.masr`, on port 9100. It belongs to the `legacy-masr-service` compose profile and is not started by default. The API process does not call it; the router the API uses is built in-process by `MASRRuntime.create`. |
 | `pgadmin`, `redis-commander` | Development tools in the `dev-tools` profile. |
 
@@ -54,7 +53,6 @@ flowchart LR
     nginx -->|"all other paths"| web
     api --> postgres[(Postgres)]
     api --> redis[(Redis)]
-    mcp[mcp-server] --> redis
     masr["masr-router (legacy-masr-service profile)"] --> redis
 ```
 
