@@ -1,0 +1,238 @@
+"""Provider catalog, vocabulary, readiness and plan-route behaviour that spends nothing."""
+
+import asyncio
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+
+from src.ai_brain.providers.base_provider import ModelRequest
+from src.core.config import settings
+from src.core.kernel.component_keys import PROVIDER_KEYS
+
+
+class _FakeService:
+    def __init__(self, *_a: Any, **_k: Any) -> None:
+        self.prompts: list[str] = []
+
+    async def generate_research_plan(self, query: str) -> str:
+        self.prompts.append(query)
+        return "stub answer"
+
+
+@pytest.fixture
+def gemini_provider(monkeypatch: pytest.MonkeyPatch) -> Any:
+    from src.ai_brain.providers import gemini_provider as module
+
+    monkeypatch.setattr(module, "GeminiServiceClass", _FakeService)
+    return module.GeminiProvider({"api_key": "k"})
+
+
+async def test_valid_gemini_request_reaches_the_service(gemini_provider: Any) -> None:
+    response = await gemini_provider.generate(
+        ModelRequest(prompt="hello"), "gemini-pro"
+    )
+
+    assert response.success, response.error_message
+    assert gemini_provider.gemini_service.prompts == ["hello"]
+
+
+async def test_concurrent_first_calls_load_the_catalog_once(
+    gemini_provider: Any,
+) -> None:
+    loads = 0
+    original = gemini_provider._get_supported_models_legacy
+
+    def counting() -> list[str]:
+        nonlocal loads
+        loads += 1
+        return original()
+
+    gemini_provider._get_supported_models_legacy = counting
+
+    await asyncio.gather(
+        *(
+            gemini_provider.generate(ModelRequest(prompt="x"), "gemini-pro")
+            for _ in range(5)
+        )
+    )
+
+    assert loads == 1
+
+
+async def test_unknown_gemini_model_fails_before_dispatch(gemini_provider: Any) -> None:
+    response = await gemini_provider.generate(ModelRequest(prompt="x"), "not-a-model")
+
+    assert not response.success
+    assert gemini_provider.gemini_service.prompts == []
+
+
+def test_optimizer_models_use_dispatchable_provider_names() -> None:
+    from src.ai_brain.router.cost_optimizer import CostOptimizer
+
+    models = CostOptimizer({})._initialize_models_legacy()
+
+    assert {m.provider for m in models.values()} <= set(PROVIDER_KEYS)
+
+
+def test_masr_fallback_decision_uses_dispatchable_provider_name() -> None:
+    from src.ai_brain.router.masr import MASRouter, RoutingStrategy
+
+    router = MASRouter.__new__(MASRouter)
+    router.default_strategy = RoutingStrategy("balanced")
+    decision = router._create_fallback_decision("q", "query", RuntimeError("boom"))
+
+    assert decision.optimization_result.primary_model.provider in PROVIDER_KEYS
+
+
+class _Unprobeable:
+    """A provider whose paid health probe must never run on the request path."""
+
+    supported_models = ["m"]
+
+    def __init__(self) -> None:
+        self.probed = False
+
+    async def health_check(self) -> Any:
+        self.probed = True
+        raise AssertionError("paid probe")
+
+    async def generate(self, request: ModelRequest, model_name: str | None) -> Any:
+        from src.ai_brain.providers.base_provider import ModelResponse
+
+        return ModelResponse(request_id=request.request_id, provider="p", success=True)
+
+
+async def test_router_dispatch_does_not_run_a_paid_health_probe() -> None:
+    from src.ai_brain.providers.model_router import ModelRouter
+
+    router = ModelRouter({"providers": {}}, component_registry=object())  # type: ignore[arg-type]
+    provider = _Unprobeable()
+    router.registry.providers["p"] = provider  # type: ignore[assignment]
+
+    response = await router._try_provider(ModelRequest(prompt="x"), "p", "m")
+
+    assert response.success
+    assert not provider.probed
+
+
+def test_plan_route_router_is_built_once_per_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.agents import llm_worker_base
+
+    built: list[Any] = []
+
+    class _Router:
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            built.append(self)
+
+    monkeypatch.setattr("src.ai_brain.providers.ModelRouter", _Router)
+    worker = llm_worker_base.LLMWorkerAgentBase.__new__(
+        llm_worker_base.LLMWorkerAgentBase
+    )
+    worker.config = {}
+    policy = {"primary": {"provider": "gemini", "model": "gemini-pro"}}
+
+    first = worker._build_plan_route(policy)
+    second = worker._build_plan_route(policy)
+
+    assert first.router is second.router
+    assert len(built) == 1
+
+
+@pytest.mark.parametrize(("configured", "expected"), [(True, None), (False, False)])
+def test_configured_provider_readiness_is_unknown_not_true(
+    monkeypatch: pytest.MonkeyPatch, configured: bool, expected: bool | None
+) -> None:
+    from src.api.services.masr_routing_service import MASRRoutingService
+
+    monkeypatch.setattr(settings, "GEMINI_ENABLED", configured)
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "k" if configured else None)
+
+    service = MASRRoutingService.__new__(MASRRoutingService)
+    assert service._check_model_availability()["gemini"] is expected
+
+
+def test_ready_reports_providers_without_gating_or_probing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.api.main import app
+    from src.api.routes import health
+
+    async def ok() -> None:
+        return None
+
+    monkeypatch.setattr(health, "_check_database", ok)
+    monkeypatch.setattr(health, "_check_redis", ok)
+    monkeypatch.setattr(settings, "GEMINI_ENABLED", True)
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "k")
+
+    response = TestClient(app).get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["checks"]["providers"] == "unknown"
+
+
+def test_ready_stays_200_when_no_provider_is_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.api.main import app
+    from src.api.routes import health
+
+    async def ok() -> None:
+        return None
+
+    monkeypatch.setattr(health, "_check_database", ok)
+    monkeypatch.setattr(health, "_check_redis", ok)
+    for name in (
+        "GEMINI_ENABLED",
+        "DEEPSEEK_ENABLED",
+        "LLAMA_ENABLED",
+        "OPENROUTER_ENABLED",
+    ):
+        monkeypatch.setattr(settings, name, False)
+
+    response = TestClient(app).get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["checks"]["providers"] == "unconfigured"
+
+
+@pytest.mark.parametrize("name", ["GEMINI_MAX_CONCURRENT", "GEMINI_TEMPERATURE"])
+def test_invalid_gemini_env_value_is_rejected_without_echoing_it(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    from src.services.gemini_config import GeminiConfig
+
+    monkeypatch.setenv(name, "secret-looking-garbage")
+
+    with pytest.raises(ValueError, match=name) as excinfo:
+        GeminiConfig.from_env(api_key="k")
+    assert "secret-looking-garbage" not in str(excinfo.value)
+
+
+async def test_concurrent_first_calls_share_one_async_catalog_load(
+    gemini_provider: Any,
+) -> None:
+    from types import SimpleNamespace
+
+    calls = 0
+
+    class _Manager:
+        async def get_provider_configuration(self, _name: str) -> Any:
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0)
+            return SimpleNamespace(enabled=True)
+
+        async def get_models_for_provider(self, _name: str) -> dict[str, Any]:
+            return {}
+
+    gemini_provider.model_config_manager = _Manager()
+
+    await asyncio.gather(
+        *(gemini_provider.ensure_configuration_loaded() for _ in range(5))
+    )
+
+    assert calls == 1
