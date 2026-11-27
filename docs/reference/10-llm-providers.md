@@ -7,7 +7,7 @@ Language-model calls go through two layers. `GeminiService` is the default clien
 | Feature | Status | Entry point | Source |
 |---|---|---|---|
 | `GeminiService` text and structured generation | Active | `LLMWorkerAgentBase._generate_with_routing`, supervisors, TalkHier services | `src/services/gemini_service.py` (`GeminiService`) |
-| `GeminiService` rate limiting and retry | Active | every `GeminiService` call | `src/services/gemini_limiter.py` (`RateLimiter`), `src/services/gemini_service.py` (`_generate_content`) |
+| `GeminiService` rate limiting and circuit breaker | Active | every `GeminiService` call | `src/services/gemini_limiter.py` (`RateLimiter`), `src/services/gemini_service.py` (`generate_content_result`) |
 | `GeminiService` response cache | Not wired | `GeminiService(cache_client=...)` | `src/services/gemini_service.py` (`_get_cached_response`) |
 | Plan-backed provider route | Active | tasks that carry `provider_model_policy` | `src/agents/llm_worker_base.py` (`_build_plan_route`) |
 | Multi-provider OpenRouter route | Off by default | `MULTI_PROVIDER_ROUTING_ENABLED=true` with `OPENROUTER_API_KEY` | `src/agents/llm_worker_base.py` (`_build_legacy_openrouter_route`) |
@@ -29,11 +29,12 @@ Language-model calls go through two layers. `GeminiService` is the default clien
 | `max_output_tokens` | 32768 |
 | rate limit | 10 requests per 60 seconds |
 | concurrent requests | 2 |
-| retry | up to 3 attempts, exponential wait of 5 to 30 seconds, on any exception |
+| attempts per call | 1; a retry is the caller's decision |
+| circuit breaker | opens after 5 consecutive failures, 30 second cooldown, one trial call |
 
 The `GEMINI_*` environment variables are read by `GeminiConfig.from_env`, which `GeminiService` uses unless a complete `config` is given; an `api_key` argument replaces only `GEMINI_API_KEY`. See [configuration](02-configuration.md).
 
-- **Generation.** `generate_content(prompt)` returns text. `generate_structured_content(prompt, schema, max_retries=2)` appends Pydantic format instructions, parses the reply with `PydanticOutputParser` and retries on a parse failure, for up to three attempts in total.
+- **Generation.** `generate_content_result(prompt)` returns a `GeminiResult` with the text, finish reason and the token counts the provider reported (`None` when it reported none), and records one `LLMCallMetrics` entry; `generate_content(prompt)` returns its text. A call while the breaker is open raises `GeminiCircuitOpenError`. `generate_structured_content(prompt, schema, max_retries=0)` appends Pydantic format instructions and parses the reply with `PydanticOutputParser`; each re-ask allowed by `max_retries` is a new billed call.
 - **Research helpers.** `generate_research_plan`, `analyze_literature`, `synthesize_findings`, `generate_citations` and `validate_hypothesis` build a prompt from `src/services/prompts/`, call the model and parse JSON with `parse_json_response`.
 - **Rate limiting.** `RateLimiter` is a token bucket plus a semaphore. Each call waits for a token and a free concurrency slot before the request.
 - **Parsers and prompts.** `src/services/parsers/json_parser.py` (`parse_json_response`) is the only parser function imported outside the package; it tolerates Markdown fences around JSON. The prompt builders in `src/services/prompts/` (`research_prompts`, `agent_prompts`, `validation_prompts`) are used by `GeminiService` and by the literature and comparative agents. The other parser modules (`citation_parser`, `text_parser`, `response_sanitizer`) are imported only by the package `__init__`.
