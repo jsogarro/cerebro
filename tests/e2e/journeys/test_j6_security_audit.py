@@ -1,8 +1,10 @@
 """J6: failed logins are audited, alerted and rate limited; admin reads are gated."""
 
+import uuid
+
 import pytest
 
-from tests.e2e.journeys.harness import PASSWORD, require_path_containing
+from tests.e2e.journeys.harness import PASSWORD
 
 pytestmark = pytest.mark.e2e
 
@@ -91,11 +93,32 @@ async def test_admin_reads_are_superuser_only(client, db, burst, new_account):
     assert events.json()["items"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="P07-E wave 2: no security alert acknowledge route",
-)
-async def test_superuser_can_ack_alerts(client, new_account):
-    await require_path_containing(client, await new_account("alice"), "/ack")
-    pytest.fail("route landed: superuser acks an alert, a normal user gets 403")
+async def test_superuser_can_ack_alerts(client, db, burst, new_account):
+    victim, _, _ = burst
+    admin = await new_account("admin")
+    other = await new_account("other")
+    await db.execute(
+        "UPDATE users SET is_superuser = true WHERE id = $1::uuid", admin.user_id
+    )
+    listed = await client.get(
+        "/api/v1/admin/alerts",
+        headers=admin.headers,
+        params={"alert_type": "failed_login_attempts"},
+    )
+    alert_id = next(
+        a["id"] for a in listed.json()["items"] if a["user_id"] == victim.user_id
+    )
+    path = f"/api/v1/admin/alerts/{alert_id}/acknowledge"
+
+    assert (await client.post(path, headers=other.headers)).status_code == 403
+
+    acked = await client.post(path, headers=admin.headers)
+    assert acked.status_code == 200, acked.text
+    row = await db.fetchrow(
+        "SELECT status::text, acknowledged_by FROM security_alerts WHERE id = $1::uuid",
+        alert_id,
+    )
+    assert (row["status"], row["acknowledged_by"]) == ("acknowledged", admin.user_id)
+
+    missing = f"/api/v1/admin/alerts/{uuid.uuid4()}/acknowledge"
+    assert (await client.post(missing, headers=admin.headers)).status_code == 404

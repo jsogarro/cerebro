@@ -74,7 +74,9 @@ The other keys in the default threshold map (`suspicious_activity`, `unauthorize
 
 ### Audit queries
 
-> **Not wired.** `AuditLogger.query_logs` filters `audit_logs` and `AuditLogger.generate_compliance_report` summarises a date range, but no route or other production code outside `AuditLogger` calls either (`generate_compliance_report` calls `query_logs`). No HTTP route exposes audit logs or security alerts. `generate_compliance_report` produces a summary only for `compliance_type="gdpr"`.
+> **Not wired.** `AuditLogger.query_logs` filters `audit_logs` and `AuditLogger.generate_compliance_report` summarises a date range, but no route or other production code outside `AuditLogger` calls either (`generate_compliance_report` calls `query_logs`). The superuser-only `/admin` routes below read the tables directly. `generate_compliance_report` produces a summary only for `compliance_type="gdpr"`.
+
+`POST /admin/alerts/{alert_id}/acknowledge` (superuser only, with the other `/admin` reads) marks a `security_alerts` row `acknowledged` and records the acknowledging user's id in `acknowledged_by`; an unknown id returns 404.
 
 ## Security headers
 
@@ -136,6 +138,7 @@ Rate-limit behaviour and its response headers are documented in the [HTTP API](0
 | `cerebro_masr_outcome_metric_availability_total` | Counter | `metric`, `availability` |
 | `cerebro_masr_adaptive_effective_state` | Gauge | `state` (`disabled`, `fixture_off`, `cold`, `degraded`, `active`) |
 | `cerebro_execution_plan_admissions_total` | Counter | `collaboration_mode`, `result` |
+| `cerebro_rate_limit_rejections_total` | Counter | none |
 | `cerebro_execution_plan_rejections_total` | Counter | `code` |
 
 These families are defined in `src/ai_brain/router/routing_observability.py` and `src/ai_brain/integration/execution_plan_observability.py`. The app exports no `http_requests_total`, `http_request_duration_seconds` or `memory_usage_bytes` series.

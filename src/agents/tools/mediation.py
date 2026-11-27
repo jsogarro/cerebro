@@ -74,8 +74,11 @@ from typing import Any, Final, final
 from src.core.contracts.capabilities import (
     APPROVAL_REQUIRED_SENSITIVITIES,
     CapabilityDecision,
+    CapabilityDecisionEffect,
+    CapabilityDenialReason,
     CapabilityGrant,
     SensitivityClass,
+    decide_capability,
 )
 from src.core.contracts.provenance import ToolInvocation, ToolInvocationStatus
 from src.core.contracts.trust import TrustClassification
@@ -441,6 +444,27 @@ class InMemoryToolAuditStore:
             )
 
 
+def decide_without_approver(**kwargs: Any) -> CapabilityDecision:
+    """Decide as :func:`decide_capability` does, with no approver in existence.
+
+    ``agent_capability_approvals`` has no production writer, so an approval a
+    caller hands in was not issued by anyone. It is dropped, and a grant that
+    needs one is denied as ``approval_unavailable`` rather than ``missing``:
+    the latter reads as "ask someone", which nobody can answer.
+    """
+
+    kwargs.pop("approvals", None)
+    decision = decide_capability(**kwargs)
+    if (
+        decision.effect is CapabilityDecisionEffect.DENY
+        and decision.denial_reason is CapabilityDenialReason.APPROVAL_MISSING
+    ):
+        return decision.model_copy(
+            update={"denial_reason": CapabilityDenialReason.APPROVAL_UNAVAILABLE}
+        )
+    return decision
+
+
 def build_tool_boundary(
     *,
     secret_provider: SecretProvider | None = None,
@@ -462,6 +486,7 @@ def build_tool_boundary(
         audit_store=audit_store or InMemoryToolAuditStore(),
         event_publisher=event_publisher or NullEventPublisher(),
         clock=clock or (lambda: datetime.now(UTC)),
+        decide=decide_without_approver,
     )
 
 

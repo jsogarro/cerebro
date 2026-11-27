@@ -55,6 +55,9 @@ jobs:
         SECRET_KEY: ci-test-secret-key-32-bytes-of-entropy-for-jwt-signing-only
         JWT_SECRET_KEY: ci-test-jwt-secret-key-32-bytes-of-entropy-for-signing
         GEMINI_API_KEY: ci-test-gemini-key-not-used-by-e2e-suite
+        # Every e2e request shares one client IP, so the default 100 per
+        # window throttles the suite itself; no test asserts that limit.
+        MAX_REQUESTS_PER_MINUTE: "1000"
       run: |
         docker compose up -d
         timeout 90 bash -c 'until curl -fsS http://localhost:8000/health; do sleep 2; done'

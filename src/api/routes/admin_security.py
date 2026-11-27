@@ -7,15 +7,17 @@ are deliberately global and therefore not available to tenant users.
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.middleware.auth_middleware import require_superuser
+from src.middleware.auth_middleware import get_current_active_user, require_superuser
 from src.models.db.audit_log import AuditEventType, AuditLog
 from src.models.db.security_alert import AlertStatus, AlertType, SecurityAlert
 from src.models.db.session import get_session
+from src.models.db.user import User
 
 router = APIRouter(
     prefix="/admin", tags=["admin"], dependencies=[Depends(require_superuser())]
@@ -51,3 +53,16 @@ async def list_security_alerts(
         query = query.where(SecurityAlert.status == status)
     rows = (await db.execute(query.limit(limit).offset(offset))).scalars().all()
     return {"items": [row.to_dict() for row in rows], "limit": limit, "offset": offset}
+
+
+@router.post("/alerts/{alert_id}/acknowledge")
+async def acknowledge_security_alert(
+    alert_id: UUID,
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_active_user),
+) -> dict[str, Any]:
+    alert = await db.get(SecurityAlert, alert_id)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Security alert not found")
+    alert.acknowledge(str(user.id))
+    return alert.to_dict()

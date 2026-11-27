@@ -31,6 +31,7 @@ services:
       - SECRET_KEY=${SECRET_KEY:-development-only-secret-key-32-chars}
       - ENVIRONMENT=development
       - LOG_LEVEL=DEBUG
+      - MAX_REQUESTS_PER_MINUTE=${MAX_REQUESTS_PER_MINUTE:-100}
       # In-process MASR configuration. The old heuristic alias does not enable
       # the Thompson bandit.
       - MASR_ENABLE_ADAPTIVE=${MASR_ENABLE_ADAPTIVE:-true}
