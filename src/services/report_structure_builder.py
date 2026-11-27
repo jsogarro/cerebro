@@ -377,9 +377,8 @@ class ReportStructureBuilder:
         aggregated_results = input_data.get("aggregated_results", {})
 
         sources = aggregated_results.get("sources", [])
-        if sources and len(sources) > 1:
-            if len({str(source.get("year", "Unknown")) for source in sources}) > 1:
-                report.add_visualization(create_source_distribution_viz(sources))
+        if len({str(source.get("year", "Unknown")) for source in sources}) > 1:
+            report.add_visualization(create_source_distribution_viz(sources))
 
         category_confidence = {
             category: sum(c) / len(c)
