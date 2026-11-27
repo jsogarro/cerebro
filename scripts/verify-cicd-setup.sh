@@ -304,15 +304,11 @@ else
     echo -e "${RED}════════════════════════════════════════════════${NC}"
     echo
     echo "Critical issues found. Please address failed checks above."
-    echo "Refer to docs/ci-cd-security-configuration.md for setup instructions."
 fi
 
 # Cleanup
 rm -f /tmp/main_protection.json /tmp/develop_protection.json /tmp/environments.json /tmp/runs.json
 
-echo
-echo "For detailed configuration instructions, see:"
-echo "  docs/ci-cd-security-configuration.md"
 echo
 echo "To automatically configure protection rules, run:"
 echo "  ./scripts/setup-github-protection.sh"

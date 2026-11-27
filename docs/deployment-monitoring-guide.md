@@ -34,7 +34,7 @@ The `production` stage declares a healthcheck that runs `curl -f http://localhos
 
 Both runnable stages use `docker/entrypoint.sh` as the entrypoint. It runs `alembic upgrade head` and, if that fails, prints the exit status and exits with it, so the container never starts the application against an unmigrated schema. It exits with status 64 when no command is supplied. Otherwise it `exec`s the command.
 
-Build locally with `docker compose build` (development stage, `docker-compose.yml`) or `make prod-build` (production stage). No workflow in this repository pushes images to a registry.
+Build locally with `docker compose build` (development stage, `docker-compose.yml`) or `make prod-build` (production stage). The `build-image` job of `cd.yml` pushes the API image to `gcr.io`.
 
 ## Docker Compose (production file)
 
@@ -64,7 +64,7 @@ Several files the production compose file mounts are not in the repository: `doc
 
 `docker/nginx/nginx.conf` rate-limits `/api/` (10 requests per second per client address, burst 20) and `/ws` (5 per second, burst 10), proxies `/api/` and `/ws` to `api:8000`, answers `/health` with a fixed `200 healthy` that never reaches the API, serves `/docs` from its own static root (404 there, so FastAPI's `/docs` is not reachable through the proxy even with `DEBUG=true`) and sends everything else to `web:8080`. The `/ws` location keeps connections open for up to 86400 seconds.
 
-The `api` service has no `volumes` entry. `SOURCE_SNAPSHOT_DIR` (default `data/source_snapshots`, resolved against the working directory) holds source files that evidence rows cite by digest, and the application expects it on a persistent volume. With `read_only: true`, mount a writable volume at that path and set `SOURCE_SNAPSHOT_DIR` to it.
+The `api` service mounts the named volume `source_snapshots_prod` at `/var/lib/cerebro/source_snapshots`. The production image sets that path as the default `SOURCE_SNAPSHOT_DIR` and creates it owned by the `app` user, so the volume is writable under `read_only: true` and the snapshots survive container replacement.
 
 ## Kubernetes
 
@@ -75,29 +75,30 @@ The `api` service has no `volumes` entry. `SOURCE_SNAPSHOT_DIR` (default `data/s
 | `namespace.yaml` | The `research-platform` namespace |
 | `serviceaccount.yaml` | Service account `research-platform-sa` (with a GKE workload-identity annotation) and a read-only `Role` and `RoleBinding` |
 | `configmap.yaml` | `research-platform-config`: `ENVIRONMENT`, `LOG_LEVEL`, `MAX_REQUESTS_PER_MINUTE`, `ENABLE_RATE_LIMITING` and related values the API container loads with `envFrom` |
-| `external-secrets.yaml` | Two `ExternalSecret` resources that build `research-platform-secrets` (`GEMINI_API_KEY`, `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `TEMPORAL_HOST`) and `research-platform-jwt-keys` (`jwt_private.pem`, `jwt_public.pem`) from a `ClusterSecretStore` named `research-platform-secret-store` |
+| `external-secrets.yaml` | Three `ExternalSecret` resources (including `research-platform-metrics-token`, a bearer token for the `/metrics` scraper) that build `research-platform-secrets` (`GEMINI_API_KEY`, `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `TEMPORAL_HOST`) and `research-platform-jwt-keys` (`jwt_private.pem`, `jwt_public.pem`) from a `ClusterSecretStore` named `research-platform-secret-store` |
 | `deployment-api.yaml` | Deployment `research-api`: 3 replicas, non-root user 1000, read-only root filesystem, `/tmp` as an `emptyDir`, JWT keys mounted read-only at `/secrets`, resource requests 512Mi/250m and limits 2Gi/1000m |
 | `service.yaml` | `ClusterIP` services `research-api-service` (port 80 to 8000) and `mcp-service` (port 9000) |
 | `ingress.yaml` | A GCE ingress for `api.research-platform.example.com` and a managed certificate |
 | `hpa.yaml` | `research-api-hpa`: 3 to 20 replicas on 70% CPU and 80% memory |
 | `networkpolicy.yaml` | Ingress to the API pods on 8000; egress to Postgres (5432), Redis (6379), Temporal (7233), DNS and HTTPS outside the metadata address |
 
-No `secrets.yaml` exists in `k8s/`; secrets come from `external-secrets.yaml`, so the External Secrets Operator and the `ClusterSecretStore` must exist in the cluster first. `k8s/` has no Deployment for Postgres, Redis or an MCP server; `DATABASE_URL` and `REDIS_URL` come from the secret store, and `mcp-service` selects pods labelled `app: mcp-server`, which no manifest creates. The deployment mounts only `/tmp` and the JWT keys, so `SOURCE_SNAPSHOT_DIR` needs a volume added to it.
+No `secrets.yaml` exists in `k8s/`; secrets come from `external-secrets.yaml`, so the External Secrets Operator and the `ClusterSecretStore` must exist in the cluster first. `k8s/` has no Deployment for Postgres, Redis or an MCP server; `DATABASE_URL` and `REDIS_URL` come from the secret store, and `mcp-service` selects pods labelled `app: mcp-server`, which no manifest creates. The deployment mounts `/tmp`, the JWT keys and the ReadWriteMany claim `research-platform-source-snapshots` (`pvc-source-snapshots.yaml`) at `/var/lib/cerebro/source_snapshots`; set `storageClassName` in that file to a class that supports ReadWriteMany.
 
 The image reference in `deployment-api.yaml` is `gcr.io/PROJECT_ID/research-platform-api:latest`. The Kustomize `images` entry changes only the tag, so `PROJECT_ID` stays literal until something replaces the whole name; `cd.yml` does this with `kustomize edit set image`. The deployment's probes call `/health` (liveness) and `/ready` (readiness) on port 8000.
 
-Make targets `k8s-namespace` and `k8s-config` apply files that exist. `k8s-deploy` and `k8s-clean` fail because the kustomization does not build. `k8s-secrets` applies `k8s/secrets.yaml`, which does not exist. `k8s-status` and `k8s-logs` use the namespace `cerebro` and the deployment name `cerebro-api`, which match nothing in the manifests. Use `kubectl -n research-platform get pods,services,ingress` and `kubectl -n research-platform logs -f deployment/research-api` instead.
+Make targets `k8s-namespace`, `k8s-config`, `k8s-deploy` and `k8s-clean` apply or delete files that exist, and `k8s-status` and `k8s-logs` use the namespace `research-platform` and `deployment/research-api`. `kubectl kustomize k8s` builds; CI runs it.
 
 ## Continuous deployment
 
 `.github/workflows/cd.yml` runs on tags matching `v*`, pushes to `develop` and manual dispatch (inputs `environment`, `skip_tests`). The `determine-environment` job maps a manual dispatch to its input, `develop` to `staging` and a `v*` tag to `production`.
 
-1. `pre-deployment-checks` (skipped when `skip_tests` is `true`) installs the project, runs `pytest tests/test_api.py::TestHealthEndpoints` and runs `kustomize build k8s/`, which fails (see [Kubernetes](#kubernetes)).
-2. `deploy-staging` authenticates to Google Cloud with `GCP_SA_KEY`, fetches GKE credentials, runs `kustomize edit set image` for `research-platform-api` and `research-platform-web` under `gcr.io/<GCP_PROJECT_ID>/`, applies the result, waits for `deployment/research-api` to roll out, then requests `/health` and `/ready` through the ingress address.
-3. `deploy-production` runs only for a `refs/tags/v*` ref. It reads the selector of a Service named `research-platform-active`, deploys with a `color` label of the opposite colour, runs `curl` against `/health` and `/ready` inside the new pod, patches `research-platform-active` to the new colour and creates a GitHub release.
-4. `rollback` runs when `deploy-production` fails and patches `research-platform-active` back to the colour recorded in the `last-stable-version` annotation.
+1. `pre-deployment-checks` (skipped when `skip_tests` is `true`) installs the project, runs `pytest tests/test_api.py::TestHealthEndpoints` and runs `kustomize build k8s/`.
+2. `build-image` builds the `production` target of the `Dockerfile` and pushes it to `gcr.io/<GCP_PROJECT_ID>/research-platform-api`, tagged with the Git tag (or the commit SHA outside a tag).
+3. `deploy-staging` authenticates to Google Cloud with `GCP_SA_KEY`, fetches GKE credentials, runs `kustomize edit set image` for `research-platform-api`, applies the result, waits for `deployment/research-api` to roll out, then requests `/health` and `/ready` through the ingress address.
+4. `deploy-production` runs only for a `refs/tags/v*` ref. It applies the same way, waits for the rollout, requests `/health` and `/ready` through the ingress address and creates a GitHub release.
+5. `rollback` runs when `deploy-production` fails and runs `kubectl rollout undo deployment/research-api`.
 
-The workflow tags images with the Git tag (or commit SHA for staging) but contains no step that builds or pushes them, and no manifest in `k8s/` defines `research-platform-active`. The production verification step requests `/metrics` without an `Authorization` header, which the authentication middleware rejects (see [monitoring](#monitoring)).
+No manifest in `k8s/` deploys a web image, so the workflow builds none. The verification steps do not request `/metrics`, which needs a bearer token (see [monitoring](#monitoring)).
 
 ## Health and readiness
 
@@ -105,7 +106,7 @@ The probes `GET /health`, `GET /live`, `GET /ready` and `GET /ws/health` are una
 
 ## Monitoring
 
-`src/api/main.py` mounts the Prometheus ASGI app from `prometheus_client` at `/metrics`. The path is not in `PUBLIC_ROUTE_ALLOWLIST`, so a scraper must send `Authorization: Bearer <access token>`. A Prometheus scrape job therefore needs a bearer token (`authorization` credentials in the scrape config) from a user whose token has not expired; access tokens last 15 minutes by default (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`).
+`src/api/main.py` mounts the Prometheus ASGI app from `prometheus_client` at `/metrics`. The path is not in `PUBLIC_ROUTE_ALLOWLIST`, so a scraper must send `Authorization: Bearer <access token>`. Provision the token under the remote key `research-platform/metrics-token`; the `research-platform-metrics-token` Secret then holds it in `token`. A Prometheus scrape job needs a bearer token (`authorization` credentials in the scrape config) from a user whose token has not expired; access tokens last 15 minutes by default (`JWT_ACCESS_TOKEN_EXPIRE_MINUTES`).
 
 The series exported are the `llm_*` metrics defined in `src/core/observability.py`; the table of series and labels is in [security, audit and observability](reference/12-security-audit-observability.md). Interactive API documentation at `/docs` and `/redoc` is served only when `DEBUG=true`, and those routes also require a token.
 

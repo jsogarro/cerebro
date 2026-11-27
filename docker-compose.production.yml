@@ -65,6 +65,8 @@ services:
       - source: jwt_public_key
         target: jwt_public.pem
     read_only: true
+    volumes:
+      - source_snapshots_prod:/var/lib/cerebro/source_snapshots
     tmpfs:
       - /tmp
       - /var/cache/nginx
@@ -362,6 +364,9 @@ volumes:
     driver: local
   redis_data_prod:
     name: cerebro-redis-data-prod
+    driver: local
+  source_snapshots_prod:
+    name: cerebro-source-snapshots-prod
     driver: local
   prometheus_data:
     name: cerebro-prometheus-data

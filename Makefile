@@ -91,7 +91,7 @@ test-coverage: ## Run tests with coverage report
 	pytest --cov=src --cov-report=html --cov-report=term
 
 test-docker: ## Run tests in Docker environment
-	docker-compose -f tests/integration/docker-compose.test.yml up --build --abort-on-container-exit
+	docker compose -f tests/integration/docker-compose.test.yml up --build --abort-on-container-exit
 
 ## Code Quality
 lint: ## Run linting (ruff)
@@ -126,45 +126,36 @@ cli-test: ## Test CLI functionality
 	research-cli projects create --title "Test Project" --query "Test query" --domains "test"
 
 ## MASR Testing
-masr-test: ## Test MASR integration
-	python examples/masr_supervisor_integration_test.py
-
 masr-health: ## Check MASR components health
 	python -c "import asyncio; from src.ai_brain.router.masr import MASRouter; print(asyncio.run(MASRouter().health_check()))"
-
-hierarchical-test: ## Test hierarchical agent communication
-	python examples/hierarchical_agent_example.py
 
 ## Docker Registry
 docker-login: ## Login to Docker registry
 	echo ${DOCKER_REGISTRY_TOKEN} | docker login -u _json_key --password-stdin ${DOCKER_REGISTRY}
 
 docker-push-dev: ## Push development images
-	docker-compose build
-	docker-compose push
+	docker compose build
+	docker compose push
 
 docker-push-prod: ## Push production images
-	docker-compose -f docker-compose.production.yml build
-	docker-compose -f docker-compose.production.yml push
+	docker compose -f docker-compose.production.yml build
+	docker compose -f docker-compose.production.yml push
 
 ## Kubernetes Deployment
 k8s-namespace: ## Create Kubernetes namespace
 	kubectl apply -f k8s/namespace.yaml
 
-k8s-secrets: ## Apply Kubernetes secrets (ensure secrets are configured first)
-	kubectl apply -f k8s/secrets.yaml
-
 k8s-config: ## Apply Kubernetes configuration
-	kubectl apply -f k8s/configmap.yaml
+	kubectl apply -n research-platform -f k8s/configmap.yaml
 
 k8s-deploy: ## Deploy to Kubernetes
 	kubectl apply -k k8s/
 
 k8s-status: ## Check Kubernetes deployment status
-	kubectl get pods,services,ingress -n cerebro
+	kubectl get pods,services,ingress -n research-platform
 
 k8s-logs: ## Get Kubernetes logs
-	kubectl logs -f deployment/cerebro-api -n cerebro
+	kubectl logs -f deployment/research-api -n research-platform
 
 k8s-clean: ## Clean Kubernetes deployment
 	kubectl delete -k k8s/
@@ -173,17 +164,11 @@ k8s-clean: ## Clean Kubernetes deployment
 logs-api: ## Follow API logs
 	./scripts/compose.sh logs -f api
 
-logs-worker: ## Follow worker logs
-	./scripts/compose.sh logs -f worker
-
 logs-masr: ## Follow MASR logs
 	./scripts/compose.sh --profile legacy-masr-service logs -f masr-router
 
 logs-all: ## Follow all service logs
 	./scripts/compose.sh logs -f
-
-metrics: ## Show system metrics
-	docker-compose exec prometheus curl -s localhost:9090/api/v1/query?query=up
 
 ## Maintenance
 clean: ## Clean up development artifacts
@@ -201,19 +186,13 @@ clean-docker: ## Clean Docker system
 backup-all: ## Create full system backup
 	@mkdir -p backups/$$(date +%Y%m%d)
 	make db-backup
-	docker-compose exec redis redis-cli --rdb backups/$$(date +%Y%m%d)/redis_backup.rdb
-	cp -r src backups/$$(date +%Y%m%d)/
+	./scripts/compose.sh exec redis redis-cli --rdb /tmp/redis_backup.rdb
+	./scripts/compose.sh cp redis:/tmp/redis_backup.rdb backups/$$(date +%Y%m%d)/redis_backup.rdb
 	@echo "Full system backup created in backups/$$(date +%Y%m%d)/"
 
 ## Performance Testing
-perf-test: ## Run performance tests
-	python -m pytest tests/performance/ -v
-
 load-test: ## Run load testing with locust
 	locust -f tests/load/locustfile.py --host=http://localhost:8000
-
-benchmark: ## Run performance benchmarks
-	python tests/benchmarks/run_benchmarks.py
 
 ## Development Workflow
 dev-workflow: ## Complete development workflow (format, lint, test)
@@ -261,7 +240,7 @@ status: ## Show development environment status
 	@echo "Cerebro AI Brain Platform Status"
 	@echo "==============================="
 	@echo ""
-	@docker-compose ps
+	@docker compose ps
 	@echo ""
 	@echo "Health Checks:"
 	@curl -s http://localhost:8000/health || echo "❌ API not responding"
@@ -301,5 +280,5 @@ version: ## Show version information
 	@echo "========================"
 	@echo "Python: $$(python --version)"
 	@echo "Docker: $$(docker --version)"
-	@echo "Docker Compose: $$(docker-compose --version)"
+	@echo "Docker Compose: $$(docker compose version)"
 	@echo "Kubernetes: $$(kubectl version --client --short 2>/dev/null || echo 'Not installed')"

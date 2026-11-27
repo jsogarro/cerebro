@@ -346,4 +346,3 @@ echo "2. Test the branch protection by creating a test PR"
 echo "3. Verify CI/CD workflows are running correctly"
 echo "4. Review the generated Dependabot configuration if created"
 echo
-echo "For detailed instructions, see: docs/ci-cd-security-configuration.md"

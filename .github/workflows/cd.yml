@@ -89,9 +89,56 @@ jobs:
           sudo mv kustomize /usr/local/bin/
           kustomize build k8s/ > /tmp/rendered.yaml
 
+  build-image:
+    name: Build and Push API Image
+    needs: [determine-environment, pre-deployment-checks]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.image-tags.outputs.tag }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Get image tag
+        id: image-tags
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure Docker for gcr.io
+        run: gcloud auth configure-docker gcr.io --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          target: production
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-api:${{ steps.image-tags.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy-staging:
     name: Deploy to Staging
-    needs: [determine-environment, pre-deployment-checks]
+    needs: [determine-environment, pre-deployment-checks, build-image]
     if: needs.determine-environment.outputs.environment == 'staging'
     runs-on: ubuntu-latest
     environment: staging
@@ -119,22 +166,11 @@ jobs:
           curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
           sudo mv kustomize /usr/local/bin/
       
-      - name: Get image tags
-        id: image-tags
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            TAG="${{ github.ref_name }}"
-          else
-            TAG="${{ github.sha }}"
-          fi
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-      
       - name: Update Kubernetes manifests
         run: |
           cd k8s
           kustomize edit set image \
-            gcr.io/PROJECT_ID/research-platform-api=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-api:${{ steps.image-tags.outputs.tag }} \
-            gcr.io/PROJECT_ID/research-platform-web=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-web:${{ steps.image-tags.outputs.tag }}
+            gcr.io/PROJECT_ID/research-platform-api=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-api:${{ needs.build-image.outputs.tag }}
           kustomize edit set namespace staging
       
       - name: Deploy to staging
@@ -176,7 +212,7 @@ jobs:
 
   deploy-production:
     name: Deploy to Production
-    needs: [determine-environment, pre-deployment-checks]
+    needs: [determine-environment, pre-deployment-checks, build-image]
     if: needs.determine-environment.outputs.environment == 'production' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: production
@@ -208,73 +244,27 @@ jobs:
         run: |
           kubectl create namespace production --dry-run=client -o yaml | kubectl apply -f -
       
-      - name: Blue-Green Deployment Preparation
-        id: blue-green
-        run: |
-          # Check current deployment
-          CURRENT_COLOR=$(kubectl get service research-platform-active -n production -o jsonpath='{.spec.selector.color}' 2>/dev/null || echo "blue")
-          
-          if [[ "$CURRENT_COLOR" == "blue" ]]; then
-            NEW_COLOR="green"
-          else
-            NEW_COLOR="blue"
-          fi
-          
-          echo "current_color=$CURRENT_COLOR" >> $GITHUB_OUTPUT
-          echo "new_color=$NEW_COLOR" >> $GITHUB_OUTPUT
-      
-      - name: Deploy new version (Blue-Green)
+      - name: Deploy new version
         run: |
           cd k8s
-          
-          # Update image tags
+
           kustomize edit set image \
-            gcr.io/PROJECT_ID/research-platform-api=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-api:${{ github.ref_name }} \
-            gcr.io/PROJECT_ID/research-platform-web=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-web:${{ github.ref_name }}
-          
-          # Set namespace
+            gcr.io/PROJECT_ID/research-platform-api=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-api:${{ needs.build-image.outputs.tag }}
           kustomize edit set namespace production
-          
-          # Apply with color label
-          kustomize build . | \
-            sed "s/app: research-api/app: research-api\n        color: ${{ steps.blue-green.outputs.new_color }}/" | \
-            kubectl apply -f -
-          
-          # Wait for rollout
+
+          kustomize build . | kubectl apply -f -
+
+          # The Deployment rolls pods gradually and keeps the previous
+          # ReplicaSet, which the rollback job restores with `rollout undo`.
           kubectl rollout status deployment/research-api -n production --timeout=10m
-      
-      - name: Run production smoke tests
-        run: |
-          # Test the new deployment directly
-          NEW_POD=$(kubectl get pods -n production -l app=research-api,color=${{ steps.blue-green.outputs.new_color }} -o jsonpath='{.items[0].metadata.name}')
-          
-          kubectl exec -n production $NEW_POD -- curl -f http://localhost:8000/health || exit 1
-          kubectl exec -n production $NEW_POD -- curl -f http://localhost:8000/ready || exit 1
-      
-      - name: Switch traffic to new version
-        run: |
-          # Update the active service to point to new color
-          kubectl patch service research-platform-active -n production \
-            -p '{"spec":{"selector":{"color":"${{ steps.blue-green.outputs.new_color }}"}}}'
-          
-          echo "Traffic switched to ${{ steps.blue-green.outputs.new_color }} deployment"
-      
+
       - name: Verify production deployment
         run: |
           PROD_URL=$(kubectl get ingress research-platform-ingress -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          
-          # Run comprehensive health checks
+
           curl -f "http://$PROD_URL/health" || exit 1
           curl -f "http://$PROD_URL/ready" || exit 1
-          curl -f "http://$PROD_URL/metrics" || exit 1
-      
-      - name: Keep old version for rollback
-        run: |
-          echo "Keeping ${{ steps.blue-green.outputs.current_color }} deployment for potential rollback"
-          kubectl annotate deployment/research-api -n production \
-            last-stable-version=${{ steps.blue-green.outputs.current_color }} \
-            --overwrite
-      
+
       - name: Create GitHub Release
         if: success()
         uses: actions/github-script@v9
@@ -316,21 +306,9 @@ jobs:
       
       - name: Perform rollback
         run: |
-          # Get the previous stable color
-          STABLE_COLOR=$(kubectl get deployment/research-api -n production \
-            -o jsonpath='{.metadata.annotations.last-stable-version}')
-          
-          if [[ -n "$STABLE_COLOR" ]]; then
-            # Switch traffic back to stable version
-            kubectl patch service research-platform-active -n production \
-              -p '{"spec":{"selector":{"color":"'$STABLE_COLOR'"}}}'
-            
-            echo "Rolled back to $STABLE_COLOR deployment"
-          else
-            echo "No stable version found for rollback"
-            exit 1
-          fi
-      
+          kubectl rollout undo deployment/research-api -n production
+          kubectl rollout status deployment/research-api -n production --timeout=10m
+
       - name: Notify rollback
         uses: actions/github-script@v9
         with:

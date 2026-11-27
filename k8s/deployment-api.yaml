@@ -23,6 +23,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
+        fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -82,6 +83,8 @@ spec:
         - name: jwt-keys
           mountPath: /secrets
           readOnly: true
+        - name: source-snapshots
+          mountPath: /var/lib/cerebro/source_snapshots
       volumes:
       - name: tmp
         emptyDir: {}
@@ -89,6 +92,9 @@ spec:
         secret:
           secretName: research-platform-jwt-keys
           defaultMode: 0400
+      - name: source-snapshots
+        persistentVolumeClaim:
+          claimName: research-platform-source-snapshots
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
