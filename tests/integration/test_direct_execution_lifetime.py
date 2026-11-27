@@ -35,6 +35,7 @@ from tests.integration.test_direct_execution_worker_outcomes import (
     _ok,
     _records,
     _worker,
+    register_stub_gemini,
 )
 
 pytestmark = [pytest.mark.integration]
@@ -75,6 +76,7 @@ async def _start(
         return await provider.generate(request)
 
     monkeypatch.setattr(ModelRouter, "route_and_generate", route_and_generate)
+    register_stub_gemini(monkeypatch)
     factory = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
     workers = (_worker("content_planning"), _worker("drafting"))
     service = DirectExecutionService(
