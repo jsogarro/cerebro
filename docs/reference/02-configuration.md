@@ -367,7 +367,6 @@ No variable named `GEMINI_TIMEOUT` or `GEMINI_RETRY_*` is read anywhere in `src`
 | `RESEARCH_VERBOSE` | `false` | verbose output; `true`, `1` or `yes` enable it |
 | `RESEARCH_COLOR` | `true` | coloured output; `true`, `1` or `yes` enable it |
 | `RESEARCH_MAX_RETRIES` | `3` | retries for failed requests |
-| `RESEARCH_API_KEY` | unset | API key stored in the configuration |
 | `RESEARCH_AUTH_TOKEN` | unset | JWT stored in the configuration |
 
 See [CLI and web clients](13-cli-and-web-clients.md) for the commands.

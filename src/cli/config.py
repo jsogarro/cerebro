@@ -38,11 +38,7 @@ class CLIConfig(BaseModel):
         description="Maximum number of retries for failed requests",
     )
 
-    # Future: Authentication
-    api_key: str | None = Field(
-        default=None,
-        description="API key for authentication",
-    )
+    # Authentication
     auth_token: str | None = Field(
         default=None,
         description="JWT authentication token",
@@ -95,9 +91,6 @@ class CLIConfig(BaseModel):
         if max_retries := os.getenv("RESEARCH_MAX_RETRIES"):
             config_dict["max_retries"] = int(max_retries)
 
-        if api_key := os.getenv("RESEARCH_API_KEY"):
-            config_dict["api_key"] = api_key
-
         if auth_token := os.getenv("RESEARCH_AUTH_TOKEN"):
             config_dict["auth_token"] = auth_token
 
@@ -116,9 +109,6 @@ class CLIConfig(BaseModel):
             f.write(f"RESEARCH_VERBOSE={str(self.verbose).lower()}\n")
             f.write(f"RESEARCH_COLOR={str(self.color).lower()}\n")
             f.write(f"RESEARCH_MAX_RETRIES={self.max_retries}\n")
-
-            if self.api_key:
-                f.write(f"RESEARCH_API_KEY={self.api_key}\n")
 
             if self.auth_token:
                 f.write(f"RESEARCH_AUTH_TOKEN={self.auth_token}\n")

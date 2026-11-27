@@ -75,8 +75,6 @@ class ResearchAPIClient:
 
         if config.auth_token:
             self.client.headers["Authorization"] = f"Bearer {config.auth_token}"
-        elif config.api_key:
-            self.client.headers["X-API-Key"] = config.api_key
 
     async def __aenter__(self) -> "ResearchAPIClient":
         """Async context manager entry."""
