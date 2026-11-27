@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 
+if [ -n "${ROLES_ADMIN_DATABASE_URL:-}" ]; then
+    echo "Applying database roles..."
+    python /docker/apply_roles.py
+fi
+
 echo "Running database migrations..."
 if alembic upgrade head; then
     echo "Database migrations completed."

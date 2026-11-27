@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from src.core.acquisition.search_evidence import SearchEvidenceRecorder
 from src.core.acquisition.search_result import (
@@ -56,6 +57,9 @@ class _Evidence:
 
 
 class _Session:
+    # tenant_session registers its per-transaction hook on the sync session.
+    sync_session = Session()
+
     async def commit(self) -> None:
         return None
 

@@ -23,7 +23,7 @@ from src.middleware.tenant_context import (
     owner_ids,
 )
 from src.models.db.generated_report import GeneratedReport
-from src.models.db.session import get_session, get_session_factory
+from src.models.db.session import get_session, get_session_factory, tenant_session
 from src.models.report import (
     CitationStyle,
     ReportConfiguration,
@@ -781,7 +781,7 @@ async def _generate_report_task(
     """Generate and finalize the exact pending report row returned to the caller."""
     session_factory = get_session_factory()
 
-    async with session_factory() as session:
+    async with tenant_session(session_factory, organization_id) as session:
         _generator, storage_service, report_repo, _format_repo = get_report_services(
             session
         )

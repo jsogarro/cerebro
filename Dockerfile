@@ -44,6 +44,7 @@ COPY alembic.ini .
 # Copy and set entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+COPY docker/roles.sql docker/apply_roles.py /docker/
 
 # Expose ports
 EXPOSE 8000
@@ -95,6 +96,7 @@ COPY alembic/ ./alembic/
 COPY alembic.ini .
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+COPY docker/roles.sql docker/apply_roles.py /docker/
 
 # Source snapshots outlive the container: the directory is created owned by
 # `app` so a named volume mounted here inherits writable ownership.

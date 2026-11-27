@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.orm import Session
 
 from src.api.routes.reports import _generate_report_task
 from src.models.report import (
@@ -82,6 +83,8 @@ async def test_one_failed_format_fails_the_whole_request(parallel: bool) -> None
 async def test_report_task_marks_report_failed_and_stores_nothing() -> None:
     report_id, user_id, org_id = uuid4(), uuid4(), uuid4()
     session = AsyncMock()
+    # The task scopes its session to the tenant through a session event.
+    session.sync_session = Session()
     repo = MagicMock()
     repo.update_report_status = AsyncMock()
     storage = MagicMock()

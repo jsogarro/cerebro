@@ -77,7 +77,7 @@ The models declare 34 tables.
 | `research_projects` | `ResearchProject` | `research_project.py` | `organization_id`, nullable | `tenant_isolation_research_projects` | no | research execution |
 | `research_results` | `ResearchResult` | `research_result.py` | none | no | no | research execution |
 | `workflow_checkpoints` | `WorkflowCheckpoint` | `workflow_checkpoint.py` | none | no | no | research execution |
-| `generated_reports` | `GeneratedReport` | `generated_report.py` | `organization_id`, not null | no | no | reports |
+| `generated_reports` | `GeneratedReport` | `generated_report.py` | `organization_id`, not null | yes (`f1c8a4d7e2b6`) | no | reports |
 | `report_formats` | `ReportFormat` | `generated_report.py` | none | no | no | reports |
 | `agent_runs` | `AgentRun` | `run_lifecycle.py` | `organization_id`, nullable | `tenant_isolation_agent_runs` | no | durable runs |
 | `agent_run_tasks` | `AgentRunTask` | `run_lifecycle.py` | `organization_id`, nullable | `tenant_isolation_agent_run_tasks` | no | durable runs |
@@ -148,7 +148,7 @@ Columns: `workflow_id`, `project_id` (foreign key to `research_projects.id`), `r
 
 Twenty-three tables carry an `organization_id` column: `users`, `research_projects`, `generated_reports`, the thirteen `agent_*` run, capability, invocation, artifact, evidence, claim and execution-authority tables, and the seven document tables (`uploaded_documents`, `usage_ledger`, `document_critiques`, `critique_findings`, `similarity_checks`, `similarity_matches`, `egress_events`). `generated_reports.organization_id` and the `organization_id` of `agent_execution_authorities` and the seven document tables are not null; every other tenant column is nullable.
 
-**Row-level security.** Migrations `b7a9c2d4e8f1`, `c3f5a1d7b209`, `5d04cec6c232`, `e4b7c1a9d6f2`, `a7d2e9c4b1f8`, `b5e1c8d3a9f7` and `b8e3f1a5c7d9` run `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` and create a policy `tenant_isolation_<table>` on twenty-one tables (the table column above lists each). Every policy has the same predicate: `organization_id = current_setting('app.current_org_id', true)::uuid`. The migrations create them only when the connection is PostgreSQL. No migration issues `FORCE ROW LEVEL SECURITY`. `set_postgres_tenant_context` (`src/middleware/tenant_context.py`) sets the value with `SELECT set_config('app.current_org_id', :organization_id, true)` for the current transaction, and does nothing on a non-PostgreSQL dialect. Only `get_tenant_context`, a request dependency that shares the request's session, calls it. Sessions opened from `get_session_factory()` by the durable execution service, the outbox relay and the run event streams do not set the value. The enforcement those code paths rely on is the repository filter described next.
+**Row-level security.** Migrations `b7a9c2d4e8f1`, `c3f5a1d7b209`, `5d04cec6c232`, `e4b7c1a9d6f2`, `a7d2e9c4b1f8`, `b5e1c8d3a9f7` and `b8e3f1a5c7d9` enable row-level security and create a policy `tenant_isolation_<table>` on twenty-one tables. `f1c8a4d7e2b6` adds the same policy to `generated_reports`, drops the `purge_expired_*` policies, rewrites each predicate to `organization_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid`, runs `FORCE ROW LEVEL SECURITY` on all twenty-two, and adds `maintenance_<command>_<table>` policies `TO cerebro_maint` on `agent_runs`, `agent_run_tasks`, `agent_task_attempts`, `agent_run_config_snapshots`, `agent_execution_authorities` (select), `agent_run_event_outbox` (select, update), `uploaded_documents` (select, delete where expired) and `egress_events` (select, delete where older than a day). Policies exist on PostgreSQL only. The setting is written by `set_postgres_tenant_context` and by `tenant_session` (`src/models/db/session.py`); execution-service sessions set neither, so for them the repository filter below is the effective boundary (see [not wired](15-not-wired.md#row-level-security-for-execution-service-sessions)).
 
 **Repository filter.**
 
@@ -232,6 +232,7 @@ Alembic scripts are in `alembic/versions/`; `alembic/env.py` reads `DATABASE_URL
 | `b5e1c8d3a9f7` | `agent_execution_authorities`; row-level security (the append-only guard is ORM-only, with no database trigger) |
 | `b8e3f1a5c7d9` | `similarity_checks`, `similarity_matches`, `egress_events`; row-level security |
 | `c4d7a2e9f1b6` | `model_call_reservations` with its CHECKs, unique call id per organization and tenant policy |
+| `f1c8a4d7e2b6` | `NULLIF` tenant policies, `FORCE ROW LEVEL SECURITY`, `cerebro_maint` policies and grants |
 
 Migrations that create row-level security or triggers do so inside an `_is_postgresql()` guard; on another dialect they create tables and indexes only.
 

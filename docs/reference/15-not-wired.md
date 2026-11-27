@@ -17,6 +17,7 @@ This page lists code and settings present in the repository that no production p
 | Dead execution attributes | Not wired | none | `src/api/services/direct_execution_service.py`, `src/core/config.py` |
 | Settings with no effect | Not wired | none | `src/core/config.py` (`Settings`) |
 | Unbacked web pages | Not wired | none | `cerebro/web/src/api/` |
+| Row-level security for execution-service sessions | Not wired | none | `src/api/services/direct_execution_service.py` |
 
 ## Multi-tier memory
 
@@ -118,3 +119,12 @@ The web workbench pages for runs, run detail and memory, and the run form on the
 - `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`, `src/core/contracts/citation.py`: citation modules (the rest of `src/core/claims/` is the live claim-support path)
 - `tests/architecture/test_module_reachability.py`: import-graph test that lists the modules no entry point reaches
 - `src/api/services/direct_execution_service.py`: the dead execution attributes
+
+## Row-level security for execution-service sessions
+
+> **Not wired.** The roles, forced policies and `tenant_session` helper exist (see [authentication and tenancy](04-authentication-and-tenancy.md)), and every other background reader and writer uses them. The sessions that `direct_execution_service.py` opens from the application session factory do not set `app.current_org_id`, and its recovery and unscoped `get_run` reads do not use the maintenance factory.
+
+Consequences:
+
+- Under `cerebro_app` those sessions would read no rows and fail their inserts. The default compose stack therefore keeps `DATABASE_URL` on the `research` superuser, which bypasses row-level security, so for execution-service sessions the repository `organization_id` predicates are the effective boundary.
+- A deployment that points `DATABASE_URL` at `cerebro_app` before these sessions adopt `tenant_session` loses run persistence.

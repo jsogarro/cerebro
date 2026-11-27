@@ -30,6 +30,7 @@ from structlog import get_logger
 
 from src.core.contracts.provenance import ToolInvocation
 from src.core.tools.secrets import NullSecretProvider, SecretProvider
+from src.models.db.session import tenant_session
 from src.repositories.artifact_repository import ArtifactRepository
 from src.repositories.evidence_repository import EvidenceRepository
 
@@ -197,7 +198,7 @@ class SearchEvidenceRecorder:
         content: bytes,
         metadata: Mapping[str, Any],
     ) -> str | None:
-        async with self._session_factory() as session:
+        async with tenant_session(self._session_factory, organization_id) as session:
             evidence = await self._service(session).record_retrieved_source(
                 invocation=invocation,
                 organization_id=organization_id,
@@ -216,7 +217,7 @@ class SearchEvidenceRecorder:
         uri: str,
         content: bytes,
     ) -> bool:
-        async with self._session_factory() as session:
+        async with tenant_session(self._session_factory, organization_id) as session:
             row = await EvidenceRepository(session).get_evidence(
                 retrieved_source_evidence_id(invocation, uri, content),
                 organization_id=organization_id,

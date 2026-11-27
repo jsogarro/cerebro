@@ -47,6 +47,7 @@ from structlog import get_logger
 
 from src.core.contracts import RunEventCursor, delivery_idempotency_key
 from src.core.contracts.states import TERMINAL_RUN_STATUSES
+from src.models.db.session import tenant_session
 from src.repositories.run_event_repository import RunEventRepository
 from src.repositories.run_lifecycle_repository import RunLifecycleRepository
 
@@ -233,7 +234,9 @@ class RunEventStreamReader:
         Raises ``RunNotVisibleError`` for both "no such run" and "another
         tenant's run", so the two are indistinguishable to a caller.
         """
-        async with self.session_factory() as session:
+        async with tenant_session(
+            self.session_factory, self.entitlement.organization_id
+        ) as session:
             run = await RunLifecycleRepository(session).get_run(
                 run_id, organization_id=self.entitlement.organization_id
             )
@@ -248,7 +251,9 @@ class RunEventStreamReader:
         The organization filter is applied to this query, not inherited from
         an earlier authorization, so every page is independently tenant-scoped.
         """
-        async with self.session_factory() as session:
+        async with tenant_session(
+            self.session_factory, self.entitlement.organization_id
+        ) as session:
             rows = await RunEventRepository(session).read_events_after(
                 cursor.run_id,
                 after_sequence=cursor.last_sequence,
@@ -277,7 +282,9 @@ class RunEventStreamReader:
 
     async def is_run_terminal(self, run_id: str) -> bool:
         """Whether the run has reached a terminal status, within this tenant."""
-        async with self.session_factory() as session:
+        async with tenant_session(
+            self.session_factory, self.entitlement.organization_id
+        ) as session:
             run = await RunLifecycleRepository(session).get_run(
                 run_id, organization_id=self.entitlement.organization_id
             )

@@ -212,6 +212,9 @@ async def test_main_lifespan_warms_authority_and_restores_active_executions(
     db_session_module._engine = None
     db_session_module._async_session_factory = None
     monkeypatch.setattr(main.settings, "DATABASE_URL", connection_url)
+    # One superuser serves every role here; the roles themselves are covered
+    # by test_rls_roles.
+    monkeypatch.setattr(main.settings, "MAINTENANCE_DATABASE_URL", connection_url)
 
     class _Runtime:
         def __init__(self) -> None:
@@ -297,11 +300,9 @@ async def test_main_lifespan_starts_and_stops_the_run_event_wakeup_subscriber(
 
     db_session_module._engine = None
     db_session_module._async_session_factory = None
-    monkeypatch.setattr(
-        main.settings,
-        "DATABASE_URL",
-        test_engine.url.render_as_string(hide_password=False),
-    )
+    connection_url = test_engine.url.render_as_string(hide_password=False)
+    monkeypatch.setattr(main.settings, "DATABASE_URL", connection_url)
+    monkeypatch.setattr(main.settings, "MAINTENANCE_DATABASE_URL", connection_url)
 
     class _Runtime:
         router = SimpleNamespace(route=AsyncMock())

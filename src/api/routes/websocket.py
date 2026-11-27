@@ -30,7 +30,7 @@ from src.api.websocket.run_stream import (
 from src.auth.jwt_service import JWTService
 from src.core.contracts import RunEventCursor
 from src.middleware.auth_middleware import get_jwt_service
-from src.models.db.session import get_session_factory
+from src.models.db.session import get_session_factory, tenant_session
 from src.models.websocket_messages import (
     SubscriptionRequest,
     SubscriptionResponse,
@@ -75,7 +75,7 @@ async def _principal_may_subscribe_to_project(
             session=None,
         )
 
-    async with session_factory() as session:
+    async with tenant_session(session_factory, principal.organization_id) as session:
         return await verify_project_access(
             principal.user_id,
             str(project_id),

@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     MCP_TOOL_PATH_ENABLED: bool = True
     # Evaluation runs write only here, never to DATABASE_URL.
     EVAL_RUN_DATABASE_URL: str | None = None
+    # Role for the cross-tenant maintenance jobs (outbox relay, authority
+    # warm-up, upload purge). Required in production; there is no fallback to
+    # the application role because it sees no rows without a tenant context.
+    MAINTENANCE_DATABASE_URL: str | None = None
     # Verbatim source snapshots; must be a persistent volume in deployment,
     # since evidence rows cite files here by digest.
     SOURCE_SNAPSHOT_DIR: str = "data/source_snapshots"

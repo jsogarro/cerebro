@@ -20,6 +20,7 @@ from src.core.contracts import ProviderModelRoute
 from src.evals.cost_pilot import PilotError, RunSample
 from src.evals.trial_setup import build_trial_authority, trial_wall_seconds
 from src.models.db.claim_support import AgentClaimSupport
+from src.models.db.session import tenant_session
 from src.models.execution_authority import ExecutionAuthorityReference
 from src.models.research_project import ResearchProject, ResearchQuery
 from src.repositories.run_event_repository import RunEventRepository
@@ -76,7 +77,7 @@ def database_run_reader(session_factory: Any, *, organization_id: str) -> ReadRu
     """Read a finished run's events and claim rows from the evaluation database."""
 
     async def read(run_id: str, domain: str) -> RunSample:
-        async with session_factory() as session:
+        async with tenant_session(session_factory, organization_id) as session:
             events = await RunEventRepository(session).read_events_after(
                 run_id, after_sequence=0, organization_id=organization_id
             )
