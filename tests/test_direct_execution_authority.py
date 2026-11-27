@@ -37,7 +37,9 @@ from src.models.research_project import (
 
 class _Allocation:
     supervisor_type = "research"
-    worker_types = ["literature", "synthesis"]
+
+    def __init__(self) -> None:
+        self.worker_types = ["literature", "synthesis"]
 
 
 class _Model:
@@ -57,9 +59,12 @@ class _Complexity:
 class _Decision:
     routing_strategy = RoutingStrategy.BALANCED
     collaboration_mode = CollaborationMode.HIERARCHICAL
-    agent_allocation = _Allocation()
     optimization_result = _Optimization()
     complexity_analysis = _Complexity()
+
+    def __init__(self) -> None:
+        # Per instance: tests mutate it, and a class-level one leaks across tests.
+        self.agent_allocation = _Allocation()
 
 
 def _binding() -> ExecutionAuthorityBinding:
@@ -254,3 +259,10 @@ async def test_compiler_mismatch_fails_before_state_or_task_creation() -> None:
     assert service.active_executions == {}
     assert service.execution_stats["total_executions"] == 0
     assert service._background_tasks == set()
+
+
+def test_decisions_do_not_share_an_allocation() -> None:
+    first = _Decision()
+    first.agent_allocation.worker_types = ["mutated"]
+
+    assert _Decision().agent_allocation.worker_types == ["literature", "synthesis"]
