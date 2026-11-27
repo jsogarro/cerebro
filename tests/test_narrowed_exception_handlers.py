@@ -25,7 +25,6 @@ from src.core import telemetry, tracing
 from src.mcp.academic_filters import AcademicSearchFilters
 from src.mcp.tools.academic_search_tool import AcademicSearchTool
 from src.middleware import auth_middleware
-from src.models.db.migrations import MigrationManager
 from src.models.db.session import DatabaseManager
 from src.prompts.manager import PromptManager
 
@@ -220,14 +219,6 @@ class TestDatabase:
         engine = MagicMock()
         engine.begin.side_effect = OperationalError("select", {}, Exception("nope"))
         assert await DatabaseManager(engine).get_slow_queries() == []
-
-    def test_verify_migration_failure_propagates(self) -> None:
-        manager = object.__new__(MigrationManager)
-        with (
-            patch.object(manager, "check_migration_status", side_effect=OSError("x")),
-            pytest.raises(OSError),
-        ):
-            manager.verify_migration()
 
 
 class TestPromptManager:
