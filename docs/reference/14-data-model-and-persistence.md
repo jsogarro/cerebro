@@ -9,7 +9,7 @@ The persistence layer is SQLAlchemy 2.1 over an async engine (`asyncpg` on Postg
 | Async engine and session factory | Active | `init_db()` in the API lifespan | `src/models/db/session.py` (`init_db`, `get_session_factory`) |
 | Request-scoped session | Active | `Depends(get_session)` | `src/models/db/session.py` (`get_session`) |
 | Soft-delete base model | Active | every `BaseModel` table | `src/models/db/base.py` (`BaseModel`) |
-| Append-only guard (ORM and PostgreSQL trigger) | Active | four durable tables | `src/models/db/append_only.py` (`register_append_only`) |
+| Append-only guard (ORM, plus a PostgreSQL trigger on four of the five) | Active | five durable tables | `src/models/db/append_only.py` (`register_append_only`) |
 | Tenant filter in repositories | Active | every repository read and write | `src/repositories/base.py` (`BaseRepository.apply_organization_scope`), `src/repositories/tenant_scope.py` (`scope_to_organization`) |
 | PostgreSQL row-level security policies | Active (PostgreSQL only) | migrations; context set by `get_tenant_context` | `alembic/versions/`, `src/middleware/tenant_context.py` (`set_postgres_tenant_context`) |
 | Alembic migrations at container start | Active | `docker/entrypoint.sh` | `alembic/env.py`, `alembic/versions/` |
@@ -41,7 +41,7 @@ The persistence layer is SQLAlchemy 2.1 over an async engine (`asyncpg` on Postg
 
 `BaseModel` also provides `is_deleted`, `soft_delete()`, `restore()` and `to_dict()`.
 
-Five tables extend `Base` directly and carry their own columns:
+Thirteen tables extend `Base` directly and carry their own columns:
 
 | Table | Primary key | Append-only |
 |---|---|---|
@@ -50,14 +50,22 @@ Five tables extend `Base` directly and carry their own columns:
 | `agent_run_event_outbox` | `id`, `BigInteger` autoincrement (`Integer` on SQLite) | no, mutable by design |
 | `agent_evidence` | `id`, `PortableUUID` | yes |
 | `agent_claim_supports` | `id`, `PortableUUID` | yes |
+| `agent_execution_authorities` | `id`, `PortableUUID` | yes (ORM guard only) |
+| `uploaded_documents` | `id`, `PortableUUID` | no |
+| `usage_ledger` | `id`, `PortableUUID` | no |
+| `document_critiques` | `id`, `PortableUUID` | no |
+| `critique_findings` | `id`, `PortableUUID` | no |
+| `similarity_checks` | `id`, `PortableUUID` | no |
+| `similarity_matches` | `id`, `PortableUUID` | no |
+| `egress_events` | `id`, `PortableUUID` | no |
 
 The other 21 tables extend `BaseModel`, so they have soft deletion. `generated_reports` and `report_formats` redeclare `id` as `postgresql.UUID(as_uuid=True)` with `uuid4` as the default instead of `PortableUUID`.
 
-`register_append_only` (`src/models/db/append_only.py`) is a class decorator that registers `before_update` and `before_delete` listeners raising `AppendOnlyViolationError`. It covers ORM unit-of-work writes only. Migration `c3f5a1d7b209` installs the function `reject_append_only_mutation()` and `BEFORE UPDATE OR DELETE` triggers on `agent_run_events` and `agent_run_config_snapshots`; migration `5d04cec6c232` installs the same trigger on `agent_evidence` and `agent_claim_supports`. The triggers are created on PostgreSQL only.
+`register_append_only` (`src/models/db/append_only.py`) is a class decorator that registers `before_update` and `before_delete` listeners raising `AppendOnlyViolationError`. It covers ORM unit-of-work writes only. Migration `c3f5a1d7b209` installs the function `reject_append_only_mutation()` and `BEFORE UPDATE OR DELETE` triggers on `agent_run_events` and `agent_run_config_snapshots`; migration `5d04cec6c232` installs the same trigger on `agent_evidence` and `agent_claim_supports`. The triggers are created on PostgreSQL only. `agent_execution_authorities` is decorated too but has no trigger.
 
 ## Tables
 
-The models declare 26 tables.
+The models declare 34 tables.
 
 | Table | Model class | Module | Tenant column | RLS policy | Append-only | Owner subsystem |
 |---|---|---|---|---|---|---|
@@ -82,6 +90,14 @@ The models declare 26 tables.
 | `agent_artifacts` | `AgentArtifact` | `artifact.py` | `organization_id`, nullable | `tenant_isolation_agent_artifacts` | no | tool boundary and evidence |
 | `agent_evidence` | `AgentEvidence` | `evidence.py` | `organization_id`, nullable | `tenant_isolation_agent_evidence` | yes | tool boundary and evidence |
 | `agent_claim_supports` | `AgentClaimSupport` | `claim_support.py` | `organization_id`, nullable | `tenant_isolation_agent_claim_supports` | yes | tool boundary and evidence |
+| `agent_execution_authorities` | `AgentExecutionAuthority` | `execution_authority.py` | `organization_id`, not null | `tenant_isolation_agent_execution_authorities` | yes (ORM only) | execution authority |
+| `uploaded_documents` | `UploadedDocument` | `uploaded_document.py` | `organization_id`, not null | `tenant_isolation_uploaded_documents` | no | document uploads |
+| `usage_ledger` | `UsageLedger` | `uploaded_document.py` | `organization_id`, not null | `tenant_isolation_usage_ledger` | no | document uploads |
+| `document_critiques` | `DocumentCritique` | `document_critique.py` | `organization_id`, not null | `tenant_isolation_document_critiques` | no | document critique |
+| `critique_findings` | `CritiqueFinding` | `document_critique.py` | `organization_id`, not null | `tenant_isolation_critique_findings` | no | document critique |
+| `similarity_checks` | `SimilarityCheck` | `similarity_check.py` | `organization_id`, not null | `tenant_isolation_similarity_checks` | no | similarity checks |
+| `similarity_matches` | `SimilarityMatch` | `similarity_check.py` | `organization_id`, not null | `tenant_isolation_similarity_matches` | no | similarity checks |
+| `egress_events` | `EgressEvent` | `similarity_check.py` | `organization_id`, not null | `tenant_isolation_egress_events` | no | similarity checks |
 | `experiments` | `Experiment` | `experiment.py` | none | no | no | experiments (not wired) |
 | `experiment_variants` | `ExperimentVariant` | `experiment.py` | none | no | no | experiments (not wired) |
 | `experiment_assignments` | `ExperimentAssignment` | `experiment.py` | none | no | no | experiments (not wired) |
@@ -125,9 +141,9 @@ Columns: `workflow_id`, `project_id` (foreign key to `research_projects.id`), `r
 
 ## Tenancy in the data layer
 
-Fifteen tables carry an `organization_id` column: `users`, `research_projects`, `generated_reports` and the twelve `agent_*` run, capability, invocation, artifact, evidence and claim tables. `generated_reports.organization_id` is not null; every other tenant column is nullable.
+Twenty-three tables carry an `organization_id` column: `users`, `research_projects`, `generated_reports`, the thirteen `agent_*` run, capability, invocation, artifact, evidence, claim and execution-authority tables, and the seven document tables (`uploaded_documents`, `usage_ledger`, `document_critiques`, `critique_findings`, `similarity_checks`, `similarity_matches`, `egress_events`). `generated_reports.organization_id` and the `organization_id` of `agent_execution_authorities` and the seven document tables are not null; every other tenant column is nullable.
 
-**Row-level security.** Migrations `b7a9c2d4e8f1`, `c3f5a1d7b209` and `5d04cec6c232` run `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` and create a policy `tenant_isolation_<table>` on thirteen tables (the table column above lists each). Every policy has the same predicate: `organization_id = current_setting('app.current_org_id', true)::uuid`. The migrations create them only when the connection is PostgreSQL. No migration issues `FORCE ROW LEVEL SECURITY`. `set_postgres_tenant_context` (`src/middleware/tenant_context.py`) sets the value with `SELECT set_config('app.current_org_id', :organization_id, true)` for the current transaction, and does nothing on a non-PostgreSQL dialect. Only `get_tenant_context`, a request dependency that shares the request's session, calls it. Sessions opened from `get_session_factory()` by the durable execution service, the outbox relay and the run event streams do not set the value. The enforcement those code paths rely on is the repository filter described next.
+**Row-level security.** Migrations `b7a9c2d4e8f1`, `c3f5a1d7b209`, `5d04cec6c232`, `e4b7c1a9d6f2`, `a7d2e9c4b1f8`, `b5e1c8d3a9f7` and `b8e3f1a5c7d9` run `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` and create a policy `tenant_isolation_<table>` on twenty-one tables (the table column above lists each). Every policy has the same predicate: `organization_id = current_setting('app.current_org_id', true)::uuid`. The migrations create them only when the connection is PostgreSQL. No migration issues `FORCE ROW LEVEL SECURITY`. `set_postgres_tenant_context` (`src/middleware/tenant_context.py`) sets the value with `SELECT set_config('app.current_org_id', :organization_id, true)` for the current transaction, and does nothing on a non-PostgreSQL dialect. Only `get_tenant_context`, a request dependency that shares the request's session, calls it. Sessions opened from `get_session_factory()` by the durable execution service, the outbox relay and the run event streams do not set the value. The enforcement those code paths rely on is the repository filter described next.
 
 **Repository filter.**
 
@@ -205,6 +221,10 @@ Alembic scripts are in `alembic/versions/`; `alembic/env.py` reads `DATABASE_URL
 | `b5d7e9f1a3c2` | case-insensitive unique indexes on `users` |
 | `f3b8a6d2c4e1` | aligns the experiment tables with their models (NOT NULL columns, timezone-aware timestamps, `deleted_at` indexes) |
 | `d9a3c5e7b1f4` | report filter indexes |
+| `e4b7c1a9d6f2` | `uploaded_documents`, `usage_ledger`; row-level security |
+| `a7d2e9c4b1f8` | `document_critiques`, `critique_findings`; row-level security |
+| `b5e1c8d3a9f7` | `agent_execution_authorities`; row-level security (the append-only guard is ORM-only, with no database trigger) |
+| `b8e3f1a5c7d9` | `similarity_checks`, `similarity_matches`, `egress_events`; row-level security |
 
 Migrations that create row-level security or triggers do so inside an `_is_postgresql()` guard; on another dialect they create tables and indexes only.
 

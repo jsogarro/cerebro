@@ -6,13 +6,13 @@ This page lists code and settings present in the repository that no production p
 
 | Feature | Status | Entry point | Source |
 |---|---|---|---|
-| Multi-tier memory | Not wired | none | `src/ai_brain/memory/`, `src/core/memory_encryption.py` |
+| Multi-tier memory | Not wired | none | `src/ai_brain/memory/` |
 | A/B experimentation framework | Not wired | none | `src/ai_brain/experimentation/` (all but the adaptive allocation engine) |
 | Learning and self-improvement | Not wired | none | `src/ai_brain/learning/supervision_feedback.py` |
 | Model configuration manager | Not wired | none | `src/ai_brain/config/`, `configs/models/` |
 | Prompt manager and versioning | Not wired | none | `src/prompts/` |
 | Stub packages | Not wired | none | `src/research_platform/` |
-| Citation binding and PDF text extraction | Not wired | none | `src/core/claims/citation_*.py`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py` |
+| Citation binding | Not wired | none | `src/core/claims/citation_*.py`, `src/core/contracts/citation.py` |
 | Orphan modules | Not wired | none | see [Orphan modules](#orphan-modules) |
 | Dead execution attributes | Not wired | none | `src/api/services/direct_execution_service.py`, `src/core/config.py` |
 | Settings with no effect | Not wired | none | `src/core/config.py` (`Settings`) |
@@ -27,7 +27,7 @@ Consequences of the missing assignment:
 - `MASRouter.episodic_memory`, `MASRouter.procedural_memory` and `LLMWorkerAgentBase.procedural_memory` stay `None`. The memory-informed worker adjustment in `MASRouter` and the procedural-memory prompt context in `LLMWorkerAgentBase` return `None` when their manager is `None`, so `MEMORY_INFORMED_ROUTING_ENABLED=true` changes nothing.
 - The memory purge branch of the user-erasure route never runs, because `get_memory_system` always returns `None`.
 
-Modules: `src/ai_brain/memory/multi_tier_memory.py`, `working_memory.py`, `episodic_memory.py`, `semantic_memory.py`, `procedural_memory.py` and `src/core/memory_encryption.py` (`MemoryEncryption`, keyed by `MEMORY_ENCRYPTION_KEY`, used only by the working and episodic managers).
+Modules: `src/ai_brain/memory/multi_tier_memory.py`, `working_memory.py`, `episodic_memory.py`, `semantic_memory.py`, `procedural_memory.py`. The working and episodic managers also use `MemoryEncryption` through its `MEMORY_ENCRYPTION_KEY` fallback; the class itself is live for uploaded documents through `document_cipher()` (see [configuration](02-configuration.md#document-encryption)).
 
 Settings: `WORKING_MEMORY_*`, `EPISODIC_MEMORY_*`, `SEMANTIC_MEMORY_*`, `PROCEDURAL_MEMORY_*`, `MEMORY_ENABLE_CROSS_TIER`, `MEMORY_MAX_RECALL_ITEMS` and `MEMORY_CONSOLIDATION_INTERVAL` are read only by `Settings.get_ai_brain_config`, whose single caller reads only its `providers` entry. `MEMORY_INFORMED_ROUTING_ENABLED` (default `false`), `MEMORY_ROUTING_MAX_WORKER_ADJUST`, `MEMORY_ROUTING_FRESHNESS_DAYS` and `MEMORY_PROMPT_MAX_PROCEDURES` are read, but only the memory paths above use them.
 
@@ -71,15 +71,14 @@ Tests that exercise it: `tests/test_prompt_safety.py`, `tests/test_cache_ttl_exp
 |---|---|
 | `src/research_platform/` | `main()`, the `research-platform` script target; see [CLI and web clients](13-cli-and-web-clients.md) |
 
-## Citation binding and PDF text extraction
+## Citation binding
 
-> **Not wired.** These modules bind claim spans to citations rendered from held metadata, validate citations against a registry corpus and extract text from PDF snapshots. Only their own unit tests import them.
+> **Not wired.** These modules bind claim spans to citations rendered from held metadata and validate citations against a registry corpus. Only their own unit tests import them.
 
 - `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`
 - `src/core/contracts/citation.py`
-- `src/core/acquisition/pdf_text.py`
 
-Tests that exercise them live in `tests/unit/core/claims/` and `tests/unit/core/acquisition/test_pdf_text.py`.
+Tests that exercise them live in `tests/unit/core/claims/`. `src/core/acquisition/pdf_text.py` is not in this group: `extract_pdf_text` is live through `extract_child.py` for document uploads; `build_extracted_text_artifact` in the same module has no caller outside tests.
 
 ## Orphan modules
 
@@ -111,13 +110,12 @@ The web workbench pages for workflows, runs, run detail and memory call API rout
 ## Source map
 
 - `src/ai_brain/memory/`: the four memory managers and `MultiTierMemorySystem`
-- `src/core/memory_encryption.py`: `MemoryEncryption`
 - `src/ai_brain/experimentation/`: the adaptive allocation engine `MASRouter` uses, its statistical engine and the offline `eval/` gate
 - `src/models/db/experiment.py`: the five experiment tables
 - `src/ai_brain/learning/supervision_feedback.py`: `SupervisionFeedbackLearner`
 - `src/ai_brain/config/`, `configs/models/`: model configuration manager and YAML files
 - `src/prompts/`: `PromptManager`, versioning, templates
 - `src/research_platform/`: stub packages
-- `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py`: citation and PDF text modules (the rest of `src/core/claims/` is the live claim-support path)
+- `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`, `src/core/contracts/citation.py`: citation modules (the rest of `src/core/claims/` is the live claim-support path)
 - `tests/architecture/test_module_reachability.py`: import-graph test that lists the modules no entry point reaches
 - `src/api/services/direct_execution_service.py`: the dead execution attributes
