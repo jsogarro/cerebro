@@ -17,11 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from src.core.acquisition.pdf_text import ExtractedText, PageSpan
+from src.core.config import settings
 from src.core.memory_encryption import (
     ENCRYPTED_TEXT_PREFIX,
     DocumentEncryptionUnavailable,
     MemoryEncryption,
 )
+from src.models.db.similarity_check import EgressEvent
 from src.models.db.uploaded_document import UploadedDocument, UsageLedger
 from src.repositories.tenant_scope import (
     MissingOrganizationContextError,
@@ -220,6 +222,13 @@ class UploadedDocumentRepository:
             )
         result = await self._session.execute(
             delete(UploadedDocument).where(UploadedDocument.expires_at <= now)
+        )
+        # Audit rows outlive their check but not the documents' retention window.
+        await self._session.execute(
+            delete(EgressEvent).where(
+                EgressEvent.created_at
+                <= now - timedelta(days=settings.DOCUMENT_RETENTION_DAYS)
+            )
         )
         return result.rowcount  # type: ignore[attr-defined,no-any-return]
 

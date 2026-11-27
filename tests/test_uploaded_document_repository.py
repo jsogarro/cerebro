@@ -169,6 +169,37 @@ async def test_purge_expired_deletes_only_expired_rows_and_is_idempotent(
     assert remaining == [kept]
 
 
+async def test_purge_expired_also_drops_egress_rows_past_the_retention_window(
+    session: AsyncSession, cipher: MemoryEncryption
+) -> None:
+    from src.core.config import settings
+    from src.models.db.similarity_check import EgressEvent
+
+    def row(created_at: datetime) -> EgressEvent:
+        return EgressEvent(
+            organization_id=ORG_A,
+            user_id=USER_A,
+            host="arxiv.org",
+            request_class="pdf",
+            term_count=0,
+            bytes_received=1,
+            duration_ms=1,
+            status="200",
+            created_at=created_at,
+        )
+
+    window = timedelta(days=settings.DOCUMENT_RETENTION_DAYS)
+    old, recent = (
+        row(NOW - window - timedelta(hours=1)),
+        row(NOW - window + timedelta(hours=1)),
+    )
+    session.add_all([old, recent])
+    await session.flush()
+    await UploadedDocumentRepository(session, cipher).purge_expired(NOW)
+    remaining = (await session.execute(select(EgressEvent.id))).scalars().all()
+    assert remaining == [recent.id]
+
+
 async def test_authors_are_stored_as_encrypted_json(
     session: AsyncSession, cipher: MemoryEncryption
 ) -> None:

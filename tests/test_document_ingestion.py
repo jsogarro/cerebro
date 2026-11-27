@@ -305,6 +305,16 @@ def test_startup_refuses_an_enabled_feature_with_a_blank_key(
         require_document_key(config)
 
 
+def test_startup_refuses_similarity_checks_without_a_key() -> None:
+    config = Settings(
+        ENVIRONMENT="development",
+        SIMILARITY_CHECKS_ENABLED=True,
+        DOCUMENT_ENCRYPTION_KEY="",
+    )
+    with pytest.raises(DocumentEncryptionUnavailable):
+        require_document_key(config)
+
+
 def test_startup_allows_a_disabled_feature_or_a_set_key() -> None:
     require_document_key(Settings(DOCUMENT_UPLOADS_ENABLED=False))
     require_document_key(

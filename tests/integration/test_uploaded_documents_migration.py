@@ -6,6 +6,7 @@ import subprocess
 import sys
 import uuid
 from collections.abc import AsyncIterator, Iterator
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -288,12 +289,22 @@ async def test_the_purge_works_for_a_non_owner_role_under_rls_and_leaves_no_pois
             await setup.execute(
                 text(
                     "GRANT SELECT, INSERT, UPDATE, DELETE ON uploaded_documents, "
-                    "usage_ledger, users TO doc_app"
+                    "usage_ledger, users, egress_events TO doc_app"
                 )
             )
             user_id = await _insert_user(setup)
             await _insert_document(setup, usr=user_id)
             await _insert_document(setup, usr=user_id)
+            for age in (timedelta(days=40), timedelta(hours=1)):
+                await setup.execute(
+                    text(
+                        "INSERT INTO egress_events (id, organization_id, user_id, host, "
+                        "request_class, term_count, bytes_received, duration_ms, status, "
+                        "created_at) VALUES (gen_random_uuid(), gen_random_uuid(), :u, "
+                        "'arxiv.org', 'pdf', 0, 1, 1, '200', now() - CAST(:age AS interval))"
+                    ),
+                    {"u": user_id, "age": age},
+                )
             await setup.execute(
                 text(
                     "UPDATE uploaded_documents SET expires_at = now() + interval '1 day' "
@@ -328,6 +339,11 @@ async def test_the_purge_works_for_a_non_owner_role_under_rls_and_leaves_no_pois
                 {"u": user_id},
             )
             assert left == 1
+            egress_left = await connection.scalar(
+                text("SELECT count(*) FROM egress_events WHERE user_id = :u"),
+                {"u": user_id},
+            )
+            assert egress_left == 1
         async with engine.begin() as cleanup:
             await cleanup.execute(
                 text("DELETE FROM users WHERE id = :u"), {"u": user_id}

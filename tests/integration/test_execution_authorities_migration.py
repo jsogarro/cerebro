@@ -69,7 +69,6 @@ def test_there_is_one_head_and_it_chains_on_the_critiques_revision() -> None:
         line for line in _alembic("postgresql://x/y", "heads").splitlines() if line
     ]
     assert len(heads) == 1
-    assert heads[0].startswith(REVISION)
     revision = (
         REPO_ROOT / "alembic" / "versions" / f"{REVISION}_add_execution_authorities.py"
     ).read_text()

@@ -38,6 +38,11 @@ from src.models.db.security_alert import (
     AlertType,
     SecurityAlert,
 )
+from src.models.db.similarity_check import (
+    EgressEvent,
+    SimilarityCheck,
+    SimilarityMatch,
+)
 from src.models.db.tool_invocation import AgentToolInvocation
 from src.models.db.uploaded_document import UploadedDocument, UsageLedger
 from src.models.db.user import User
@@ -68,6 +73,7 @@ __all__ = [
     "BaseModel",
     "CritiqueFinding",
     "DocumentCritique",
+    "EgressEvent",
     "EventDeliveryStatus",
     "Experiment",
     "ExperimentAnalysis",
@@ -81,6 +87,8 @@ __all__ = [
     "ResearchProject",
     "ResearchResult",
     "SecurityAlert",
+    "SimilarityCheck",
+    "SimilarityMatch",
     "UploadedDocument",
     "UsageLedger",
     "User",

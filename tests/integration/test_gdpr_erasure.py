@@ -2,6 +2,7 @@
 
 import uuid
 from collections.abc import AsyncGenerator, Callable
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -17,6 +18,8 @@ from src.models.db.generated_report import GeneratedReport, ReportFormat
 from src.models.db.research_project import ResearchProject
 from src.models.db.research_result import ResearchResult
 from src.models.db.session import get_session
+from src.models.db.similarity_check import EgressEvent, SimilarityCheck, SimilarityMatch
+from src.models.db.uploaded_document import UploadedDocument
 from src.models.db.user import User
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 
@@ -196,3 +199,101 @@ async def test_erasure_fails_closed_when_revocation_store_is_down(
 
     assert response.status_code == 503
     assert await _counts(sessions) == before
+
+
+async def _seed_similarity(
+    sessions: async_sessionmaker[AsyncSession], user_id: uuid.UUID
+) -> None:
+    """A document with a check, a match and an egress row, all owned by ``user_id``."""
+    document_id, check_id = uuid.uuid4(), uuid.uuid4()
+    async with sessions() as s:
+        s.add(
+            UploadedDocument(
+                id=document_id,
+                organization_id=ORG_ID,
+                user_id=user_id,
+                filename_enc="f",
+                media_type="plain",
+                source_sha256="s",
+                text_sha256="t",
+                char_count=5,
+                pages=[],
+                extractor_version="v",
+                text_enc="x",
+                declared_authors_enc="y",
+                expires_at=datetime.now(UTC) + timedelta(days=1),
+            )
+        )
+        await s.flush()
+        s.add(
+            SimilarityCheck(
+                id=check_id,
+                document_id=document_id,
+                organization_id=ORG_ID,
+                user_id=user_id,
+                status="succeeded",
+                options={},
+                coverage={},
+                policy_versions={},
+            )
+        )
+        await s.flush()
+        s.add(
+            SimilarityMatch(
+                check_id=check_id,
+                organization_id=ORG_ID,
+                user_id=user_id,
+                kind="verbatim",
+                attribution="unattributed",
+                from_user_upload=False,
+                doc_start=0,
+                doc_end=1,
+                tokens=12,
+                source_origin="openalex",
+                source_id="W1",
+                source_title_enc="t",
+                source_licence={},
+                source_text_kind="full_text",
+                src_start=0,
+                src_end=1,
+            )
+        )
+        s.add(
+            EgressEvent(
+                check_id=check_id,
+                organization_id=ORG_ID,
+                user_id=user_id,
+                host="arxiv.org",
+                request_class="pdf",
+                term_count=0,
+                bytes_received=1,
+                duration_ms=1,
+                status="200",
+            )
+        )
+        await s.commit()
+
+
+async def _similarity_counts(sessions: async_sessionmaker[AsyncSession]) -> list[int]:
+    async with sessions() as s:
+        return [
+            (await s.execute(select(func.count()).select_from(model))).scalar_one()
+            for model in (SimilarityCheck, SimilarityMatch, EgressEvent)
+        ]
+
+
+async def test_erasure_removes_similarity_rows_and_keeps_other_users(
+    sessions, make_client, jwt_service
+) -> None:
+    victim = await _seed_account(sessions, "victim")
+    bystander = await _seed_account(sessions, "bystander")
+    await _seed_similarity(sessions, victim)
+    await _seed_similarity(sessions, bystander)
+    assert await _similarity_counts(sessions) == [2, 2, 2]
+
+    async with make_client(victim, jwt_service) as client:
+        response = await client.delete(f"/users/{victim}/gdpr")
+
+    assert response.status_code == 200, response.text
+    assert await _similarity_counts(sessions) == [1, 1, 1]
+    assert response.json()["deleted"]["egress_events"] == 1
