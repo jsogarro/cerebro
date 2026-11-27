@@ -145,7 +145,7 @@ def test_development_image_installs_the_mcp_extra_at_build_time() -> None:
 
     dockerfile = DOCKERFILE_PATH.read_text(encoding="utf-8")
 
-    assert 'RUN uv pip install -e ".[dev,mcp]"' in dockerfile
+    assert "RUN scripts/install-locked.sh --extra dev --extra mcp" in dockerfile
 
 
 def test_mcp_local_defaults_do_not_require_provider_credentials() -> None:
