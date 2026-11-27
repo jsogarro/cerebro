@@ -129,7 +129,7 @@ class ProceduralMemoryManager:
             await self._load_procedures()
             logger.info(f"Loaded {len(self.procedures)} procedures from storage")
 
-        except Exception as e:
+        except (OSError, KeyError, TypeError, ValueError) as e:
             logger.error(f"Failed to load procedures: {e}")
             # Start with empty memory
             self.procedures = {}
@@ -158,7 +158,7 @@ class ProceduralMemoryManager:
             logger.debug(f"Stored procedure: {procedure.name}")
             return True
 
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Failed to store procedure {procedure.id}: {e}")
             return False
 
@@ -173,54 +173,49 @@ class ProceduralMemoryManager:
             List of matching procedures
         """
 
-        try:
-            matching_procedures = []
+        matching_procedures = []
 
-            for procedure in self.procedures.values():
-                # Apply filters
-                if (
-                    query.procedure_type
-                    and procedure.procedure_type != query.procedure_type
-                ):
-                    continue
+        for procedure in self.procedures.values():
+            # Apply filters
+            if (
+                query.procedure_type
+                and procedure.procedure_type != query.procedure_type
+            ):
+                continue
 
-                if query.domain and procedure.domain != query.domain:
-                    continue
+            if query.domain and procedure.domain != query.domain:
+                continue
 
-                if query.agent_type and procedure.agent_type != query.agent_type:
-                    continue
+            if query.agent_type and procedure.agent_type != query.agent_type:
+                continue
 
-                if query.task_types and not any(
-                    t in procedure.task_types for t in query.task_types
-                ):
-                    continue
+            if query.task_types and not any(
+                t in procedure.task_types for t in query.task_types
+            ):
+                continue
 
-                if procedure.confidence < query.min_confidence:
-                    continue
+            if procedure.confidence < query.min_confidence:
+                continue
 
-                success_rate = procedure.success_count / max(procedure.usage_count, 1)
-                if success_rate < query.min_success_rate:
-                    continue
+            success_rate = procedure.success_count / max(procedure.usage_count, 1)
+            if success_rate < query.min_success_rate:
+                continue
 
-                if procedure.usage_count < query.min_usage_count:
-                    continue
+            if procedure.usage_count < query.min_usage_count:
+                continue
 
-                if query.tags and not any(t in procedure.tags for t in query.tags):
-                    continue
+            if query.tags and not any(t in procedure.tags for t in query.tags):
+                continue
 
-                matching_procedures.append(procedure)
+            matching_procedures.append(procedure)
 
-            # Sort by confidence and performance
-            matching_procedures.sort(
-                key=lambda p: (p.confidence, p.avg_performance_score), reverse=True
-            )
+        # Sort by confidence and performance
+        matching_procedures.sort(
+            key=lambda p: (p.confidence, p.avg_performance_score), reverse=True
+        )
 
-            self.retrieve_count += 1
-            return matching_procedures[: query.limit]
-
-        except Exception as e:
-            logger.error(f"Failed to retrieve procedures: {e}")
-            return []
+        self.retrieve_count += 1
+        return matching_procedures[: query.limit]
 
     async def delete_by_user_id(self, user_id: str) -> int:
         """Delete procedures associated with a user."""
@@ -251,46 +246,39 @@ class ProceduralMemoryManager:
             ID of learned procedure or None if learning failed
         """
 
-        try:
-            # Extract procedural knowledge from episode
-            steps = episode_data.get("steps", [])
-            context = episode_data.get("context", {})
+        # Extract procedural knowledge from episode
+        steps = episode_data.get("steps", [])
+        context = episode_data.get("context", {})
 
-            if not steps:
-                return None
-
-            procedure = Procedure(
-                name=f"Learned procedure {datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                procedure_type=ProcedureType.WORKFLOW,
-                steps=steps,
-                conditions=context.get("conditions", {}),
-                parameters=context.get("parameters", {}),
-                domain=episode_data.get("domain"),
-                agent_type=episode_data.get("agent_type"),
-                task_types=[episode_data.get("task_type", "general")],
-                usage_count=1,
-                success_count=1 if success else 0,
-                avg_performance_score=performance_score,
-                last_used=datetime.now(),
-                learned_from=[episode_data.get("episode_id", "unknown")],
-                confidence=self._calculate_initial_confidence(
-                    performance_score, success
-                ),
-            )
-
-            # Store the procedure
-            success = await self.store_procedure(procedure)
-
-            if success:
-                self.learn_count += 1
-                logger.info(f"Learned new procedure: {procedure.name}")
-                return procedure.id
-
+        if not steps:
             return None
 
-        except Exception as e:
-            logger.error(f"Failed to learn procedure from episode: {e}")
-            return None
+        procedure = Procedure(
+            name=f"Learned procedure {datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            procedure_type=ProcedureType.WORKFLOW,
+            steps=steps,
+            conditions=context.get("conditions", {}),
+            parameters=context.get("parameters", {}),
+            domain=episode_data.get("domain"),
+            agent_type=episode_data.get("agent_type"),
+            task_types=[episode_data.get("task_type", "general")],
+            usage_count=1,
+            success_count=1 if success else 0,
+            avg_performance_score=performance_score,
+            last_used=datetime.now(),
+            learned_from=[episode_data.get("episode_id", "unknown")],
+            confidence=self._calculate_initial_confidence(performance_score, success),
+        )
+
+        # Store the procedure
+        success = await self.store_procedure(procedure)
+
+        if success:
+            self.learn_count += 1
+            logger.info(f"Learned new procedure: {procedure.name}")
+            return procedure.id
+
+        return None
 
     async def update_procedure_performance(
         self, procedure_id: str, performance_score: float, success: bool
@@ -338,7 +326,7 @@ class ProceduralMemoryManager:
 
             return True
 
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Failed to update procedure performance {procedure_id}: {e}")
             return False
 
@@ -391,7 +379,7 @@ class ProceduralMemoryManager:
 
             return success
 
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Failed to optimize procedure {procedure_id}: {e}")
             return False
 
@@ -497,58 +485,48 @@ class ProceduralMemoryManager:
         """Load procedures from persistent storage."""
 
         if self.storage_backend == "json_file":
-            try:
-                import os
+            import os
 
-                if os.path.exists(self.storage_path):
-                    with open(self.storage_path) as f:
-                        data = json.load(f)
+            if os.path.exists(self.storage_path):
+                with open(self.storage_path) as f:
+                    data = json.load(f)
 
-                    for proc_id, proc_data in data.items():
-                        proc_data["procedure_type"] = ProcedureType(
-                            proc_data["procedure_type"]
-                        )
+                for proc_id, proc_data in data.items():
+                    proc_data["procedure_type"] = ProcedureType(
+                        proc_data["procedure_type"]
+                    )
 
-                        for date_field in ["created_at", "last_updated", "last_used"]:
-                            if proc_data.get(date_field):
-                                proc_data[date_field] = datetime.fromisoformat(
-                                    proc_data[date_field]
-                                )
+                    for date_field in ["created_at", "last_updated", "last_used"]:
+                        if proc_data.get(date_field):
+                            proc_data[date_field] = datetime.fromisoformat(
+                                proc_data[date_field]
+                            )
 
-                        procedure = Procedure(**proc_data)
-                        self.procedures[proc_id] = procedure
-
-            except Exception as e:
-                logger.error(f"Failed to load procedures from {self.storage_path}: {e}")
+                    procedure = Procedure(**proc_data)
+                    self.procedures[proc_id] = procedure
 
     async def _persist_procedures(self) -> None:
         """Persist procedures to storage."""
 
         if self.storage_backend == "json_file":
-            try:
-                import os
+            import os
 
-                os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
+            os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
 
-                data = {}
-                for proc_id, procedure in self.procedures.items():
-                    proc_dict = asdict(procedure)
+            data = {}
+            for proc_id, procedure in self.procedures.items():
+                proc_dict = asdict(procedure)
 
-                    proc_dict["procedure_type"] = procedure.procedure_type.value
+                proc_dict["procedure_type"] = procedure.procedure_type.value
 
-                    for date_field in ["created_at", "last_updated", "last_used"]:
-                        if proc_dict.get(date_field):
-                            proc_dict[date_field] = proc_dict[date_field].isoformat()
+                for date_field in ["created_at", "last_updated", "last_used"]:
+                    if proc_dict.get(date_field):
+                        proc_dict[date_field] = proc_dict[date_field].isoformat()
 
-                    data[proc_id] = proc_dict
+                data[proc_id] = proc_dict
 
-                with open(self.storage_path, "w") as f:
-                    json.dump(data, f, indent=2)
-
-            except Exception as e:
-                logger.error(
-                    f"Failed to persist procedures to {self.storage_path}: {e}"
-                )
+            with open(self.storage_path, "w") as f:
+                json.dump(data, f, indent=2)
 
 
 __all__ = ["ProceduralMemoryManager", "Procedure", "ProcedureQuery", "ProcedureType"]
