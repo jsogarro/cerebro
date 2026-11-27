@@ -308,9 +308,12 @@ class ExecutionPlanTopologyExecutor:
         decision = plan.routing_decision
         # The run's own ledger when the caller supplies one, so a workflow
         # retry draws on the budget already spent instead of a fresh one.
-        ledger = task.context.get(BUDGET_LEDGER_CONTEXT_KEY)
-        if ledger is None:
-            ledger = BudgetLedger(decision.budget)
+        supplied = task.context.get(MODEL_INVOCATION_CONTEXT_KEY)
+        ledger = (
+            task.context.get(BUDGET_LEDGER_CONTEXT_KEY)
+            or (supplied.ledger if supplied is not None else None)
+            or BudgetLedger(decision.budget)
+        )
         invocation = self._invocation_context(plan, task, ledger)
         workers = {str(worker.worker_id): worker for worker in decision.workers}
         dependencies = self._dependencies(plan)

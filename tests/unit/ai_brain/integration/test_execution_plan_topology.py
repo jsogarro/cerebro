@@ -784,3 +784,38 @@ async def test_a_plan_deadline_alone_bounds_the_provider_call() -> None:
     assert ctx.remaining_seconds() == pytest.approx(50)  # type: ignore[attr-defined]
     clock_now[0] = plan.deadline + timedelta(seconds=1)
     assert ctx.remaining_seconds() < 0  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_an_owner_supplied_ledger_governs_the_workers_without_a_ledger_key() -> (
+    None
+):
+    from src.services.model_invocation import ModelInvocationContext
+
+    plan = _plan()
+    owner_ledger = BudgetLedger(plan.routing_decision.budget)
+    seen: list[AgentTask] = []
+
+    async def execute(worker: WorkerAssignment, task: AgentTask) -> AgentResult:
+        seen.append(task)
+        return AgentResult(task.id, "success", {}, 1.0, 0.0)
+
+    await ExecutionPlanTopologyExecutor(
+        worker_executor=execute, capability_checker=lambda _: True
+    ).execute(
+        plan,
+        AgentTask(
+            id="root",
+            agent_type="execution_plan",
+            input_data={},
+            context={
+                MODEL_INVOCATION_CONTEXT_KEY: ModelInvocationContext(
+                    ledger=owner_ledger
+                )
+            },
+        ),
+    )
+
+    for task in seen:
+        assert task.context[MODEL_INVOCATION_CONTEXT_KEY].ledger is owner_ledger
+        assert task.context[BUDGET_LEDGER_CONTEXT_KEY] is owner_ledger

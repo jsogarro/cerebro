@@ -193,3 +193,32 @@ async def test_a_missing_backend_changes_nothing(
     monkeypatch.setattr("src.core.tracing.get_langfuse_client", lambda: None)
     ctx = ModelInvocationContext(ledger=_ledger(), trace_parent="a" * 32)
     assert (await _run(ctx, _call(_response()))).succeeded
+
+
+async def test_an_unusable_response_after_dispatch_settles_unknown_once_and_ends_the_span(
+    client: _Client,
+) -> None:
+    from tests.test_provider_invocation_contract import _Journal
+
+    journal, ledger = _Journal(), _ledger()
+    ctx = ModelInvocationContext(ledger=ledger, journal=journal, trace_parent="a" * 32)
+    with pytest.raises(ArithmeticError):
+        await _run(ctx, _call(_response(cost_estimate="n/a")))
+    assert journal.names == ["reserve", "mark", "settle_unknown"]
+    assert ledger.unknown_usage_calls == 1
+    assert client.spans[0].ended == 1
+    with pytest.raises(Exception, match="budget|ceiling|cost"):
+        await _run(ctx, _call(_response()))
+
+
+async def test_a_missing_token_class_is_omitted_from_the_span_usage(
+    client: _Client,
+) -> None:
+    ctx = ModelInvocationContext(ledger=_ledger(), trace_parent="a" * 32)
+    await _run(ctx, _call(_response(prompt_tokens=None)))
+    usage = {
+        k: v
+        for u in client.spans[0].updates
+        for k, v in u.get("usage_details", {}).items()
+    }
+    assert usage == {"output": 40, "total": 100}

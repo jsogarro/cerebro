@@ -528,6 +528,31 @@ class TestCancelledRunSpendsOnceAndStaysStopped:
         assert journal.names.count("settle_unknown") == 1
         assert ledger.unknown_usage_calls == 1
 
+    async def test_cancelling_during_an_unbilled_settlement_still_settles_once(
+        self,
+    ) -> None:
+        journal, ledger = _Journal(), _ledger()
+        gate = asyncio.Event()
+        original = journal.settle_known
+
+        async def slow_settle(call_id: str, **kwargs: Any) -> bool:
+            await gate.wait()
+            return await original(call_id, **kwargs)
+
+        journal.settle_known = slow_settle  # type: ignore[method-assign]
+        ctx = ModelInvocationContext(ledger=ledger, journal=journal)
+        task = asyncio.ensure_future(
+            _invoke(ctx, _Provider(UnbilledTransportError("down")))
+        )
+        for _ in range(5):
+            await asyncio.sleep(0)
+        task.cancel()
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0)
+        assert journal.names.count("settle_known") == 1
+
     async def test_two_workers_of_one_run_share_the_stopped_budget(self) -> None:
         ledger, journal = _ledger(), _Journal()
         ctx = ModelInvocationContext(ledger=ledger, journal=journal)

@@ -317,20 +317,29 @@ async def _attempt(
         ctx.trace_parent,
         {"call_id": call_id, "attempt": n, "estimated_tokens": estimated_tokens},
     )
-    response: Any = None
     try:
         response = await call(remaining)
     except UnbilledTransportError as exc:
         end_model_attempt(span, metadata={"outcome": type(exc).__name__})
-        await _settle(ctx, call_id, reservation, ReportedUsage(0, Decimal(0)), marked)
+        await asyncio.shield(
+            _settle(ctx, call_id, reservation, ReportedUsage(0, Decimal(0)), marked)
+        )
         raise
     except BaseException as exc:
         end_model_attempt(span, metadata={"outcome": type(exc).__name__})
         await asyncio.shield(_settle(ctx, call_id, reservation, None, marked))
         raise
-    result = normalize_response(response, attempts=n)
+    try:
+        result = normalize_response(response, attempts=n)
+        usage = _usage(result)
+    except Exception as exc:
+        # The provider answered, so the call may have been billed: a response
+        # we cannot read is unknown spend, never free.
+        end_model_attempt(span, metadata={"outcome": type(exc).__name__})
+        await asyncio.shield(_settle(ctx, call_id, reservation, None, marked))
+        raise
     end_model_attempt(span, **_span_update(result))
-    await asyncio.shield(_settle(ctx, call_id, reservation, _usage(result), marked))
+    await asyncio.shield(_settle(ctx, call_id, reservation, usage, marked))
     return result
 
 
@@ -347,11 +356,12 @@ def _span_update(result: ModelCallResult) -> dict[str, Any]:
         },
     }
     if result.usage_certainty is UsageCertainty.REPORTED:
-        update["usage_details"] = {
+        counts = {
             "input": result.prompt_tokens,
             "output": result.completion_tokens,
             "total": result.total_tokens,
         }
+        update["usage_details"] = {k: v for k, v in counts.items() if v is not None}
         if result.cost_usd is not None:
             update["cost_details"] = {"total": float(result.cost_usd)}
     return update
