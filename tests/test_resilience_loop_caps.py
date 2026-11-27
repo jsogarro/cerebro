@@ -14,6 +14,7 @@ from src.ai_brain.router.masr import MASRouter
 from src.api.services.talkhier_round_executor import TalkHierRoundExecutor
 from src.api.services.talkhier_session_service import TalkHierSession
 from src.api.services.talkhier_state_manager import TalkHierStateManager
+from src.core.tools.circuit import CircuitBreaker
 from src.models.talkhier_api_models import (
     ConsensusType,
     ProtocolType,
@@ -21,7 +22,6 @@ from src.models.talkhier_api_models import (
     RefinementStrategy,
     SessionStatus,
 )
-from src.reliability.retry_strategies import CircuitBreaker
 from src.services.gemini_service import GeminiService
 
 
@@ -58,9 +58,11 @@ def test_talkhier_refinement_round_rejects_rounds_past_max_rounds() -> None:
         asyncio.run(execute_past_cap())
 
 
-def test_gemini_api_call_uses_tenacity_retry_policy() -> None:
-    """GeminiService uses tenacity retry decorator."""
-    assert hasattr(GeminiService._generate_content, "retry")
+def test_gemini_api_call_has_no_hidden_retry_and_has_a_breaker() -> None:
+    """GeminiService makes one attempt per call and is guarded by the shared breaker."""
+    assert not hasattr(GeminiService._generate_content, "retry")
+    assert not hasattr(GeminiService.generate_content_result, "retry")
+    assert isinstance(GeminiService(api_key="k").circuit, CircuitBreaker)
 
 
 def test_masr_router_exposes_routing_circuit_breaker() -> None:

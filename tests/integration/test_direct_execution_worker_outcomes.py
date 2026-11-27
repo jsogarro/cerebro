@@ -48,6 +48,7 @@ from src.repositories.run_lifecycle_repository import RunLifecycleRepository
 from tests.integration.test_direct_execution_run_persistence import (
     _AllocStub,
     _RoutingDecisionStub,
+    register_stub_gemini,
 )
 
 pytestmark = [pytest.mark.integration]
@@ -194,6 +195,7 @@ async def _run(
         return generate(persona, request.prompt)
 
     monkeypatch.setattr(ModelRouter, "route_and_generate", route_and_generate)
+    register_stub_gemini(monkeypatch)
     if session_factory is None:
         # The mediated tool path needs a durable audit store; memory mode has none.
         monkeypatch.setattr(bridge_module.settings, "MCP_TOOL_PATH_ENABLED", False)

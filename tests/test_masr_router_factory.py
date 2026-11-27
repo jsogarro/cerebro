@@ -88,6 +88,17 @@ def test_mapper_carries_cache_memory_budget_and_version_settings() -> None:
     assert config["adaptive_routing_policy_version"] == "masr-adaptive-v1"
 
 
+def test_per_request_cost_ceiling_reaches_the_cost_optimizer() -> None:
+    from src.ai_brain.router.masr import MASRouter
+
+    config = settings_to_router_config(_settings(COST_MAX_PER_REQUEST=0.25))
+
+    assert config["cost_optimizer"]["max_cost_per_request"] == 0.25
+    router = MASRouter(config=config)
+    assert router.cost_optimizer.max_cost_per_request == 0.25
+    assert router.cost_threshold == 0.25
+
+
 def test_explicit_fixture_policy_disables_memory_and_thompson() -> None:
     config = settings_to_router_config(
         _settings(

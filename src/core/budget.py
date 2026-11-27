@@ -26,7 +26,8 @@ Policy, stated once:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
@@ -86,6 +87,7 @@ class BudgetExceededError(RuntimeError):
 class CallReservation:
     tokens: int
     cost: Decimal = Decimal(0)
+    call_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 @dataclass(frozen=True)
@@ -122,6 +124,7 @@ class BudgetLedger:
         self.exceeded: BudgetExceededError | None = None
         self._reserved_tokens = 0
         self._reserved_cost = Decimal(0)
+        self._open: set[str] = set()
         self._max_call_cost = Decimal(0)
         self._cost_unverified = False
 
@@ -168,10 +171,27 @@ class BudgetLedger:
             )
         self._reserved_tokens += estimated_tokens
         self._reserved_cost += call_cost
-        return CallReservation(tokens=estimated_tokens, cost=call_cost)
+        reservation = CallReservation(tokens=estimated_tokens, cost=call_cost)
+        self._open.add(reservation.call_id)
+        return reservation
+
+    def release(self, reservation: CallReservation) -> None:
+        """Give back a reservation whose call provably never left the process."""
+        if reservation.call_id not in self._open:
+            return
+        self._open.discard(reservation.call_id)
+        self._reserved_tokens -= reservation.tokens
+        self._reserved_cost -= reservation.cost
 
     def settle(self, reservation: CallReservation, usage: ReportedUsage | None) -> None:
-        """Replace a reservation with what the call actually consumed."""
+        """Replace a reservation with what the call actually consumed, once.
+
+        A reservation already settled or released is ignored, so a replayed
+        settlement can neither subtract the held totals twice nor charge twice.
+        """
+        if reservation.call_id not in self._open:
+            return
+        self._open.discard(reservation.call_id)
         self._reserved_tokens -= reservation.tokens
         self._reserved_cost -= reservation.cost
         if usage is not None and not _is_well_formed(usage):

@@ -7,25 +7,84 @@ This service integrates with Google's Gemini API following functional programmin
 from __future__ import annotations
 
 import hashlib
-from dataclasses import replace
+import time
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from langchain_google_genai import ChatGoogleGenerativeAI
 from redis import asyncio as aioredis
 from redis.exceptions import RedisError
 from structlog import get_logger
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
+from src.core.observability import LLMCallMetrics, record_llm_call
+from src.core.tools.circuit import CircuitBreaker
 from src.services.gemini_config import GeminiConfig
 from src.services.gemini_limiter import RateLimiter
 from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
 logger = get_logger()
+
+
+class GeminiCircuitOpenError(RuntimeError):
+    """Recent calls kept failing, so this one was not attempted."""
+
+
+@dataclass(frozen=True)
+class GeminiResult:
+    """One Gemini generation with the metadata the provider reported.
+
+    A token count the provider did not report is ``None``, never zero.
+    """
+
+    content: str
+    finish_reason: str | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+
+
+_PROVIDER_SIDE_HTTP = frozenset({408, 429})
+
+
+def _is_provider_side(error: BaseException) -> bool:
+    """Whether a failure says the provider is unhealthy, not that the request was bad.
+
+    Walks the cause chain because the SDK wrappers re-raise. Unclassified
+    errors are the caller's: one tenant's oversized or malformed prompt must
+    not open the breaker every other tenant shares.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, TimeoutError | OSError | httpx.TransportError):
+            return True
+        code = getattr(current, "code", None)
+        if isinstance(code, int) and not isinstance(code, bool):
+            return code >= 500 or code in _PROVIDER_SIDE_HTTP
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _reported_count(usage: Any, key: str) -> int | None:
+    value = usage.get(key) if isinstance(usage, Mapping) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _result_from(message: Any) -> GeminiResult:
+    usage = getattr(message, "usage_metadata", None)
+    metadata = getattr(message, "response_metadata", None)
+    finish = metadata.get("finish_reason") if isinstance(metadata, Mapping) else None
+    return GeminiResult(
+        content=str(message.content),
+        finish_reason=finish if isinstance(finish, str) else None,
+        prompt_tokens=_reported_count(usage, "input_tokens"),
+        completion_tokens=_reported_count(usage, "output_tokens"),
+        total_tokens=_reported_count(usage, "total_tokens"),
+    )
 
 
 class GeminiService:
@@ -78,6 +137,8 @@ class GeminiService:
             top_p=self.config.top_p,
             top_k=self.config.top_k,
             max_output_tokens=self.config.max_output_tokens,
+            # The SDK default is 6 resends, each billed under one reservation.
+            max_retries=1,
         )
 
         self.rate_limiter = RateLimiter(
@@ -86,29 +147,67 @@ class GeminiService:
             max_concurrent=kwargs.get("max_concurrent", self.config.max_concurrent),
         )
 
+        # One breaker per service: a provider that keeps failing is not re-called
+        # until its cooldown ends, and the refusal is its own error, not a value.
+        self.circuit = CircuitBreaker()
+
         self.cache_client = cache_client
         self._cache_enabled = self.config.cache_enabled and cache_client is not None
 
         logger.info("gemini_service_initialized", model=self.config.model_name)
 
-    @retry(
-        retry=retry_if_exception_type(Exception),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=2, min=5, max=30),
-    )
-    async def _generate_content(self, prompt: str) -> str:
-        """
-        Generate content from Gemini with retry logic.
+    async def generate_content_result(
+        self, prompt: str, *, record_metrics: bool = True
+    ) -> GeminiResult:
+        """One Gemini call, one attempt, with the metadata the provider reported.
 
-        This method handles the side effect of calling the API.
+        Retrying is the caller's decision: a hidden retry here would spend again
+        under a reservation that covers a single call. ``record_metrics=False``
+        is for a caller that records the call itself (the provider adapter).
         """
-        async with self.rate_limiter.acquire():
-            try:
-                result = await self.model.ainvoke(prompt)
-                return str(result.content)
-            except Exception as e:
-                logger.error("gemini_api_error", error=str(e))
-                raise
+        if not self.circuit.allows(datetime.now(UTC)):
+            raise GeminiCircuitOpenError("gemini circuit is open")
+        epoch = self.circuit.epoch
+        started = time.monotonic()
+        try:
+            async with self.rate_limiter.acquire():
+                message = await self.model.ainvoke(prompt)
+            result = _result_from(message)
+        except BaseException as exc:
+            if isinstance(exc, Exception) and _is_provider_side(exc):
+                self.circuit.record_failure(datetime.now(UTC), epoch=epoch)
+            else:
+                # Cancelled or caller-caused: no evidence about the provider,
+                # but a half-open trial slot must still go back.
+                self.circuit.record_abandoned()
+            logger.error("gemini_api_error", error=str(exc))
+            if record_metrics and isinstance(exc, Exception):
+                self._record_call(None, started, success=False)
+            raise
+        self.circuit.record_success(epoch=epoch)
+        if record_metrics:
+            self._record_call(result, started, success=True)
+        return result
+
+    def _record_call(
+        self, result: GeminiResult | None, started: float, *, success: bool
+    ) -> None:
+        # Cost is not priced here, so it is recorded as 0.0 on the counter and
+        # never presented as a measurement; budgets price calls at the provider.
+        record_llm_call(
+            LLMCallMetrics(
+                provider="gemini",
+                model=self.model_name,
+                prompt_tokens=(result.prompt_tokens or 0) if result else 0,
+                completion_tokens=(result.completion_tokens or 0) if result else 0,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                cost_usd=0.0,
+                success=success,
+            )
+        )
+
+    async def _generate_content(self, prompt: str) -> str:
+        return (await self.generate_content_result(prompt)).content
 
     async def generate_content(self, prompt: str) -> str:
         """
@@ -125,7 +224,7 @@ class GeminiService:
         return await self._generate_content(prompt)
 
     async def generate_structured_content(
-        self, prompt: str, schema: type[Any], max_retries: int = 2
+        self, prompt: str, schema: type[Any], max_retries: int = 0
     ) -> Any:
         """
         Generate structured content from Gemini using Pydantic schema validation.
@@ -133,7 +232,8 @@ class GeminiService:
         Args:
             prompt: The prompt to send to Gemini.
             schema: Pydantic model class for output validation.
-            max_retries: Number of retry attempts on parse failure (default: 2).
+            max_retries: Extra calls allowed after a parse failure; each is a new
+                billed request, so the default is none.
 
         Returns:
             Validated Pydantic model instance.
@@ -152,7 +252,7 @@ class GeminiService:
         last_error = None
         for attempt in range(max_retries + 1):
             try:
-                # Generate content using existing retry logic
+                # One call per attempt; a re-ask is the caller's explicit choice
                 response = await self._generate_content(enhanced_prompt)
 
                 parsed = parser.parse(response)

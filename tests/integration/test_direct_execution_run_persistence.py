@@ -97,6 +97,25 @@ class _AmbiguousCommitSession(AsyncSession):
             raise RuntimeError("ambiguous commit result")
 
 
+def register_stub_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Register a zero-priced ``gemini`` provider on every ``ModelRouter``.
+
+    A plan whose provider never registers (no key in CI) is refused before the
+    call; tests that replace ``route_and_generate`` still need the call made.
+    """
+    from src.ai_brain.providers import ModelRouter
+
+    original = ModelRouter._initialize_providers
+
+    def initialize(self: ModelRouter) -> None:
+        original(self)
+        self.registry.providers.setdefault(
+            "gemini", SimpleNamespace(estimate_cost=lambda *_: 0.0)
+        )
+
+    monkeypatch.setattr(ModelRouter, "_initialize_providers", initialize)
+
+
 # Mirrors ``tests/test_direct_execution_service.py``'s ``_FakeRoutingDecision``
 # family: the smallest dataclass shape ``ExecutionPlanCompiler.compile`` and
 # ``asdict(routing_decision)`` both accept, matched to ``_make_binding``'s

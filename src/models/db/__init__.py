@@ -23,6 +23,7 @@ from src.models.db.experiment import (
     ExperimentVariant,
 )
 from src.models.db.generated_report import GeneratedReport, ReportFormat
+from src.models.db.model_call_reservation import ModelCallReservation
 from src.models.db.oauth_account import OAuthAccount, OAuthProvider
 from src.models.db.research_project import ResearchProject
 from src.models.db.research_result import ResearchResult
@@ -83,6 +84,7 @@ __all__ = [
     "ExperimentResult",
     "ExperimentVariant",
     "GeneratedReport",
+    "ModelCallReservation",
     "OAuthAccount",
     "OAuthProvider",
     "ReportFormat",

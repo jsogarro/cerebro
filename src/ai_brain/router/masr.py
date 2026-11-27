@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -51,7 +52,7 @@ from src.core.constants import (
     MIN_RETRY_ATTEMPTS,
     SHORT_TIMEOUT,
 )
-from src.reliability.retry_strategies import CircuitBreaker, CircuitBreakerConfig
+from src.core.tools.circuit import CircuitBreaker
 
 from .adaptive_state_store import (
     AdaptiveExperimentSnapshot,
@@ -223,14 +224,8 @@ class MASRouter:
         # Learning parameters for adaptive routing
         self.learning_enabled = self.config.get("enable_learning", True)
         self._routing_circuit_breaker = CircuitBreaker(
-            "masr_router",
-            CircuitBreakerConfig(
-                failure_threshold=self.config.get("circuit_failure_threshold", 5),
-                success_threshold=self.config.get("circuit_success_threshold", 2),
-                timeout=self.config.get("circuit_timeout_seconds", 60.0),
-                # A caller's query not fitting a workflow is not a router fault.
-                exclude_exceptions=(WorkflowShapeUnsupportedError,),
-            ),
+            failure_threshold=self.config.get("circuit_failure_threshold", 5),
+            cooldown_seconds=self.config.get("circuit_timeout_seconds", 60.0),
         )
 
         # Memory-informed routing (feature-flagged, default OFF)
@@ -322,6 +317,34 @@ class MASRouter:
     def routing_circuit_breaker(self) -> CircuitBreaker:
         """Circuit breaker guarding MASR routing analysis and optimization."""
         return self._routing_circuit_breaker
+
+    async def _through_routing_breaker(
+        self, routing: Callable[[], Awaitable[RoutingDecision]]
+    ) -> RoutingDecision:
+        """Run one routing pass if the breaker admits it, and report its outcome.
+
+        A refusal is raised, not substituted: ``route`` turns it into its fallback
+        decision like any other routing failure. A cancelled pass says nothing
+        about routing health but must give back the half-open trial slot.
+        """
+        breaker = self._routing_circuit_breaker
+        if not breaker.allows(datetime.now(UTC)):
+            raise RuntimeError("routing circuit breaker is open")
+        epoch = breaker.epoch
+        try:
+            decision = await routing()
+        except WorkflowShapeUnsupportedError:
+            # A caller's query not fitting a workflow is not a router fault.
+            breaker.record_abandoned()
+            raise
+        except Exception:
+            breaker.record_failure(datetime.now(UTC), epoch=epoch)
+            raise
+        except BaseException:
+            breaker.record_abandoned()
+            raise
+        breaker.record_success(epoch=epoch)
+        return decision
 
     async def route(
         self,
@@ -598,8 +621,7 @@ class MASRouter:
 
                     return decision
 
-                # call() records success/failure and gates OPEN/HALF_OPEN.
-                return await self._routing_circuit_breaker.call(_route)
+                return await self._through_routing_breaker(_route)
 
             except WorkflowShapeUnsupportedError:
                 raise

@@ -100,6 +100,8 @@ def settings_to_router_config(
         "max_parallel": settings.MAX_PARALLEL_WORKERS,
         "max_agents": settings.AGENTS_MAX_WORKERS_PER_SUPERVISOR,
         "max_cost": settings.COST_MAX_PER_REQUEST,
+        # The optimizer reads its own key; without it the ceiling stops at MASR.
+        "cost_optimizer": {"max_cost_per_request": settings.COST_MAX_PER_REQUEST},
         "memory_informed_routing_enabled": (
             False if fixture_mode else settings.MEMORY_INFORMED_ROUTING_ENABLED
         ),

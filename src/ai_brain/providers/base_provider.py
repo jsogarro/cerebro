@@ -128,6 +128,10 @@ class ModelResponse:
     error_type: str | None = None
     retry_count: int = 0
 
+    # True when the token counts are the adapter's own estimate, not the
+    # provider's report; an estimate is never charged as measured usage.
+    usage_estimated: bool = False
+
     # Cost information
     cost_estimate: float = 0.0
     cost_breakdown: dict[str, float] = field(default_factory=dict)

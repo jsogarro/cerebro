@@ -290,3 +290,52 @@ def _register(
         )
     )
     return boundary
+
+
+class TestLateOutcomesFromBeforeTheTrip:
+    """A call admitted while closed can finish after the breaker has opened."""
+
+    def test_a_late_success_does_not_close_an_open_breaker(self) -> None:
+        breaker = CircuitBreaker(failure_threshold=2, cooldown_seconds=60)
+        assert breaker.allows(NOW) and breaker.allows(NOW) and breaker.allows(NOW)
+        breaker.record_failure(NOW)
+        breaker.record_failure(NOW)
+
+        breaker.record_success()
+
+        assert breaker.state is BreakerState.OPEN
+        assert not breaker.allows(NOW)
+
+    def test_a_late_failure_does_not_extend_the_cooldown(self) -> None:
+        breaker = CircuitBreaker(failure_threshold=1, cooldown_seconds=60)
+        breaker.record_failure(NOW)
+
+        breaker.record_failure(NOW + timedelta(seconds=50))
+
+        assert breaker.allows(NOW + timedelta(seconds=61))
+
+    def test_a_stale_success_cannot_close_a_half_open_breaker(self) -> None:
+        breaker = CircuitBreaker(failure_threshold=1, cooldown_seconds=60)
+        assert breaker.allows(NOW)
+        stale = breaker.epoch
+        breaker.record_failure(NOW)
+        assert breaker.allows(NOW + timedelta(seconds=61))  # the trial
+        trial = breaker.epoch
+
+        breaker.record_success(epoch=stale)
+        assert breaker.state is BreakerState.HALF_OPEN
+
+        breaker.record_success(epoch=trial)
+        assert breaker.state is BreakerState.CLOSED
+
+    def test_a_stale_failure_does_not_reopen_a_half_open_breaker(self) -> None:
+        breaker = CircuitBreaker(failure_threshold=1, cooldown_seconds=60)
+        assert breaker.allows(NOW)
+        stale = breaker.epoch
+        breaker.record_failure(NOW)
+        later = NOW + timedelta(seconds=61)
+        assert breaker.allows(later)
+
+        breaker.record_failure(later, epoch=stale)
+
+        assert breaker.state is BreakerState.HALF_OPEN

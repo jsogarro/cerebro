@@ -68,7 +68,7 @@ A `CapabilityGrant` (`src/core/contracts/capabilities.py`) authorizes one tool f
 
 `BudgetLedger` (`src/core/budget.py`) enforces the plan's `ExecutionBudget` across all tasks and retries of one run. `DirectExecutionService` creates one per execution (`BudgetLedger(execution_plan.routing_decision.budget)`) and passes it to workers under `BUDGET_LEDGER_CONTEXT_KEY`. Three dimensions: tokens, cost and tool invocations.
 
-- `reserve_call(estimated_tokens, estimated_cost)` runs before each model call in `LLMWorkerAgentBase`; `settle(reservation, usage)` replaces the reservation with provider-reported usage. Unknown usage settles as the full reservation and fails the ledger closed on cost for every later call.
+- `reserve_call(estimated_tokens, estimated_cost)` runs before each model call, inside `invoke_model` (`src/services/model_invocation.py`); `settle(reservation, usage)` replaces the reservation with provider-reported usage, once. `release(reservation)` returns a reservation whose call provably never left. Unknown usage settles as the full reservation and fails the ledger closed on cost for every later call.
 - `charge_tool_invocation()` is called by `ToolRegistry.execute` and `MCPIntegration` before the boundary is entered.
 - A crossed ceiling raises `BudgetExceededError` (`code="BUDGET_EXCEEDED"`), which is terminal. The execution service records it as `run.budget_exceeded` with `usage_payload()`.
 - `check_plan_fits` refuses a plan whose token ceiling cannot hold `MIN_WORKER_CALL_TOKENS` (2000) per worker; `ExecutionPlanTopologyExecutor.admit` calls it.

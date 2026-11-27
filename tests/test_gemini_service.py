@@ -7,7 +7,7 @@ These tests verify the Gemini integration service functionality.
 import asyncio
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from redis import asyncio as aioredis
@@ -112,32 +112,223 @@ class TestGeminiService:
         assert "methodology" in result
         assert mock_gemini_model.ainvoke.called
 
-    async def test_retry_on_api_failure(self, mock_gemini_model):
-        """Test that service retries on API failures."""
+    async def test_api_failure_is_one_attempt_not_a_hidden_retry(
+        self, mock_gemini_model
+    ):
+        """A failed call is raised after one request; retrying is the caller's call."""
         from src.services.gemini_service import GeminiService
 
         service = GeminiService(api_key="test-key")
-
-        # Configure mock to fail twice then succeed
-        success_response = MagicMock()
-        success_response.content = json.dumps(
-            {"phases": ["literature_review"], "methodology": "test"}
-        )
-        mock_gemini_model.ainvoke.side_effect = [
-            Exception("API Error"),
-            Exception("API Error"),
-            success_response,
-        ]
+        mock_gemini_model.ainvoke.side_effect = Exception("API Error")
         service.model = mock_gemini_model
 
         query = ResearchQuery(
             text="Test query", domains=["Test"], depth_level=ResearchDepth.SURVEY
         )
 
-        result = await service.generate_research_plan(query)
+        with pytest.raises(Exception, match="API Error"):
+            await service.generate_research_plan(query)
 
-        assert result is not None
-        assert mock_gemini_model.ainvoke.call_count == 3
+        assert mock_gemini_model.ainvoke.call_count == 1
+
+    async def test_structured_generation_does_not_reask_by_default(
+        self, mock_gemini_model
+    ):
+        from pydantic import BaseModel
+
+        from src.services.gemini_service import GeminiService
+
+        class Shape(BaseModel):
+            value: int
+
+        service = GeminiService(api_key="test-key")
+        bad = MagicMock()
+        bad.content = "not json"
+        mock_gemini_model.ainvoke.return_value = bad
+        service.model = mock_gemini_model
+
+        with pytest.raises(ValueError):
+            await service.generate_structured_content("p", Shape)
+
+        assert mock_gemini_model.ainvoke.call_count == 1
+
+    async def test_result_keeps_finish_reason_and_reported_usage(
+        self, mock_gemini_model
+    ):
+        from src.services.gemini_service import GeminiService
+
+        service = GeminiService(api_key="test-key")
+        message = MagicMock()
+        message.content = "text"
+        message.response_metadata = {"finish_reason": "MAX_TOKENS"}
+        message.usage_metadata = {
+            "input_tokens": 7,
+            "output_tokens": 3,
+            "total_tokens": 10,
+        }
+        mock_gemini_model.ainvoke.return_value = message
+        service.model = mock_gemini_model
+
+        result = await service.generate_content_result("p")
+
+        assert result.finish_reason == "MAX_TOKENS"
+        assert (result.prompt_tokens, result.completion_tokens) == (7, 3)
+        assert result.total_tokens == 10
+
+    async def test_unreported_usage_is_none_not_zero(self, mock_gemini_model):
+        from src.services.gemini_service import GeminiService
+
+        service = GeminiService(api_key="test-key")
+        service.model = mock_gemini_model  # a bare MagicMock message reports nothing
+
+        result = await service.generate_content_result("p")
+
+        assert result.total_tokens is None and result.finish_reason is None
+
+    async def test_direct_call_records_llm_call_metrics_once(self, mock_gemini_model):
+        from src.services.gemini_service import GeminiService
+
+        service = GeminiService(api_key="test-key", model_name="gemini-pro")
+        message = MagicMock()
+        message.content = "text"
+        message.usage_metadata = {
+            "input_tokens": 7,
+            "output_tokens": 3,
+            "total_tokens": 10,
+        }
+        mock_gemini_model.ainvoke.return_value = message
+        service.model = mock_gemini_model
+
+        with patch("src.services.gemini_service.record_llm_call") as record:
+            await service.generate_content("p")
+            await service.generate_content_result("p", record_metrics=False)
+
+        record.assert_called_once()
+        metrics = record.call_args.args[0]
+        assert (metrics.provider, metrics.model) == ("gemini", "gemini-pro")
+        assert (metrics.prompt_tokens, metrics.completion_tokens) == (7, 3)
+        assert metrics.success is True
+
+    async def test_failed_call_is_recorded_as_unsuccessful(self, mock_gemini_model):
+        from src.services.gemini_service import GeminiService
+
+        service = GeminiService(api_key="test-key")
+        mock_gemini_model.ainvoke.side_effect = Exception("down")
+        service.model = mock_gemini_model
+
+        with (
+            patch("src.services.gemini_service.record_llm_call") as record,
+            pytest.raises(Exception, match="down"),
+        ):
+            await service.generate_content("p")
+
+        assert record.call_args.args[0].success is False
+
+    async def test_breaker_stops_calls_to_a_provider_that_keeps_failing(
+        self, mock_gemini_model
+    ):
+        from src.services.gemini_service import GeminiCircuitOpenError, GeminiService
+
+        service = GeminiService(api_key="test-key")
+        mock_gemini_model.ainvoke.side_effect = TimeoutError("down")
+        service.model = mock_gemini_model
+
+        for _ in range(5):
+            with pytest.raises(TimeoutError):
+                await service.generate_content("p")
+        with pytest.raises(GeminiCircuitOpenError):
+            await service.generate_content("p")
+
+        assert mock_gemini_model.ainvoke.call_count == 5
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            lambda: __import__("google.genai.errors", fromlist=["x"]).ServerError(
+                503, {}
+            ),
+            lambda: __import__("google.genai.errors", fromlist=["x"]).ClientError(
+                429, {}
+            ),
+            lambda: ConnectionError("reset"),
+        ],
+    )
+    async def test_provider_side_failures_open_the_breaker(
+        self, mock_gemini_model, error
+    ):
+        from src.services.gemini_service import GeminiCircuitOpenError, GeminiService
+
+        service = GeminiService(api_key="test-key")
+        mock_gemini_model.ainvoke.side_effect = lambda *_: (_ for _ in ()).throw(
+            error()
+        )
+        service.model = mock_gemini_model
+
+        for _ in range(5):
+            with pytest.raises(Exception):  # noqa: B017 - type varies by case
+                await service.generate_content("p")
+        with pytest.raises(GeminiCircuitOpenError):
+            await service.generate_content("p")
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            lambda: __import__("google.genai.errors", fromlist=["x"]).ClientError(
+                400, {}
+            ),
+            lambda: ValueError("prompt too long"),
+        ],
+    )
+    async def test_caller_caused_failures_never_open_the_breaker(
+        self, mock_gemini_model, error
+    ):
+        """One tenant's bad prompts must not take Gemini away from everyone."""
+        from src.services.gemini_service import GeminiService
+
+        service = GeminiService(api_key="test-key")
+        mock_gemini_model.ainvoke.side_effect = lambda *_: (_ for _ in ()).throw(
+            error()
+        )
+        service.model = mock_gemini_model
+
+        for _ in range(10):
+            with pytest.raises(Exception):  # noqa: B017 - type varies by case
+                await service.generate_content("p")
+
+        assert mock_gemini_model.ainvoke.call_count == 10
+
+    async def test_a_wrapped_provider_error_still_counts(self, mock_gemini_model):
+        from src.services.gemini_service import GeminiCircuitOpenError, GeminiService
+
+        def wrapped(*_):
+            try:
+                raise TimeoutError("upstream")
+            except TimeoutError as cause:
+                raise RuntimeError("langchain wrapper") from cause
+
+        service = GeminiService(api_key="test-key")
+        mock_gemini_model.ainvoke.side_effect = wrapped
+        service.model = mock_gemini_model
+
+        for _ in range(5):
+            with pytest.raises(RuntimeError):
+                await service.generate_content("p")
+        with pytest.raises(GeminiCircuitOpenError):
+            await service.generate_content("p")
+
+    async def test_the_sdk_client_makes_one_request_per_call(self, monkeypatch):
+        from src.services import gemini_service as module
+
+        seen: dict = {}
+
+        def capture(**kwargs):
+            seen.update(kwargs)
+
+        monkeypatch.setattr(module, "ChatGoogleGenerativeAI", capture)
+        module.GeminiService(api_key="test-key")
+
+        # The SDK default is 6 resends, each billed, under one reservation.
+        assert seen["max_retries"] == 1
 
     async def test_rate_limiting(self, mock_gemini_model, redis_client):
         """Test that rate limiting works correctly."""

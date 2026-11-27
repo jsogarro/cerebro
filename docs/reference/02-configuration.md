@@ -89,7 +89,7 @@ A field is listed here when a production module outside `src/core/config.py` rea
 | `MASR_ENABLE_ADAPTIVE` | `true` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) | older history-based strategy heuristic (`adaptive_strategy_enabled`); it applies once the metrics collector holds more than 100 history entries and never enables the Thompson-sampling allocator |
 | `MASR_FAST_PATH_ENABLED` | `true` | `src/ai_brain/router/masr.py` (`MASRouter._should_use_fast_path`) | allows simple single-domain queries to bypass orchestration |
 | `AGENTS_MAX_WORKERS_PER_SUPERVISOR` | `10` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) | `max_agents`, the upper bound on agents per query |
-| `COST_MAX_PER_REQUEST` | `0.1` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) | copied to `MASRouter.cost_threshold`; no other code reads that attribute, so the value limits nothing |
+| `COST_MAX_PER_REQUEST` | `0.1` | `src/ai_brain/router/factory.py` (`settings_to_router_config`) | copied to `MASRouter.cost_threshold` and to `CostOptimizer.max_cost_per_request`, the ceiling the optimizer applies per request |
 
 ### Adaptive routing
 
@@ -226,7 +226,7 @@ The table lists 96 rows: 95 fields of `Settings` and `OTEL_EXPORTER_OTLP_ENDPOIN
 | `GEMINI_ENABLED` | `true` | Provider switches and model router |
 | `OPENROUTER_ENABLED` | `false` | Provider switches and model router |
 | `MODEL_ROUTER_HEALTH_CHECK_INTERVAL` | `300` | Provider switches and model router |
-| `MODEL_ROUTER_MAX_RETRIES` | `3` | Provider switches and model router |
+| `MODEL_ROUTER_MAX_RETRIES` | `1` | Maximum attempts for one governed model call. Attempts beyond the first are taken only after a transport error the provider documents as unbilled; each has its own reservation |
 | `MODEL_ROUTER_ENABLE_FALLBACK` | `true` | Provider switches and model router |
 | `MEMORY_ENABLE_CROSS_TIER` | `true` | Memory tiers |
 | `MEMORY_MAX_RECALL_ITEMS` | `10` | Memory tiers |
@@ -296,7 +296,7 @@ Notes on specific rows:
 - `LOG_LEVEL` is the minimum level of the structlog events the API process emits (`configure_logging` in `src/core/observability.py`, called when `src.api.main` is imported). It takes a standard level name in any case; any other value stops the process at startup. Uvicorn's own access and error logs do not follow it.
 - `DEEPSEEK_ENABLED`, `LLAMA_ENABLED`, `GEMINI_ENABLED` and `OPENROUTER_ENABLED` are emitted into the provider configuration, but `_build_plan_route` overwrites `enabled` with true and no other path reads them. `MODEL_PROVIDERS_ENABLED` is emitted as `providers["enabled"]`, which no code reads.
 - `MODEL_ROUTER_*` values are not passed to `ModelRouter`, which reads `health_check_interval`, `max_retries` and `enable_fallback` from its own configuration dictionary with its own defaults.
-- `CLOUD_RUN_*`, `PERF_*`, `COST_DAILY_BUDGET_LIMIT`, `COST_ENABLE_BUDGET_ALERTS` and `COST_OPTIMIZATION_ENABLED` configure nothing. `COST_MAX_PER_REQUEST` is the only `COST_*` field read, and its value limits nothing (see the MASR table).
+- `CLOUD_RUN_*`, `PERF_*`, `COST_DAILY_BUDGET_LIMIT`, `COST_ENABLE_BUDGET_ALERTS` and `COST_OPTIMIZATION_ENABLED` configure nothing. `COST_MAX_PER_REQUEST` is the only `COST_*` field read (see the MASR table).
 - `AI_BRAIN_ENABLED` and `AI_BRAIN_MODE` are read only by `Settings.is_ai_brain_mode` and `Settings.is_research_only_mode`, which have no callers.
 
 ## Environment variables read outside Settings

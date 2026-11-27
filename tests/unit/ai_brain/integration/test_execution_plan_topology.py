@@ -371,14 +371,18 @@ def _wired_bridge(
             cost_estimate=0.0,
         )
 
+    # An explicitly zero-priced fixture provider: an unpriced route is refused.
     router = SimpleNamespace(
         route_and_generate=route_and_generate,
-        registry=SimpleNamespace(providers={}),
+        registry=SimpleNamespace(
+            providers={"fixture": SimpleNamespace(estimate_cost=lambda *_: 0.0)}
+        ),
     )
+    decision = {"primary_model": {"provider": "fixture", "name": "m"}}
     monkeypatch.setattr(
         LLMWorkerAgentBase,
         "_build_plan_route",
-        lambda self, policy: _GenerationRoute(router, {}, True),
+        lambda self, policy: _GenerationRoute(router, decision, True),
     )
     monkeypatch.setattr(
         "src.ai_brain.integration.masr_supervisor_bridge._mcp_tool_path_enabled",

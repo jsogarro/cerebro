@@ -88,6 +88,7 @@ The models declare 34 tables.
 | `agent_capability_grants` | `AgentCapabilityGrant` | `capability.py` | `organization_id`, nullable | `tenant_isolation_agent_capability_grants` | no | tool boundary |
 | `agent_capability_approvals` | `AgentCapabilityApproval` | `capability.py` | `organization_id`, nullable | `tenant_isolation_agent_capability_approvals` | no | tool boundary |
 | `agent_tool_invocations` | `AgentToolInvocation` | `tool_invocation.py` | `organization_id`, nullable | `tenant_isolation_agent_tool_invocations` | no | tool boundary |
+| `model_call_reservations` | `ModelCallReservation` | `model_call_reservation.py` | `organization_id`, not null | `tenant_isolation_model_call_reservations` | no | model-call journal |
 | `agent_artifacts` | `AgentArtifact` | `artifact.py` | `organization_id`, nullable | `tenant_isolation_agent_artifacts` | no | tool boundary and evidence |
 | `agent_evidence` | `AgentEvidence` | `evidence.py` | `organization_id`, nullable | `tenant_isolation_agent_evidence` | yes | tool boundary and evidence |
 | `agent_claim_supports` | `AgentClaimSupport` | `claim_support.py` | `organization_id`, nullable | `tenant_isolation_agent_claim_supports` | yes | tool boundary and evidence |
@@ -137,6 +138,7 @@ Columns: `workflow_id`, `project_id` (foreign key to `research_projects.id`), `r
 - `agent_run_events`, `agent_run_event_outbox`: the ordered event log and its delivery outbox.
 - `agent_capability_grants`, `agent_capability_approvals`: capability grants issued at admission and approvals bound to a request fingerprint; see [tool boundary and evidence](09-tool-boundary-and-evidence.md).
 - `agent_tool_invocations`: one row per mediated tool call, with idempotency key, trust labels, capability decision fields and lease columns.
+- `model_call_reservations`: one row per external model call a governed owner makes, committed before admission and marked `may_have_sent` before dispatch. It holds ids, counts and a price digest, never prompts or responses. A call settles once out of `open` as `settled_known` (reported usage), `settled_unknown` (reserved amounts kept as an uncertain bound) or `released_unsent` (provably never sent). `ModelCallReservationRepository` filters every read and write by organization, locks the owner row to serialize concurrent reservations, and fences settlement; nothing calls it in production yet.
 - `agent_artifacts`: content-addressed outputs, including the final report of a run and source snapshots.
 - `agent_evidence`: citations of snapshot spans, each referencing an artifact and optionally the invocation that produced it.
 - `agent_claim_supports`: one verdict row per material claim of an artifact.
@@ -229,6 +231,7 @@ Alembic scripts are in `alembic/versions/`; `alembic/env.py` reads `DATABASE_URL
 | `a7d2e9c4b1f8` | `document_critiques`, `critique_findings`; row-level security |
 | `b5e1c8d3a9f7` | `agent_execution_authorities`; row-level security (the append-only guard is ORM-only, with no database trigger) |
 | `b8e3f1a5c7d9` | `similarity_checks`, `similarity_matches`, `egress_events`; row-level security |
+| `c4d7a2e9f1b6` | `model_call_reservations` with its CHECKs, unique call id per organization and tenant policy |
 
 Migrations that create row-level security or triggers do so inside an `_is_postgresql()` guard; on another dialect they create tables and indexes only.
 

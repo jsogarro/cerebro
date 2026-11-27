@@ -35,6 +35,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from src.agents.llm_worker_base import PlanProviderUnavailableError
 from src.core.budget import (
     BUDGET_LEDGER_CONTEXT_KEY,
     BudgetExceededError,
@@ -2364,10 +2365,11 @@ class DirectExecutionService:
     @retry(
         stop=stop_after_attempt(_WORKFLOW_MAX_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        # An exhausted budget stays exhausted, and a cancelled run must not be
-        # restarted by the retry wrapper.
+        # An exhausted budget stays exhausted, a fail-closed provider error is
+        # one attempt (a retry would spend again on a provider the plan cannot
+        # replace), and a cancelled run must not be restarted by the wrapper.
         retry=retry_if_not_exception_type(
-            (BudgetExceededError, asyncio.CancelledError)
+            (BudgetExceededError, PlanProviderUnavailableError, asyncio.CancelledError)
         ),
     )
     async def _execute_research_workflow(
@@ -2541,8 +2543,11 @@ class DirectExecutionService:
             self.execution_stats["failed_executions"] += 1
 
             budget_error = e if isinstance(e, BudgetExceededError) else None
-            if budget_error is None and (
-                execution_status.retry_count < _WORKFLOW_MAX_ATTEMPTS
+            provider_failed = isinstance(e, PlanProviderUnavailableError)
+            if (
+                budget_error is None
+                and not provider_failed
+                and execution_status.retry_count < _WORKFLOW_MAX_ATTEMPTS
             ):
                 # This attempt failed; the run has not. Recording FAILED here
                 # would make the run durably terminal and immutable, so every
@@ -2565,6 +2570,8 @@ class DirectExecutionService:
                     "usage": execution_status._budget_ledger.usage_payload(),
                 }
                 execution_status.failure_code = budget_error.code
+            elif provider_failed:
+                execution_status.failure_code = "PLAN_PROVIDER_UNAVAILABLE"
             outcome = await self._persist_transition(
                 execution_status,
                 run_target=RunStatus.FAILED,

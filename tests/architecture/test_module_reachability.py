@@ -51,6 +51,9 @@ KNOWN_UNREACHABLE: frozenset[str] = frozenset(
         "src.core.evaluation.events",
         "src.core.evaluation.registry",
         "src.repositories.evaluation_result_repository",
+        # Its production callers are the run-recovery and evaluator-lease owners
+        # (P03-B, P10-A, P12); delete this line when the first one lands.
+        "src.repositories.model_call_reservation_repository",
         "src.services.evaluation_regression",
         # Launch contract frozen ahead of its callers; durable launch wires it.
         "src.api.services.workflow_launch_service",

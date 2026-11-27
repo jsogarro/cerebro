@@ -49,6 +49,7 @@ class CircuitBreaker:
     __slots__ = (
         "_consecutive_failures",
         "_cooldown",
+        "_epoch",
         "_half_open_in_flight",
         "_opened_at",
         "_state",
@@ -71,6 +72,12 @@ class CircuitBreaker:
         self._consecutive_failures = 0
         self._opened_at: datetime | None = None
         self._half_open_in_flight = False
+        self._epoch = 0
+
+    @property
+    def epoch(self) -> int:
+        """Counts trips. A caller that read it when admitted can report it back."""
+        return self._epoch
 
     @property
     def state(self) -> BreakerState:
@@ -97,7 +104,21 @@ class CircuitBreaker:
             return True
         return False
 
-    def record_success(self) -> None:
+    def _is_stale(self, epoch: int | None) -> bool:
+        """Whether an outcome belongs to a call admitted before the latest trip.
+
+        An open breaker admits nothing, so any outcome arriving then is from a
+        call admitted earlier and says nothing about recovery. In ``HALF_OPEN``
+        only a caller that reports its admission epoch can be told apart from
+        the trial.
+        """
+        return self._state is BreakerState.OPEN or (
+            epoch is not None and epoch != self._epoch
+        )
+
+    def record_success(self, *, epoch: int | None = None) -> None:
+        if self._is_stale(epoch):
+            return
         self._state = BreakerState.CLOSED
         self._consecutive_failures = 0
         self._opened_at = None
@@ -119,7 +140,7 @@ class CircuitBreaker:
 
         self._half_open_in_flight = False
 
-    def record_failure(self, now: datetime) -> None:
+    def record_failure(self, now: datetime, *, epoch: int | None = None) -> None:
         """Count a failure, opening once the threshold is reached.
 
         A failure during the half-open trial reopens immediately rather than
@@ -128,6 +149,8 @@ class CircuitBreaker:
         just demonstrated it is still down.
         """
 
+        if self._is_stale(epoch):
+            return
         self._half_open_in_flight = False
         if self._state is BreakerState.HALF_OPEN:
             self._open(now)
@@ -138,6 +161,7 @@ class CircuitBreaker:
 
     def _open(self, now: datetime) -> None:
         self._state = BreakerState.OPEN
+        self._epoch += 1
         self._opened_at = now
         self._consecutive_failures = self._threshold
 

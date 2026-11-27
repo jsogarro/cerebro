@@ -12,10 +12,10 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 | Collaboration mode selection and fast path | Active | `MASRouter.route` | `src/ai_brain/router/masr.py` (`MASRouter._determine_collaboration_mode`) |
 | Routing strategies | Active | `MASRouter.route`, `POST /api/v1/masr/route` | `src/ai_brain/router/routing_types.py` (`RoutingStrategy`) |
 | Model selection and cost estimate | Active | `MASRouter.route` | `src/ai_brain/router/cost_optimizer.py` (`CostOptimizer`) |
-| `COST_MAX_PER_REQUEST` | Not wired | `settings_to_router_config` | `src/ai_brain/router/masr.py` (`MASRouter.cost_threshold`) |
+| `COST_MAX_PER_REQUEST` | Active | `settings_to_router_config` | `src/ai_brain/router/cost_optimizer.py` (`CostOptimizer.max_cost_per_request`) |
 | Hierarchical cost model | Not wired | none | `src/ai_brain/router/hierarchical_cost_model.py` (`HierarchicalCostOptimizer`) |
 | Routing decision cache | Active | `MASRouter.route` | `src/ai_brain/router/routing_cache.py` (`RoutingCacheManager`) |
-| Routing circuit breaker | Active | `MASRouter.route` | `src/reliability/retry_strategies.py` (`CircuitBreaker`) |
+| Routing circuit breaker | Active | `MASRouter.route` | `src/core/tools/circuit.py` (`CircuitBreaker`) |
 | MASR HTTP API (8 routes) | Active | `/api/v1/masr/*` | `src/api/routes/masr_api.py` (`router`) |
 | `POST /api/v1/masr/feedback` learning | Not wired | `MASRRoutingService.submit_feedback` | `src/api/services/masr_routing_service.py` (`SupervisionFeedbackLearner`) |
 | History-based strategy heuristic | Active | `MASRouter._select_routing_strategy` | `src/ai_brain/router/routing_metrics.py` (`RoutingMetricsCollector.get_adaptive_strategy`) |
@@ -122,7 +122,7 @@ The application constructs `MASRouter` with `model_config_manager=None` (`create
 
 `MAX_PARALLEL_WORKERS` (default 5) and `AGENTS_MAX_WORKERS_PER_SUPERVISOR` (default 10) are mapped by `settings_to_router_config` to `max_parallel` and `max_agents`, which bound `parallel` and `hierarchical` allocations.
 
-> **Not wired.** `COST_MAX_PER_REQUEST` (default 0.10) is mapped to the router key `max_cost` and stored as `MASRouter.cost_threshold`. Nothing reads `cost_threshold`, and the optimizer's own `max_cost_per_request` limit is not set from the setting.
+`COST_MAX_PER_REQUEST` (default 0.10) is mapped to the router key `max_cost` (stored as `MASRouter.cost_threshold`, which nothing reads) and to `cost_optimizer.max_cost_per_request`, the per-request ceiling `CostOptimizer` applies when it filters models.
 
 ### Hierarchical cost model
 
@@ -132,7 +132,7 @@ The application constructs `MASRouter` with `model_config_manager=None` (`create
 
 `RoutingCacheManager` (`src/ai_brain/router/routing_cache.py`) holds routing decisions in process memory when `MASR_ENABLE_CACHING` is `true` (default). The key is an MD5 hash of the lower-cased, stripped query, `context["user_id"]`, `context["domain"]`, the requested strategy and the constraints. `MASR_CACHE_MAX_SIZE` (default 1000) bounds the cache; when it is exceeded, the `MASR_CACHE_EVICTION_BATCH_SIZE` (default 100) entries with the oldest decision timestamp are removed. A cache hit does not refresh an entry. The cache is bypassed and never written when adaptive allocation is enabled or the request carries the fixture execution policy.
 
-`MASRouter` runs the whole routing body inside a `CircuitBreaker` named `masr_router` with `failure_threshold` 5, `success_threshold` 2 and `timeout` 60 seconds. While the breaker is open the call is rejected, and `route` returns the fallback decision described under [Role in execution](#role-in-execution). The breaker is exposed as `MASRouter.routing_circuit_breaker`.
+`MASRouter` runs the whole routing body through the shared `CircuitBreaker` (`src/core/tools/circuit.py`, the same implementation `GeminiService` uses) with `circuit_failure_threshold` 5 and `circuit_timeout_seconds` 60 as its cooldown. While the breaker is open the pass is rejected, and `route` returns the fallback decision described under [Role in execution](#role-in-execution). After the cooldown the breaker admits one trial pass: its success closes the breaker, its failure reopens it, and a cancelled trial gives the slot back without counting as either. An outcome from a call admitted before the breaker opened is ignored, so a late success cannot close an open breaker. The breaker is exposed as `MASRouter.routing_circuit_breaker`.
 
 ## MASR HTTP API
 
@@ -268,7 +268,7 @@ Two offline scripts evaluate the allocation policy without enabling it; see the 
 - `src/ai_brain/router/execution_plan_compiler.py`: `ExecutionPlanCompiler`
 - `src/ai_brain/experimentation/core/adaptive_allocation_engine.py`: `AdaptiveAllocationEngine`
 - `src/ai_brain/experimentation/eval/adaptive_routing_eval.py`, `adaptive_routing_promotion.py`: offline evaluation and promotion gate
-- `src/reliability/retry_strategies.py`: `CircuitBreaker`
+- `src/core/tools/circuit.py`: `CircuitBreaker`
 - `src/core/contracts/execution_plan.py`: `CollaborationMode`, `COLLABORATION_MODE_SUPPORT`
 - `src/api/routes/masr_api.py`: HTTP routes
 - `src/models/masr_api_models.py`: request and response models
