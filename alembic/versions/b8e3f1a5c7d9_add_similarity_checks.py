@@ -1,7 +1,7 @@
 """Add similarity checks, their matches and the egress audit rows.
 
 Revision ID: b8e3f1a5c7d9
-Revises: a7d2e9c4b1f8
+Revises: b5e1c8d3a9f7
 Create Date: 2026-11-26
 
 All three tables cascade or detach in the database, since erasure uses core
@@ -17,7 +17,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "b8e3f1a5c7d9"
-down_revision: str | Sequence[str] | None = "a7d2e9c4b1f8"
+down_revision: str | Sequence[str] | None = "b5e1c8d3a9f7"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

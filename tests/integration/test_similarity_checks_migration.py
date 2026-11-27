@@ -82,7 +82,7 @@ async def connection_fixture(migrated: str) -> AsyncIterator[AsyncConnection]:
     await engine.dispose()
 
 
-def test_there_is_exactly_one_head_and_it_chains_on_the_critiques_revision() -> None:
+def test_one_head_chained_on_the_execution_authorities_revision() -> None:
     heads = [
         line for line in _alembic("postgresql://x/y", "heads").splitlines() if line
     ]
@@ -90,7 +90,7 @@ def test_there_is_exactly_one_head_and_it_chains_on_the_critiques_revision() -> 
     revisions = list((REPO_ROOT / "alembic" / "versions").glob("*similarity_checks.py"))
     assert len(revisions) == 1
     assert (
-        'down_revision: str | Sequence[str] | None = "a7d2e9c4b1f8"'
+        'down_revision: str | Sequence[str] | None = "b5e1c8d3a9f7"'
         in revisions[0].read_text()
     )
 
