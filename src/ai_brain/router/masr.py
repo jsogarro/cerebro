@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -148,6 +148,16 @@ class MASRouter:
     # coupling to the analyzer's GENERAL penalty (query_analyzer.py); if that
     # penalty changes, revisit this constant and the fast-path tests.
     _FAST_PATH_UNCERTAINTY_CEILING = 0.3
+
+    # Registered agent names (AGENT_KEYS). Domains absent here have no
+    # registered worker, so their queries cannot take the fast path.
+    _FAST_PATH_WORKERS = {
+        "research": "literature_review",
+        "general": "literature_review",
+        "content": "drafting",
+        "analytics": "data_analysis",
+        "finance": "financial_analysis",
+    }
 
     def __init__(
         self,
@@ -423,6 +433,12 @@ class MASRouter:
                         complexity_analysis, optimization_result
                     )
 
+                    if collaboration_mode == CollaborationMode.FAST_PATH:
+                        # The plan admits no provider substitution.
+                        optimization_result = replace(
+                            optimization_result, fallback_models=[]
+                        )
+
                     # Step 3.5: Query episodic memory for routing prior (if enabled)
                     episodic_prior = (
                         await self._get_episodic_routing_prior(
@@ -630,10 +646,16 @@ class MASRouter:
         return (
             complexity_analysis.level == ComplexityLevel.SIMPLE
             and len(complexity_analysis.domains) == 1
+            and self._domain_name(complexity_analysis.domains[0])
+            in self._FAST_PATH_WORKERS
             and complexity_analysis.subtask_count == 1
             and complexity_analysis.uncertainty <= self._FAST_PATH_UNCERTAINTY_CEILING
             and "critical" not in complexity_analysis.priority_level
         )
+
+    @staticmethod
+    def _domain_name(domain: Any) -> str:
+        return str(getattr(domain, "value", domain))
 
     def _determine_collaboration_mode(
         self,
@@ -1494,11 +1516,17 @@ class MASRouter:
 
         # Base allocation by collaboration mode
         if collaboration_mode == CollaborationMode.FAST_PATH:
-            # Fast path: no supervisor, single LLM call
+            # One registered worker and no supervisor: the compiled plan
+            # requires exactly one worker and rejects a supervisor type
+            # without a supervisor node.
             return AgentAllocation(
-                supervisor_type=primary_supervisor,  # Placeholder (not used)
+                supervisor_type=None,
                 worker_count=1,
-                worker_types=[],  # No workers (direct LLM call)
+                worker_types=[
+                    self._FAST_PATH_WORKERS[
+                        self._domain_name(complexity_analysis.domains[0])
+                    ]
+                ],
                 max_parallel=1,
                 timeout_seconds=SHORT_TIMEOUT,
                 retry_attempts=MIN_RETRY_ATTEMPTS,

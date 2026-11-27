@@ -224,3 +224,40 @@ class TestStrategyBudgets:
 
         # DEBATE normally fixed at 3, budget cap is also 3 for COST_EFFICIENT
         assert allocation.worker_count == 3, "DEBATE should use 3 workers"
+
+
+class TestFastPathWorker:
+    """The fast path names one concrete, registered worker and no fallbacks."""
+
+    @pytest.fixture
+    def router(self):
+        return MASRouter(config={"default_strategy": "balanced"})
+
+    @pytest.mark.parametrize(
+        ("domain", "worker"),
+        [
+            ("research", "literature_review"),
+            ("general", "literature_review"),
+            ("content", "drafting"),
+            ("analytics", "data_analysis"),
+            ("finance", "financial_analysis"),
+        ],
+    )
+    def test_fast_path_allocates_exactly_one_registered_worker(
+        self, router, domain, worker
+    ):
+        from src.core.kernel.component_keys import AGENT_KEYS
+
+        allocation = router._allocate_agents(
+            make_complexity(domains=[domain]), CollaborationMode.FAST_PATH, None, None
+        )
+        assert allocation.worker_types == [worker]
+        assert allocation.worker_count == 1
+        assert allocation.supervisor_type is None
+        assert worker in AGENT_KEYS
+
+    @pytest.mark.parametrize("domain", ["service", "multimodal"])
+    def test_domain_without_a_registered_worker_does_not_fast_path(
+        self, router, domain
+    ):
+        assert router._should_use_fast_path(make_complexity(domains=[domain])) is False
