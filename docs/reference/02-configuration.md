@@ -176,14 +176,6 @@ A field is listed here when a production module outside `src/core/config.py` rea
 | `LANGFUSE_SECRET_KEY` | unset | `src/core/tracing.py` (`_initialize_langfuse`) | required when enabled; same rule as the public key |
 | `LANGFUSE_HOST` | unset | `src/core/tracing.py` (`_initialize_langfuse`) | Langfuse server URL; unset uses Langfuse cloud |
 
-### WebSocket development bypass
-
-> **Off by default.** With `ENVIRONMENT=development` and `DEV_ALLOW_ANONYMOUS_WEBSOCKETS=true` both set, project authorization is skipped for callers who authenticated. It does not admit a connection without a token: every WebSocket route requires one.
-
-| Setting | Default | Read by | Effect |
-|---|---|---|---|
-| `DEV_ALLOW_ANONYMOUS_WEBSOCKETS` | `false` | `src/api/websocket/auth.py` (`verify_websocket_claims`, `verify_project_access`) | with `ENVIRONMENT=development`, `verify_project_access` returns `True` without checking project ownership; a WebSocket connection still needs a token |
-
 Notes on the provider rows:
 
 - The `DEEPSEEK_*`, `LLAMA_*` and `GEMINI_DEFAULT_MODEL` rows reach providers only through `Settings.get_ai_brain_config()["providers"]`. That method has one production caller, `_build_plan_route` in `src/agents/llm_worker_base.py`. It reads only the entry for the plan's primary provider and forces `enabled` to true for it.
