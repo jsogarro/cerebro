@@ -407,6 +407,38 @@ async def test_an_allowed_call_writes_one_row_and_two_events(
 
 
 @pytest.mark.asyncio
+async def test_two_workers_sharing_a_root_attempt_each_get_their_own_invocation(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    handler_calls: list[str] = []
+
+    async def counting_search(
+        args: SearchInput, context: ToolCallContext
+    ) -> dict[str, Any]:
+        handler_calls.append(args.query)
+        return {"hits": 1}
+
+    boundary = _boundary(
+        SessionToolAuditStore(session_factory, clock=lambda: NOW),
+        handler=counting_search,
+    )
+    kwargs = _call_kwargs(grants=_grants())
+
+    outcomes = await asyncio.gather(
+        boundary.invoke(**kwargs, worker_scope="plan-1:worker-a"),
+        boundary.invoke(**kwargs, worker_scope="plan-1:worker-b"),
+    )
+    retry = await boundary.invoke(**kwargs, worker_scope="plan-1:worker-a")
+
+    assert [o.status for o in outcomes] == [ToolOutcomeStatus.SUCCEEDED] * 2
+    assert retry.status is ToolOutcomeStatus.SUCCEEDED
+    assert len(handler_calls) == 2
+    async with session_factory() as session:
+        invocations = list((await session.scalars(select(AgentToolInvocation))).all())
+    assert len({row.idempotency_key for row in invocations}) == 2
+
+
+@pytest.mark.asyncio
 async def test_a_refused_call_writes_one_row_and_one_event(
     boundary: ToolBoundary,
     session_factory: async_sessionmaker[AsyncSession],
