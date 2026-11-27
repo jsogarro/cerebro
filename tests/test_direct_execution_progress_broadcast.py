@@ -1,15 +1,9 @@
-"""Regression tests for progress-update broadcasting during execution.
+"""Progress updates during execution go out through the typed broadcast path.
 
-`DirectExecutionService._publish_progress_update` used to call
-`EventPublisher.publish_project_event`, a logs-only compatibility shim that
-does NOT fan out over WebSocket. As a result no PROGRESS event ever reached a
-subscribed `/ws` client while a query was running, even though the WebSocket
-auth/subscription plumbing was working.
-
-These tests assert the service uses the typed, actually-broadcasting
-`publish_progress_update` path with a valid `UUID` project id and a
-`ProgressUpdate` payload. They fail on the pre-fix code (which called
-`publish_project_event` and never `publish_progress_update`).
+`DirectExecutionService._publish_progress_update` must call
+`EventPublisher.publish_progress_update` with a valid `UUID` project id and a
+`ProgressUpdate` payload, so a PROGRESS event reaches subscribed `/ws` clients
+while a query is running.
 """
 
 import uuid
@@ -31,7 +25,7 @@ def service() -> DirectExecutionService:
     return svc
 
 
-async def test_progress_update_is_broadcast_not_logged_only(
+async def test_progress_update_is_broadcast(
     service: DirectExecutionService,
 ) -> None:
     project_id = str(uuid.uuid4())
@@ -46,9 +40,7 @@ async def test_progress_update_is_broadcast_not_logged_only(
 
     await service._publish_progress_update(status)
 
-    # Must use the broadcasting path, not the logs-only shim.
     service.event_publisher.publish_progress_update.assert_awaited_once()
-    service.event_publisher.publish_project_event.assert_not_called()
 
     call = service.event_publisher.publish_progress_update.await_args
     sent_project_id, sent_progress = call.args[0], call.args[1]

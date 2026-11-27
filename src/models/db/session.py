@@ -5,7 +5,6 @@ Provides utilities for managing database connections and sessions.
 """
 
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import event, text
@@ -185,40 +184,6 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
-
-
-@asynccontextmanager
-async def get_transaction() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Get database session with transaction.
-
-    Yields:
-        Database session with active transaction
-    """
-    session_factory = get_session_factory()
-
-    async with session_factory() as session, session.begin():
-        try:
-            yield session
-        except Exception:
-            await session.rollback()
-            raise
-
-
-async def execute_in_transaction(func: Any, *args: Any, **kwargs: Any) -> Any:
-    """
-    Execute function in transaction.
-
-    Args:
-        func: Async function to execute
-        *args: Function arguments
-        **kwargs: Function keyword arguments
-
-    Returns:
-        Function result
-    """
-    async with get_transaction() as session:
-        return await func(session, *args, **kwargs)
 
 
 class DatabaseManager:
@@ -411,10 +376,8 @@ async def get_db_manager() -> DatabaseManager:
 __all__ = [
     "DatabaseManager",
     "close_db",
-    "execute_in_transaction",
     "get_db_manager",
     "get_session",
     "get_session_factory",
-    "get_transaction",
     "init_db",
 ]

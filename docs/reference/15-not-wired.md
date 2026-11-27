@@ -11,7 +11,6 @@ This page lists code and settings present in the repository that no production p
 | Learning and self-improvement | Not wired | none | `src/ai_brain/learning/supervision_feedback.py` |
 | Model configuration manager | Not wired | none | `src/ai_brain/config/`, `configs/models/` |
 | Prompt manager and versioning | Not wired | none | `src/prompts/` |
-| Reliability service registry | Not wired | none | `src/reliability/service_registry.py` |
 | Stub packages | Not wired | none | `src/research_platform/` |
 | Citation binding and PDF text extraction | Not wired | none | `src/core/claims/citation_*.py`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py` |
 | Orphan modules | Not wired | none | see [Orphan modules](#orphan-modules) |
@@ -63,12 +62,6 @@ Other modules in the group: `model_schemas.py` is in use: `ModelTier` and `Routi
 `src/prompts/versioning.py` (`PromptVersionManager`) is imported by `UnifiedExperimentManager`, which is itself not wired, and re-exported by `src/prompts/__init__.py`, which loads whenever `src.prompts.manager` is imported. No code constructs or calls it. The prompts the agents send come from Python modules under `src/services/prompts/`, imported by `src/agents/base.py`, `src/agents/literature_review_agent.py`, `src/agents/comparative_analysis_agent.py` and `src/services/gemini_service.py`. Prompt identity pinning is part of the tool boundary; see [tool boundary and evidence](09-tool-boundary-and-evidence.md).
 
 Tests that exercise it: `tests/test_prompt_safety.py`, `tests/test_cache_ttl_expiry.py`.
-
-## Reliability service registry
-
-> **Not wired.** `src/reliability/service_registry.py` defines `ServiceRegistry`, `ServiceDiscovery`, `LoadBalancer` and the helpers `initialize_service_registry`, `get_service_registry` and `get_service_discovery`. `src/reliability/__init__.py` re-exports them, and no code constructs or calls any of them.
-
-The one part of `src/reliability/` in production use is `retry_strategies.CircuitBreaker`, which `MASRouter` uses as its routing circuit breaker.
 
 ## Stub packages
 
@@ -124,7 +117,6 @@ The web workbench pages for workflows, runs, run detail and memory call API rout
 - `src/ai_brain/learning/supervision_feedback.py`: `SupervisionFeedbackLearner`
 - `src/ai_brain/config/`, `configs/models/`: model configuration manager and YAML files
 - `src/prompts/`: `PromptManager`, versioning, templates
-- `src/reliability/`: `service_registry.py` (not wired) and `retry_strategies.py` (used)
 - `src/research_platform/`: stub packages
 - `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`, `src/core/contracts/citation.py`, `src/core/acquisition/pdf_text.py`: citation and PDF text modules (the rest of `src/core/claims/` is the live claim-support path)
 - `tests/architecture/test_module_reachability.py`: import-graph test that lists the modules no entry point reaches

@@ -6,9 +6,8 @@ Implements token bucket algorithm for rate limiting following functional princip
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
 
 
 class RateLimiter:
@@ -129,110 +128,3 @@ class RateLimiter:
         tokens_needed = 1 - current_tokens
         refill_rate = self.rate_limit / self.rate_period
         return tokens_needed / refill_rate
-
-
-class CircuitBreaker:
-    """
-    Circuit breaker for handling API failures.
-
-    Implements circuit breaker pattern with three states:
-    - Closed: Normal operation
-    - Open: Failures exceeded threshold, blocking requests
-    - Half-Open: Testing if service recovered
-    """
-
-    def __init__(
-        self,
-        failure_threshold: int = 5,
-        recovery_timeout: int = 60,
-        expected_exception: type[BaseException] = Exception,
-    ):
-        """
-        Initialize circuit breaker.
-
-        Args:
-            failure_threshold: Number of failures before opening
-            recovery_timeout: Seconds before attempting recovery
-            expected_exception: Exception type to track
-        """
-        self.failure_threshold = failure_threshold
-        self.recovery_timeout = recovery_timeout
-        self.expected_exception = expected_exception
-
-        # State management
-        self._failure_count = 0
-        self._last_failure_time: float | None = None
-        self._state = "closed"  # closed, open, half-open
-        self._lock = asyncio.Lock()
-
-    def _should_attempt_reset(self) -> bool:
-        """
-        Check if circuit breaker should attempt reset.
-
-        Pure function that determines reset eligibility.
-        """
-        if self._state != "open":
-            return False
-
-        if self._last_failure_time is None:
-            return False
-
-        return (time.time() - self._last_failure_time) >= self.recovery_timeout
-
-    async def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        """
-        Call function with circuit breaker protection.
-
-        Args:
-            func: Async function to call
-            *args: Function arguments
-            **kwargs: Function keyword arguments
-
-        Returns:
-            Function result
-
-        Raises:
-            Exception: If circuit is open or function fails
-        """
-        async with self._lock:
-            if self._should_attempt_reset():
-                self._state = "half-open"
-
-            if self._state == "open":
-                raise Exception("Circuit breaker is open")
-
-        try:
-            # Attempt the call
-            result = await func(*args, **kwargs)
-
-            # Success - reset on half-open
-            async with self._lock:
-                if self._state == "half-open":
-                    self._state = "closed"
-                    self._failure_count = 0
-
-            return result
-
-        except self.expected_exception as e:
-            async with self._lock:
-                self._failure_count += 1
-                self._last_failure_time = time.time()
-
-                if self._failure_count >= self.failure_threshold:
-                    self._state = "open"
-
-            raise e
-
-    def get_state(self) -> str:
-        """Get current circuit breaker state."""
-        return self._state
-
-    def reset(self) -> None:
-        """
-        Reset circuit breaker to closed state.
-
-        Side effect: Resets internal state.
-        """
-        self._state = "closed"
-        self._failure_count = 0
-        self._last_failure_time = None

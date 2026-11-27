@@ -251,7 +251,7 @@ src/
   models/           API models; db/ holds the SQLAlchemy models
   prompts/          Prompt manager, versioning, YAML prompt templates
   qa/               MAST labels and legacy annotation helpers
-  reliability/      Retry strategies and service registry
+  reliability/      Circuit breaker
   repositories/     Database repositories
   research_platform/ Entry point named by the research-platform script
   security/         Audit logger and middleware, security headers, content sanitizer, login throttle

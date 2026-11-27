@@ -22,6 +22,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from src.ai_brain.compaction.constraint_registry import (
+    ConstraintType,
+    ExtractedConstraint,
+)
 from src.models.masr_api_models import MASRErrorResponse
 from src.models.report import ReportMetadata
 from src.models.research_project import ResearchProject, ResearchQuery
@@ -32,10 +36,6 @@ from src.models.websocket_messages import (
     ProgressUpdate,
     WSMessage,
     WSMessageType,
-)
-from src.reliability.service_registry import (
-    ServiceInstance,
-    ServiceMetadata,
 )
 
 # Tolerance: defaults are evaluated at object construction; any drift greater
@@ -68,16 +68,8 @@ def _assert_close_to_now(
     )
 
 
-def _build_service_instance() -> ServiceInstance:
-    return ServiceInstance(
-        metadata=ServiceMetadata(
-            name="svc",
-            version="0.0.1",
-            instance_id="i-1",
-            host="localhost",
-            port=8080,
-        ),
-    )
+def _build_constraint() -> ExtractedConstraint:
+    return ExtractedConstraint(constraint_type=next(iter(ConstraintType)), content="c")
 
 
 # ---------------------------------------------------------------------------
@@ -139,10 +131,8 @@ class TestPydanticDefaultFactories:
 class TestDataclassDefaultFactories:
     """Pin behavior of every @dataclass that uses a default_factory for its timestamp field."""
 
-    def test_service_instance_registered_at_close_to_now(self) -> None:
-        instance = _build_service_instance()
-        _assert_close_to_now(instance.registered_at)
-        _assert_close_to_now(instance.last_heartbeat)
+    def test_extracted_constraint_extracted_at_close_to_now(self) -> None:
+        _assert_close_to_now(_build_constraint().extracted_at)
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +156,8 @@ class TestDatetimeArithmeticInvariants:
         assert first <= second
 
     def test_arithmetic_between_two_dataclass_defaults_produces_timedelta(self) -> None:
-        t1 = _build_service_instance().registered_at
-        t2 = _build_service_instance().registered_at
+        t1 = _build_constraint().extracted_at
+        t2 = _build_constraint().extracted_at
         delta = t2 - t1
         assert isinstance(delta, timedelta)
         assert delta >= timedelta(0)
@@ -176,7 +166,7 @@ class TestDatetimeArithmeticInvariants:
         """Cross-cutting check: Pydantic and dataclass defaults must stay
         compatible with each other (both naive or both aware — never mixed)."""
         pyd_ts = WSMessage(type=WSMessageType.PROGRESS).timestamp
-        dc_ts = _build_service_instance().registered_at
+        dc_ts = _build_constraint().extracted_at
         # Must not raise TypeError "can't subtract offset-naive and offset-aware".
         delta = abs(pyd_ts - dc_ts)
         assert delta <= WALL_CLOCK_TOLERANCE
@@ -256,8 +246,8 @@ class TestNaiveAwareConsistency:
 
     def test_all_dataclass_defaults_have_consistent_tzinfo(self) -> None:
         defaults = [
-            _build_service_instance().registered_at,
-            _build_service_instance().last_heartbeat,
+            _build_constraint().extracted_at,
+            _build_constraint().extracted_at,
         ]
         all_naive = all(d.tzinfo is None for d in defaults)
         all_aware = all(d.tzinfo is not None for d in defaults)
@@ -266,7 +256,7 @@ class TestNaiveAwareConsistency:
     def test_pydantic_and_dataclass_defaults_have_consistent_tzinfo(self) -> None:
         """The whole codebase must agree — Pydantic and dataclasses both."""
         pyd = WSMessage(type=WSMessageType.PROGRESS).timestamp
-        dc = _build_service_instance().registered_at
+        dc = _build_constraint().extracted_at
         assert (pyd.tzinfo is None) == (dc.tzinfo is None), (
             f"Pydantic tzinfo={pyd.tzinfo!r} vs dataclass tzinfo={dc.tzinfo!r} — "
             "partial codemod detected; arithmetic across these will raise TypeError."
