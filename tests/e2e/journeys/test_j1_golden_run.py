@@ -112,9 +112,7 @@ async def test_claim_verdicts_are_exposed(client, new_account):
     )
 
 
-@_missing(
-    "P06", "GET /api/v1/reports/{report_id} returns 500 for the report's own owner"
-)
+@_missing("P06", "the report exposes no citations bound to stored evidence")
 async def test_report_is_generated_and_downloadable(client, db, new_account):
     alice = await new_account("alice")
     project_id = await create_project(client, alice, "report source")
@@ -140,9 +138,13 @@ async def test_report_is_generated_and_downloadable(client, db, new_account):
         if status != "pending":
             break
         await asyncio.sleep(1)
-    assert status != "pending", status
+    assert status == "completed", status
     fetched = await client.get(f"/api/v1/reports/{report_id}", headers=alice.headers)
     assert fetched.status_code == 200, fetched.status_code
-    pytest.fail(
-        "report landed: download Markdown/HTML and map each citation to stored evidence"
+    downloaded = await client.get(
+        f"/api/v1/reports/{report_id}/download/markdown", headers=alice.headers
     )
+    assert downloaded.status_code == 200, downloaded.status_code
+    citations = fetched.json().get("citations")
+    assert citations and all(c.get("evidence_id") for c in citations), fetched.text
+    pytest.fail("citations landed: assert each evidence_id resolves to stored evidence")

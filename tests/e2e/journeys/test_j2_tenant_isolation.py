@@ -64,7 +64,7 @@ async def test_reports_are_invisible_across_organizations(client, new_account):
     integrity = await client.get(
         f"/api/v1/reports/{report_id}/integrity", headers=bob.headers
     )
-    assert "formats_checked" not in integrity.json(), integrity.text
+    assert integrity.status_code == 404, integrity.text
 
 
 async def test_run_event_stream_hides_another_organizations_run(
