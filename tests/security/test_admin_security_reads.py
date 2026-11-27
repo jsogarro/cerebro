@@ -75,9 +75,13 @@ async def test_limit_is_bounded(app: FastAPI, path: str) -> None:
 class _AckDb:
     def __init__(self, alert: Any | None) -> None:
         self.alert = alert
+        self.commits = 0
 
     async def get(self, model: Any, key: Any) -> Any:
         return self.alert if self.alert is not None and key == self.alert.id else None
+
+    async def commit(self) -> None:
+        self.commits += 1
 
 
 def _alert() -> Any:
@@ -126,3 +130,17 @@ async def test_acknowledging_an_unknown_alert_is_404(app: FastAPI) -> None:
     async with _as(app, superuser=True) as client:
         response = await client.post(f"/admin/alerts/{uuid.uuid4()}/acknowledge")
     assert response.status_code == 404
+
+
+async def test_acknowledge_is_committed_before_the_response_is_sent(
+    app: FastAPI,
+) -> None:
+    # The session dependency commits only after the response has gone out, so a
+    # client reading straight after the 200 could still see the old row.
+    alert = _alert()
+    db = _AckDb(alert)
+    app.dependency_overrides[get_session] = lambda: db
+    async with _as(app, superuser=True) as client:
+        response = await client.post(f"/admin/alerts/{alert.id}/acknowledge")
+    assert response.status_code == 200
+    assert db.commits == 1

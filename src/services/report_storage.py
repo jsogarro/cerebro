@@ -179,7 +179,7 @@ class ReportStorageService:
             organization_id=organization_id,
             workflow_id=report.metadata.workflow_id,
             domains=report.domains,
-            configuration=report.configuration.model_dump(mode="json"),
+            configuration=self._configuration(report),
             quality_score=report.metadata.quality_score,
             confidence_score=report.metadata.confidence_score,
             total_sources=report.metadata.total_sources,
@@ -195,6 +195,15 @@ class ReportStorageService:
             generation_time_seconds=report.metadata.generation_time_seconds,
         )
 
+    @staticmethod
+    def _configuration(report: Report) -> dict[str, Any]:
+        """Generation settings plus where the content came from, for the response."""
+        return {
+            **report.configuration.model_dump(mode="json"),
+            "source_kind": report.metadata.source_kind,
+            "evaluation_availability": report.metadata.evaluation_availability,
+        }
+
     def _report_metadata(self, report: Report, storage_path: str) -> dict[str, Any]:
         """Build fields copied from a generated report into its pending row."""
         return {
@@ -202,7 +211,7 @@ class ReportStorageService:
             "report_type": report.configuration.type.value,
             "query": report.query,
             "domains": report.domains,
-            "configuration": report.configuration.model_dump(mode="json"),
+            "configuration": self._configuration(report),
             "quality_score": report.metadata.quality_score,
             "confidence_score": report.metadata.confidence_score,
             "total_sources": report.metadata.total_sources,

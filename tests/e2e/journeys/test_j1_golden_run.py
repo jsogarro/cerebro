@@ -45,17 +45,27 @@ async def test_project_roundtrip_is_persisted_for_the_callers_organization(
     assert project_id in [p["id"] for p in listed.json()]
 
 
-async def test_report_request_creates_a_tenant_owned_row(client, db, new_account):
+async def test_a_report_on_a_project_without_results_is_refused(client, new_account):
     alice = await new_account("alice")
     project_id = await create_project(client, alice, "report source")
+    response = await client.post(
+        "/api/v1/reports/generate",
+        headers=alice.headers,
+        json={"title": "J1", "query": "q", "project_id": project_id},
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "report_source_unavailable"
+
+
+async def test_report_request_creates_a_tenant_owned_row(client, db, new_account):
+    alice = await new_account("alice")
     response = await client.post(
         "/api/v1/reports/generate",
         headers=alice.headers,
         json={
             "title": "J1",
             "query": "q",
-            "project_id": project_id,
-            "user_id": alice.user_id,
+            "workflow_data": {"aggregated_results": {"sources": []}},
         },
     )
     assert response.status_code == 202, response.text

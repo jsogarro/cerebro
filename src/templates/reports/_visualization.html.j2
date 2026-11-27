@@ -1,0 +1,13 @@
+{# The plotted values as an escaped table; every value is autoescaped. #}
+{% macro viz_body(viz) %}
+{% set xs = viz.data.get("labels") or viz.data.get("categories") or viz.data.get("x") or [] %}
+{% set ys = viz.data.get("values") or viz.data.get("y") or [] %}
+<table class="visualization-data">
+    <caption>{{ viz.title }}</caption>
+    <tbody>
+    {% for x in xs %}
+        <tr><td>{{ x }}</td><td>{{ ys[loop.index0] if loop.index0 < ys | length else "" }}</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endmacro %}

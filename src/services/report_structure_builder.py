@@ -1,5 +1,6 @@
 """Build structured report objects from normalized workflow data."""
 
+from collections import Counter
 from typing import Any
 from uuid import uuid4
 
@@ -12,6 +13,11 @@ from src.models.report import (
     ReportSection,
     Visualization,
     VisualizationType,
+    format_score,
+)
+from src.services.chart_specs import (
+    create_confidence_radar_viz,
+    create_source_distribution_viz,
 )
 from src.services.report_config import ReportQualityConfig, ReportTemplateConfig
 
@@ -203,18 +209,28 @@ class ReportStructureBuilder:
     async def build_conclusions_section(
         self, report: Report, results: dict[str, Any]
     ) -> ReportSection | None:
-        confidence_score = results.get("confidence_score", 0.7)
+        confidence_score = results.get("confidence_score")
         metrics = results.get("metrics", {})
 
+        if confidence_score is None:
+            confidence_text = (
+                "Overall confidence in findings: Not evaluated.\n\n"
+                "No confidence was recorded for this content, so no confidence "
+                "level is claimed."
+            )
+        else:
+            confidence_text = (
+                f"Overall confidence in findings: {confidence_score:.2%}\n\n"
+                "The evidence suggests that the research question has been "
+                f"addressed with {self.get_confidence_level(confidence_score)} "
+                "confidence."
+            )
         content = f"""## Conclusions
 
         This research synthesized findings from {metrics.get("total_sources", 0)} sources
         and {metrics.get("total_citations", 0)} citations.
 
-        Overall confidence in findings: {confidence_score:.2%}
-
-        The evidence suggests that the research question has been addressed with
-        {self.get_confidence_level(confidence_score)} confidence.
+        {confidence_text}
         """.strip()
 
         return ReportSection(title="Conclusions", content=content, level=1)
@@ -361,34 +377,42 @@ class ReportStructureBuilder:
         aggregated_results = input_data.get("aggregated_results", {})
 
         sources = aggregated_results.get("sources", [])
-        if sources and len(sources) > 1:
-            year_dist: dict[str, int] = {}
-            for source in sources:
-                year = source.get("year", "Unknown")
-                year_dist[str(year)] = year_dist.get(str(year), 0) + 1
+        if len({str(source.get("year", "Unknown")) for source in sources}) > 1:
+            report.add_visualization(create_source_distribution_viz(sources))
 
-            if len(year_dist) > 1:
-                viz = Visualization(
-                    id="source_distribution",
-                    type=VisualizationType.BAR_CHART,
-                    title="Source Distribution by Year",
-                    data={
-                        "years": list(year_dist.keys()),
-                        "counts": list(year_dist.values()),
-                    },
-                    config={"x_label": "Year", "y_label": "Number of Sources"},
-                    caption=None,
-                    width=None,
-                    height=None,
+        category_confidence = {
+            category: sum(c) / len(c)
+            for category, findings in aggregated_results.get("findings", {}).items()
+            if (
+                c := [
+                    f["confidence"]
+                    for f in findings
+                    if isinstance(f, dict) and f.get("confidence") is not None
+                ]
+            )
+        }
+        if len(category_confidence) >= 3:
+            report.add_visualization(
+                create_confidence_radar_viz(
+                    [name.replace("_", " ").title() for name in category_confidence],
+                    list(category_confidence.values()),
                 )
-                report.add_visualization(viz)
+            )
 
-        if len(report.domains) > 1:
+        # Only domains that sources actually carry are plotted: a pie of
+        # domain names with no measured weight would be decoration.
+        domain_counts = Counter(
+            source["domain"] for source in sources if source.get("domain")
+        )
+        if len(domain_counts) > 1:
             viz = Visualization(
                 id="domain_distribution",
                 type=VisualizationType.PIE_CHART,
-                title="Research Domains Coverage",
-                data={"labels": report.domains, "values": [1] * len(report.domains)},
+                title="Sources by Research Domain",
+                data={
+                    "labels": list(domain_counts),
+                    "values": list(domain_counts.values()),
+                },
                 config={},
                 caption=None,
                 width=None,
@@ -408,10 +432,10 @@ class ReportStructureBuilder:
             total_sources=len(aggregated_results.get("sources", [])),
             total_citations=len(aggregated_results.get("citations", [])),
             agents_used=metadata_input.get("agents_used", []),
-            quality_score=input_data.get("quality_report", {}).get(
-                "quality_score", 0.8
-            ),
-            confidence_score=aggregated_results.get("confidence_score", 0.75),
+            quality_score=input_data.get("quality_report", {}).get("quality_score"),
+            confidence_score=aggregated_results.get("confidence_score"),
+            source_kind=input_data.get("source_kind"),
+            evaluation_availability=input_data.get("evaluation_availability"),
             generation_time_seconds=0.0,
             word_count=0,
             page_count=None,
@@ -434,7 +458,7 @@ class ReportStructureBuilder:
 **Key Outcomes:**
 - Analyzed {len(aggregated_results.get("sources", []))} sources
 - Identified {sum(len(f) for f in aggregated_results.get("findings", {}).values())} key findings
-- Quality Score: {report.metadata.quality_score:.2%}
+- Quality Score: {format_score(report.metadata.quality_score)}
 
 **Main Insights:**
 """

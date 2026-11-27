@@ -34,6 +34,7 @@ from src.services.report_config import (
     create_template_config,
 )
 from src.services.report_output_generator import ReportOutputGenerator
+from src.services.report_source_projection import ReportSourceProjection
 from src.services.report_structure_builder import ReportStructureBuilder
 
 logger = get_logger()
@@ -149,37 +150,36 @@ class ReportGenerator:
             )
 
     async def _extract_input_data(
-        self, request: ReportGenerationRequest
+        self,
+        request: ReportGenerationRequest,
+        projection: ReportSourceProjection | None = None,
     ) -> dict[str, Any]:
-        """
-        Extract and validate input data from the request.
+        """Normalize the report's source into the shape the builder reads.
 
-        This function normalizes data from different sources (project ID or direct data)
-        into a consistent format for report generation.
+        A project request is built only from the repository projection loaded
+        under the authenticated owner; caller-supplied workflow_data never
+        stands in for stored results.
         """
+        if request.project_id is not None:
+            if projection is None:
+                raise ReportGenerationError(
+                    "Project report requires its stored results to be loaded"
+                )
+            return projection.as_input_data()
         if request.workflow_data:
-            return self._validate_workflow_data(request.workflow_data)
+            return ReportSourceProjection.user_supplied(
+                self._validate_workflow_data(request.workflow_data)
+            ).as_input_data()
         raise ReportGenerationError(
-            "No report content provided: workflow_data is required "
-            "(a project_id alone does not load stored results)"
+            "No report content provided: workflow_data is required"
         )
 
     def _validate_workflow_data(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Validate and normalize workflow data."""
-        required_fields = ["title", "query"]
-        for field in required_fields:
+        """Require the identifying fields; leave everything else as supplied."""
+        for field in ("title", "query"):
             if field not in data:
                 raise ReportGenerationError(f"Missing required field: {field}")
-
-        # Ensure expected structure exists
-        if "aggregated_results" not in data:
-            data["aggregated_results"] = {}
-        if "quality_report" not in data:
-            data["quality_report"] = {"passed": True, "issues_found": []}
-        if "metadata" not in data:
-            data["metadata"] = {}
-
-        return data
+        return {"aggregated_results": {}, "metadata": {}, **data}
 
     async def _build_report_structure(
         self, input_data: dict[str, Any], config: ReportConfiguration, report_id: str

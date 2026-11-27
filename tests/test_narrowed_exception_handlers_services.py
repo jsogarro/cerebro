@@ -20,10 +20,6 @@ from src.services.gemini_service import GeminiService
 from src.services.report_generator import ReportGenerator
 from src.services.report_storage import ReportStorageService
 from src.services.template_renderer import TemplateRenderer
-from src.services.visualization_generator import (
-    VisualizationGenerationError,
-    VisualizationGenerator,
-)
 
 
 def _cache_manager(pipeline_error: Exception) -> CacheManager:
@@ -166,26 +162,6 @@ def test_template_validation_unexpected_error_propagates() -> None:
     renderer.env.get_template.side_effect = RuntimeError("bug")
     with pytest.raises(RuntimeError):
         renderer.validate_template("t.html")
-
-
-class TestVisualizationBatch:
-    def _generator(self, error: Exception) -> VisualizationGenerator:
-        generator = VisualizationGenerator.__new__(VisualizationGenerator)
-        generator.settings = SimpleNamespace(
-            enable_visualizations=True, max_visualizations_per_report=5
-        )
-        generator.generate_visualization = MagicMock(side_effect=error)  # type: ignore[method-assign]
-        return generator
-
-    def test_failed_visualization_is_skipped(self) -> None:
-        report = SimpleNamespace(visualizations=[SimpleNamespace(id="a")])
-        generator = self._generator(VisualizationGenerationError("bad chart"))
-        assert generator.generate_report_visualizations(report) == {}  # type: ignore[arg-type]
-
-    def test_unexpected_error_propagates(self) -> None:
-        report = SimpleNamespace(visualizations=[SimpleNamespace(id="a")])
-        with pytest.raises(RuntimeError):
-            self._generator(RuntimeError("bug")).generate_report_visualizations(report)  # type: ignore[arg-type]
 
 
 class TestAllocationUpdates:

@@ -68,6 +68,7 @@ def _pending_report() -> MagicMock:
     report.page_count = 0
     report.quality_score = 0.0
     report.confidence_score = 0.0
+    report.configuration = {}
     report.created_at = datetime.now()
     report.generation_time_seconds = None
     return report

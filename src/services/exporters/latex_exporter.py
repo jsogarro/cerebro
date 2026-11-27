@@ -16,6 +16,7 @@ from src.models.report import (
     ReportFormat,
     ReportOutput,
     ReportSection,
+    source_label,
 )
 from src.services.report_config import ReportSettings
 
@@ -200,6 +201,11 @@ class LaTeXExporter:
 
         title_parts.append("\\maketitle")
 
+        if label := source_label(report.metadata.source_kind):
+            title_parts.append(
+                f"\\begin{{center}}\\textit{{{self._escape_latex(label)}}}\\end{{center}}"
+            )
+
         # Research question box
         title_parts.extend(
             [
@@ -238,10 +244,12 @@ class LaTeXExporter:
                 )
                 title_parts.append("\\hline")
 
-            if report.metadata.quality_score > 0:
-                quality_pct = report.metadata.quality_score * 100
-                title_parts.append(f"Quality Score & {quality_pct:.1f}\\% \\\\")
-                title_parts.append("\\hline")
+            quality = report.metadata.quality_score
+            quality_text = (
+                "Not evaluated" if quality is None else f"{quality * 100:.1f}\\%"
+            )
+            title_parts.append(f"Quality Score & {quality_text} \\\\")
+            title_parts.append("\\hline")
 
             title_parts.extend(
                 [

@@ -40,19 +40,17 @@ def generator(tmp_path: Any) -> ReportGenerator:
 
 
 @pytest.mark.asyncio
-async def test_report_with_project_id_uses_supplied_workflow_data(
+async def test_report_with_project_id_never_uses_caller_workflow_data(
     generator: ReportGenerator,
 ) -> None:
     request = ReportGenerationRequest(
         project_id=uuid4(),
-        workflow_data={"title": "Real title", "query": "Real question"},
+        workflow_data={"title": "Caller title", "query": "Caller question"},
         formats=[ReportFormat.HTML],
     )
 
-    data = await generator._extract_input_data(request)
-
-    assert data["query"] == "Real question"
-    assert data["title"] == "Real title"
+    with pytest.raises(ReportGenerationError, match="stored results"):
+        await generator._extract_input_data(request)
 
 
 @pytest.mark.asyncio
@@ -61,7 +59,7 @@ async def test_report_with_only_project_id_fails_instead_of_inventing_content(
 ) -> None:
     request = ReportGenerationRequest(project_id=uuid4(), formats=[ReportFormat.HTML])
 
-    with pytest.raises(ReportGenerationError, match="workflow_data"):
+    with pytest.raises(ReportGenerationError, match="stored results"):
         await generator._extract_input_data(request)
 
 

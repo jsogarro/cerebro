@@ -86,26 +86,8 @@ class ReportSettings(BaseSettings):
 
     enable_visualizations: bool = Field(
         default=True,
-        description="Enable visualization generation",
+        description="Show chart data tables in HTML reports",
         validation_alias="ENABLE_VISUALIZATIONS",
-    )
-
-    max_visualizations_per_report: int = Field(
-        default=20,
-        description="Maximum visualizations per report",
-        validation_alias="MAX_VISUALIZATIONS_PER_REPORT",
-    )
-
-    default_chart_width: int = Field(
-        default=800,
-        description="Default chart width in pixels",
-        validation_alias="DEFAULT_CHART_WIDTH",
-    )
-
-    default_chart_height: int = Field(
-        default=600,
-        description="Default chart height in pixels",
-        validation_alias="DEFAULT_CHART_HEIGHT",
     )
 
     enable_template_cache: bool = Field(

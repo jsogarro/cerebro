@@ -132,6 +132,7 @@ class TestReportsAPI:
             pending_report.word_count = 0
             pending_report.page_count = 0
             pending_report.quality_score = 0.0
+            pending_report.configuration = {}
             pending_report.confidence_score = 0.0
             pending_report.created_at = datetime.now()
             pending_report.generation_time_seconds = None
@@ -173,6 +174,7 @@ class TestReportsAPI:
         mock_report.word_count = 1500
         mock_report.page_count = 5
         mock_report.quality_score = 0.85
+        mock_report.configuration = {}
         mock_report.confidence_score = 0.78
         mock_report.created_at.isoformat.return_value = "2024-01-01T00:00:00Z"
         mock_report.generation_time_seconds = 45.0
@@ -294,6 +296,7 @@ class TestReportsAPI:
                 page_count=3,
                 quality_score=0.8,
                 confidence_score=0.7,
+                configuration={},
                 created_at=MagicMock(),
                 generation_time_seconds=30.0,
                 formats=[],
@@ -308,6 +311,7 @@ class TestReportsAPI:
                 page_count=2,
                 quality_score=0.9,
                 confidence_score=0.8,
+                configuration={},
                 created_at=MagicMock(),
                 generation_time_seconds=20.0,
                 formats=[],
@@ -365,6 +369,7 @@ class TestReportsAPI:
                 page_count=7,
                 quality_score=0.85,
                 confidence_score=0.8,
+                configuration={},
                 created_at=MagicMock(),
                 generation_time_seconds=60.0,
                 formats=[],
@@ -565,6 +570,7 @@ class TestReportsAPI:
         report.word_count = 0
         report.page_count = 0
         report.quality_score = 0.0
+        report.configuration = {}
         report.confidence_score = 0.0
         report.created_at = datetime.now()
         report.generation_time_seconds = None
@@ -636,3 +642,314 @@ def test_report_routes_reject_anonymous_callers(method: str, path: str) -> None:
 
     assert response.status_code in (401, 403), response.text
     assert session.mock_calls == []
+
+
+# Project-sourced report input: real stored data, tenant/owner scoped.
+
+
+@pytest.fixture
+async def project_db(tmp_path):
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from src.models.db.base import Base
+    from src.models.db.generated_report import ReportFormat
+    from src.models.db.research_project import ResearchProject
+    from src.models.db.research_result import ResearchResult
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(
+            Base.metadata.create_all,
+            tables=[
+                GeneratedReport.__table__,
+                ReportFormat.__table__,
+                ResearchProject.__table__,
+                ResearchResult.__table__,
+            ],
+        )
+    yield factory
+    await engine.dispose()
+
+
+async def _seed_project(
+    factory,
+    *,
+    user_id,
+    organization_id,
+    status="completed",
+    results=True,
+    deleted=False,
+):
+    from datetime import UTC, datetime
+
+    from src.models.db.research_project import ProjectStatus, ResearchProject
+    from src.models.db.research_result import ResearchResult
+
+    async with factory() as session:
+        project = ResearchProject(
+            title="Stored project",
+            query="STORED-QUERY-SENTINEL",
+            domains=["ai", "edu"],
+            status=ProjectStatus(status),
+            user_id=user_id,
+            organization_id=organization_id,
+            project_metadata={},
+        )
+        if deleted:
+            project.deleted_at = datetime.now(UTC)
+        session.add(project)
+        await session.flush()
+        if results:
+            session.add_all(
+                [
+                    ResearchResult(
+                        project_id=project.id,
+                        result_type="finding",
+                        content={"text": "STORED-FINDING-SENTINEL"},
+                        confidence_score=0.6,
+                        result_metadata={},
+                    ),
+                    ResearchResult(
+                        project_id=project.id,
+                        result_type="source",
+                        content={"title": "Src A", "year": 2024, "domain": "ai"},
+                        result_metadata={},
+                    ),
+                    ResearchResult(
+                        project_id=project.id,
+                        result_type="source",
+                        content={"title": "Src B", "year": 2023, "domain": "ai"},
+                        result_metadata={},
+                    ),
+                    ResearchResult(
+                        project_id=project.id,
+                        result_type="source",
+                        content={"title": "Src C", "year": 2022, "domain": "edu"},
+                        result_metadata={},
+                    ),
+                ]
+            )
+        await session.commit()
+        return project.id
+
+
+async def test_soft_deleted_result_rows_are_not_reported(project_db):
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+
+    from src.models.db.research_result import ResearchResult
+    from src.services.report_source_projection import ReportSourceRepository
+
+    user_id, org_id = uuid4(), uuid4()
+    project_id = await _seed_project(
+        project_db, user_id=user_id, organization_id=org_id
+    )
+    async with project_db() as session:
+        await session.execute(
+            update(ResearchResult)
+            .where(ResearchResult.result_type == "finding")
+            .values(deleted_at=datetime.now(UTC))
+        )
+        await session.commit()
+        projection = await ReportSourceRepository(session).load_project_source(
+            project_id, user_id=user_id, organization_id=org_id
+        )
+
+    assert projection is not None
+    assert "STORED-FINDING-SENTINEL" not in str(projection.input_data)
+
+
+async def test_project_whose_only_results_are_soft_deleted_is_a_conflict(project_db):
+    from datetime import UTC, datetime
+
+    from fastapi import BackgroundTasks, HTTPException
+    from sqlalchemy import update
+
+    from src.api.routes import reports as routes
+    from src.models.db.research_result import ResearchResult
+
+    user_id, org_id = uuid4(), uuid4()
+    project_id = await _seed_project(
+        project_db, user_id=user_id, organization_id=org_id
+    )
+    async with project_db() as session:
+        await session.execute(
+            update(ResearchResult).values(deleted_at=datetime.now(UTC))
+        )
+        await session.commit()
+        with pytest.raises(HTTPException) as raised:
+            await routes.generate_report(
+                _generate_request(project_id),
+                BackgroundTasks(),
+                session,
+                TenantContext(str(user_id), str(org_id)),
+            )
+
+    assert raised.value.status_code == 409
+
+
+def _generate_request(project_id, **overrides):
+    from src.api.routes.reports import CreateReportRequest
+
+    return CreateReportRequest(
+        title="Caller title",
+        query="SAMPLE-CALLER-QUERY",
+        project_id=project_id,
+        workflow_data={"quality_report": {"quality_score": 0.99}},
+        **overrides,
+    )
+
+
+async def test_project_report_renders_stored_results_not_caller_data(
+    project_db, tmp_path, monkeypatch
+):
+    from fastapi import BackgroundTasks
+
+    from src.api.routes import reports as routes
+    from src.api.routes.reports import ReportResponse
+    from src.repositories.report_repository import ReportRepository
+    from src.services.report_config import ReportSettings
+
+    settings = ReportSettings(
+        report_storage_path=str(tmp_path), template_path="src/templates/reports"
+    )
+    monkeypatch.setattr(routes, "create_report_settings", lambda: settings)
+    monkeypatch.setattr(routes, "get_session_factory", lambda: project_db)
+    user_id, org_id = uuid4(), uuid4()
+    project_id = await _seed_project(
+        project_db, user_id=user_id, organization_id=org_id
+    )
+
+    async with project_db() as session:
+        tasks = BackgroundTasks()
+        response = await routes.generate_report(
+            _generate_request(project_id, formats=["html", "json"]),
+            tasks,
+            session,
+            TenantContext(str(user_id), str(org_id)),
+        )
+    for task in tasks.tasks:
+        await task.func(*task.args, **task.kwargs)
+
+    report_dir = tmp_path / str(response.id)
+    html = next(report_dir.glob("*.html")).read_text()
+    payload = next(report_dir.glob("*.json")).read_text()
+    for text in (html, payload):
+        assert "STORED-QUERY-SENTINEL" in text
+        assert "STORED-FINDING-SENTINEL" in text
+        assert "SAMPLE-CALLER-QUERY" not in text
+    assert "0.99" not in payload
+    assert '"quality_score": null' in payload
+    assert '"source_kind": "project_results"' in payload
+    async with project_db() as session:
+        stored = await ReportRepository(session).get_report_with_formats(
+            response.id, organization_id=org_id, user_id=user_id
+        )
+    assert stored.configuration["source_kind"] == "project_results"
+    assert ReportResponse.from_db_report(stored).source_kind == "project_results"
+    assert "Not evaluated" in html
+    assert "<td>ai</td>" in html and "<td>2</td>" in html
+
+
+@pytest.mark.parametrize("case", ["other_org", "other_user", "deleted", "missing"])
+async def test_project_report_is_not_found_across_tenant_owner_and_deletion(
+    project_db, case
+):
+    from fastapi import BackgroundTasks, HTTPException
+
+    from src.api.routes import reports as routes
+
+    user_id, org_id = uuid4(), uuid4()
+    project_id = await _seed_project(
+        project_db,
+        user_id=user_id,
+        organization_id=org_id,
+        deleted=case == "deleted",
+    )
+    caller = {
+        "other_org": (user_id, uuid4()),
+        "other_user": (uuid4(), org_id),
+        "deleted": (user_id, org_id),
+        "missing": (user_id, org_id),
+    }[case]
+    target = uuid4() if case == "missing" else project_id
+
+    async with project_db() as session:
+        tasks = BackgroundTasks()
+        with pytest.raises(HTTPException) as raised:
+            await routes.generate_report(
+                _generate_request(target),
+                tasks,
+                session,
+                TenantContext(str(caller[0]), str(caller[1])),
+            )
+
+    assert raised.value.status_code == 404
+    assert not tasks.tasks
+    async with project_db() as session:
+        from sqlalchemy import func, select
+
+        count = await session.scalar(select(func.count()).select_from(GeneratedReport))
+    assert count == 0
+
+
+@pytest.mark.parametrize(
+    ("status", "results"),
+    [("in_progress", True), ("completed", False)],
+)
+async def test_unfinished_or_empty_project_is_a_typed_conflict(
+    project_db, status, results
+):
+    from fastapi import BackgroundTasks, HTTPException
+
+    from src.api.routes import reports as routes
+
+    user_id, org_id = uuid4(), uuid4()
+    project_id = await _seed_project(
+        project_db,
+        user_id=user_id,
+        organization_id=org_id,
+        status=status,
+        results=results,
+    )
+
+    async with project_db() as session:
+        tasks = BackgroundTasks()
+        with pytest.raises(HTTPException) as raised:
+            await routes.generate_report(
+                _generate_request(project_id),
+                tasks,
+                session,
+                TenantContext(str(user_id), str(org_id)),
+            )
+
+    assert raised.value.status_code == 409
+    assert raised.value.detail["code"] == "report_source_unavailable"
+    assert not tasks.tasks
+
+
+def test_report_response_keeps_unknown_scores_unknown() -> None:
+    from src.api.routes.reports import ReportResponse
+
+    report = MagicMock(spec=GeneratedReport)
+    report.id = uuid4()
+    report.title = "T"
+    report.query = "q"
+    report.report_type = "comprehensive"
+    report.generation_status = "pending"
+    report.formats = []
+    report.word_count = 0
+    report.page_count = 0
+    report.quality_score = None
+    report.configuration = {}
+    report.confidence_score = None
+    report.created_at = datetime.now()
+    report.generation_time_seconds = None
+
+    response = ReportResponse.from_db_report(report)
+
+    assert response.quality_score is None
+    assert response.confidence_score is None

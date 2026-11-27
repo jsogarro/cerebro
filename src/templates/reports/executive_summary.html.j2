@@ -267,13 +267,19 @@
         <div style="margin: 1rem 0;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <span>Quality Score</span>
-                <span style="font-weight: bold;">{{ "%.1f" | format(report.metadata.quality_score * 100) }}%</span>
+                <span style="font-weight: bold;">{{ report.metadata.quality_score | format_score }}</span>
             </div>
+            {% if report.metadata.quality_score is not none %}
             <div class="confidence-bar">
                 <div class="confidence-fill" style="width: {{ report.metadata.quality_score * 100 }}%"></div>
             </div>
+            {% endif %}
         </div>
+        {% if report.metadata.quality_score is not none %}
         <p>{{ "High" if report.metadata.quality_score > 0.8 else "Good" if report.metadata.quality_score > 0.6 else "Acceptable" }} confidence in findings</p>
+        {% else %}
+        <p>Quality was not evaluated for this report.</p>
+        {% endif %}
     </div>
     
     <div class="highlight-card">
@@ -414,7 +420,7 @@
             {% if report.metadata.workflow_id %}
             <div>Workflow: {{ report.metadata.workflow_id[:8] }}...</div>
             {% endif %}
-            <div>Quality: {{ "%.1f" | format(report.metadata.quality_score * 100) }}%</div>
+            <div>Quality: {{ report.metadata.quality_score | format_score }}</div>
             <div>Sources: {{ report.metadata.total_sources }}</div>
         </div>
         <p style="text-align: center; margin-top: 1rem; font-size: 0.85em; color: #6c757d;">

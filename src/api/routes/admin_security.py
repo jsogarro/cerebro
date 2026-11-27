@@ -65,4 +65,7 @@ async def acknowledge_security_alert(
     if alert is None:
         raise HTTPException(status_code=404, detail="Security alert not found")
     alert.acknowledge(str(user.id))
+    # get_session commits only after the response is sent; commit here so a 200
+    # means the row is durable, and a write that matches no row fails the call.
+    await db.commit()
     return alert.to_dict()

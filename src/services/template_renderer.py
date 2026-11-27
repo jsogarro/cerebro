@@ -23,7 +23,7 @@ except ImportError:
     markdown_module = None
     MARKDOWN_AVAILABLE = False
 
-from src.models.report import Report, ReportType
+from src.models.report import Report, ReportType, format_score, source_label
 from src.services.report_config import ReportSettings, ReportTemplateConfig
 
 logger = get_logger()
@@ -136,6 +136,8 @@ class TemplateRenderer:
             "truncate_words": self._truncate_words_filter,
             "format_number": self._format_number_filter,
             "format_percentage": self._format_percentage_filter,
+            "format_score": format_score,
+            "source_label": source_label,
             "strip_markdown": self._strip_markdown_filter,
             "format_citation_count": self._format_citation_count_filter,
             "capitalize_words": self._capitalize_words_filter,

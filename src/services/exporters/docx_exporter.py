@@ -26,7 +26,14 @@ except ImportError:
     PYTHON_DOCX_AVAILABLE = False
     Document = None  # type: ignore[assignment]
 
-from src.models.report import Report, ReportFormat, ReportOutput, ReportSection
+from src.models.report import (
+    Report,
+    ReportFormat,
+    ReportOutput,
+    ReportSection,
+    format_score,
+    source_label,
+)
 from src.services.report_config import ReportSettings
 
 logger = get_logger()
@@ -190,12 +197,15 @@ class DOCXExporter:
                     run.bold = True
 
         metadata_items = [
-            ("Quality Score", f"{report.metadata.quality_score * 100:.1f}%"),
-            ("Confidence Score", f"{report.metadata.confidence_score * 100:.1f}%"),
+            ("Quality Score", format_score(report.metadata.quality_score)),
+            ("Confidence Score", format_score(report.metadata.confidence_score)),
             ("Sources Analyzed", str(report.metadata.total_sources)),
             ("Citations", str(report.metadata.total_citations)),
             ("Word Count", f"{report.metadata.word_count:,}"),
         ]
+
+        if label := source_label(report.metadata.source_kind):
+            metadata_items.append(("Content source", label))
 
         if report.domains:
             metadata_items.append(("Research Domains", ", ".join(report.domains)))

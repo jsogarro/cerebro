@@ -9,7 +9,13 @@ from html import escape as esc
 
 from structlog import get_logger
 
-from src.models.report import Report, ReportFormat, ReportOutput
+from src.models.report import (
+    Report,
+    ReportFormat,
+    ReportOutput,
+    format_score,
+    source_label,
+)
 from src.services.exporters import (
     DOCXExporter,
     LaTeXExporter,
@@ -95,7 +101,11 @@ class ReportOutputGenerator:
         """Generate Markdown report output."""
         markdown = f"# {report.title}\n\n"
         markdown += f"**Generated:** {report.metadata.generated_at}\n"
-        markdown += f"**Quality Score:** {report.metadata.quality_score:.2%}\n\n"
+        markdown += (
+            f"**Quality Score:** {format_score(report.metadata.quality_score)}\n\n"
+        )
+        if label := source_label(report.metadata.source_kind):
+            markdown += f"*{label}*\n\n"
 
         if report.executive_summary:
             markdown += report.executive_summary + "\n\n"
@@ -176,9 +186,11 @@ class ReportOutputGenerator:
 
     <div class="metadata">
         <strong>Generated:</strong> {esc(str(report.metadata.generated_at))}<br>
-        <strong>Quality Score:</strong> {report.metadata.quality_score:.2%}
+        <strong>Quality Score:</strong> {format_score(report.metadata.quality_score)}
     </div>
 """
+        if label := source_label(report.metadata.source_kind):
+            html += f"<p><em>{esc(label)}</em></p>"
 
         if report.executive_summary:
             html += f"<div class='section'>{esc(report.executive_summary)}</div>"
