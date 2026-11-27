@@ -172,10 +172,30 @@ jobs:
             tests/test_extraction_sandbox.py \
             tests/test_linux_sandbox_guard.py
 
+      - name: Install WeasyPrint system libraries and TeX
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
+            texlive-latex-base texlive-latex-recommended texlive-latex-extra \
+            poppler-utils
+
+      # The flags turn "engine missing" skips into failures, so the PDF and
+      # TeX hardening tests cannot pass by not running.
+      - name: Run exporter hardening tests with required engines
+        env:
+          CEREBRO_REQUIRED_LINUX_MODULES: tests/unit/test_exporter_output_hardening.py
+          CEREBRO_REQUIRE_WEASYPRINT: "1"
+          CEREBRO_REQUIRE_PDFLATEX: "1"
+        run: |
+          pytest --no-cov -o addopts='' -ra --strict-markers \
+            --junit-xml=test-results/linux-exporters.xml \
+            tests/unit/test_exporter_output_hardening.py
+
       - name: Test summary
         if: always()
         run: |
-          for f in test-results/linux-sandbox.xml; do
+          for f in test-results/linux-sandbox.xml test-results/linux-exporters.xml; do
             python scripts/ci_summary.py "$f" >> "$GITHUB_STEP_SUMMARY" \
               || echo "Test summary unavailable for $f" >> "$GITHUB_STEP_SUMMARY"
           done
