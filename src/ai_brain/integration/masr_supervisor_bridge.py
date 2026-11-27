@@ -13,7 +13,7 @@ This bridge enables intelligent end-to-end query processing by connecting:
 
 import asyncio
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -22,6 +22,7 @@ from typing import Any, cast
 from structlog import get_logger
 
 from src.agents.integrations.mcp_integration import MCPIntegration
+from src.agents.llm_worker_base import adapt_upstream_input, supports_upstream
 from src.agents.tools.durable_audit import SessionToolAuditStore
 from src.agents.tools.mediation import ToolCallIdentity
 from src.core.acquisition.search_evidence import SearchEvidenceRecorder
@@ -610,11 +611,20 @@ class MASRSupervisorBridge:
         self.plan_topology_executor = ExecutionPlanTopologyExecutor(
             worker_executor=self._execute_plan_worker,
             capability_checker=self._has_plan_worker_capability,
+            upstream_checker=self._plan_worker_supports_upstream,
         )
 
     def _has_plan_worker_capability(self, worker_type: str) -> bool:
         key = AGENT_KEYS.get(worker_type)
         return key is not None and key in self.component_registry.keys
+
+    def _plan_worker_supports_upstream(
+        self, worker_type: str, parent_count: int
+    ) -> bool:
+        key = AGENT_KEYS.get(worker_type)
+        if key is None or key not in self.component_registry.keys:
+            return False
+        return supports_upstream(self.component_registry.resolve(key), parent_count)
 
     def _mcp_audit_store(self) -> ToolAuditStore:
         """Return the explicitly configured store for the live MCP path."""
@@ -678,6 +688,9 @@ class MASRSupervisorBridge:
             gemini_service=self.gemini_service,
             cache_client=None,
             config=worker_config,
+        )
+        task = replace(
+            task, input_data=adapt_upstream_input(worker_class, task.input_data)
         )
         return await worker_instance.execute(task)
 

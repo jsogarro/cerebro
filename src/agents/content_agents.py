@@ -1,6 +1,6 @@
 """Content domain worker agents (LLM-reasoning; no external data)."""
 
-from src.agents.llm_worker_base import LLMWorkerAgentBase
+from src.agents.llm_worker_base import LLMWorkerAgentBase, UpstreamInput
 from src.agents.models import AgentTask
 
 
@@ -28,6 +28,7 @@ class DraftingAgent(LLMWorkerAgentBase):
     """Writes a full draft from the request and any plan."""
 
     agent_type = "drafting"
+    upstream_input = UpstreamInput.SINGLE
 
     def _build_prompt(self, query: str, task: AgentTask) -> str:
         return (
@@ -42,6 +43,7 @@ class EditingAgent(LLMWorkerAgentBase):
     """Edits a draft for clarity, correctness, and flow."""
 
     agent_type = "editing"
+    upstream_input = UpstreamInput.SINGLE
 
     def _build_prompt(self, query: str, task: AgentTask) -> str:
         return (
@@ -56,6 +58,7 @@ class OptimizationAgent(LLMWorkerAgentBase):
     """Optimizes content for readability and discoverability."""
 
     agent_type = "optimization"
+    upstream_input = UpstreamInput.SINGLE
 
     def _build_prompt(self, query: str, task: AgentTask) -> str:
         return (

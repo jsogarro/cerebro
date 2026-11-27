@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -11,7 +12,12 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
-from src.agents.llm_worker_base import PlanProviderUnavailableError
+from src.agents.llm_worker_base import (
+    RESERVED_RUNTIME_INPUT_KEYS,
+    UPSTREAM_PAYLOAD_LIMIT_BYTES,
+    UPSTREAM_RESULTS_KEY,
+    PlanProviderUnavailableError,
+)
 from src.agents.models import AgentResult, AgentTask
 from src.core.budget import (
     BUDGET_LEDGER_CONTEXT_KEY,
@@ -41,6 +47,13 @@ class ExecutionTopologyUnsupportedError(ValueError):
 
 WorkerExecutor = Callable[[WorkerAssignment, AgentTask], Awaitable[AgentResult]]
 CapabilityChecker = Callable[[str], bool]
+UpstreamChecker = Callable[[str, int], bool]
+"""``(worker_type, direct_parent_count)`` -> can that consumer use the data."""
+
+# Workflow definitions at an earlier major version ordered workers by edges
+# without delivering data; replaying them under the data contract would
+# silently reinterpret them.
+MIN_DATA_HANDOFF_WORKFLOW_MAJOR = 2
 
 
 _DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
@@ -112,6 +125,11 @@ def schema_rejection_reason(schema: dict[str, Any]) -> str | None:
     except SchemaError as error:
         return f"output schema is invalid: {error.message}"
     return None
+
+
+def _supports_data_handoff(version: str) -> bool:
+    major = version.split(".", 1)[0]
+    return major.isdigit() and int(major) >= MIN_DATA_HANDOFF_WORKFLOW_MAJOR
 
 
 def classify_worker_result(
@@ -209,9 +227,11 @@ class ExecutionPlanTopologyExecutor:
         *,
         worker_executor: WorkerExecutor,
         capability_checker: CapabilityChecker,
+        upstream_checker: UpstreamChecker | None = None,
     ) -> None:
         self._worker_executor = worker_executor
         self._capability_checker = capability_checker
+        self._upstream_checker = upstream_checker
 
     def admit(self, plan: ExecutionPlan) -> None:
         """Reject unsupported authority synchronously, before any dispatch."""
@@ -222,7 +242,31 @@ class ExecutionPlanTopologyExecutor:
             error = ExecutionTopologyUnsupportedError(unsupported)
             record_topology_rejected(plan, error.code, unsupported)
             raise error
+        dependencies = self._dependencies(plan)
+        if any(dependencies.values()) and not _supports_data_handoff(
+            plan.workflow_definition_version
+        ):
+            reason = (
+                f"workflow version {plan.workflow_definition_version!r} predates "
+                "dependency data handoff"
+            )
+            error = ExecutionTopologyUnsupportedError(reason)
+            record_topology_rejected(plan, error.code, reason)
+            raise error
         for worker in decision.workers:
+            parents = len(dependencies[str(worker.worker_id)])
+            if (
+                parents
+                and self._upstream_checker is not None
+                and not self._upstream_checker(str(worker.worker_type), parents)
+            ):
+                reason = (
+                    f"worker {worker.worker_id!r} ({worker.worker_type!r}) cannot "
+                    f"consume {parents} upstream result(s)"
+                )
+                error = ExecutionTopologyUnsupportedError(reason)
+                record_topology_rejected(plan, error.code, reason)
+                raise error
             schema_problem = schema_rejection_reason(_plain(worker.output_schema))
             if schema_problem is not None:
                 reason = f"worker {worker.worker_id!r}: {schema_problem}"
@@ -260,14 +304,43 @@ class ExecutionPlanTopologyExecutor:
         completed: dict[str, AgentResult] = {}
         outcomes: dict[str, WorkerOutcome] = {}
         pending = set(workers)
+        preflight_failures: dict[str, WorkerOutcome] = {}
         semaphore = asyncio.Semaphore(decision.budget.max_parallel_tasks)
 
-        async def execute_worker(worker: WorkerAssignment) -> AgentResult:
+        async def execute_worker(worker: WorkerAssignment) -> AgentResult | None:
+            worker_id = str(worker.worker_id)
+            upstream = {
+                parent: {
+                    "worker_id": parent,
+                    "task_id": completed[parent].task_id,
+                    "execution_plan_id": str(plan.execution_plan_id),
+                    "output": completed[parent].output,
+                }
+                for parent in sorted(dependencies[worker_id])
+            }
+            if (
+                len(json.dumps(upstream, sort_keys=True, default=str).encode())
+                > UPSTREAM_PAYLOAD_LIMIT_BYTES
+            ):
+                preflight_failures[worker_id] = WorkerOutcome(
+                    worker_id,
+                    WorkerOutcomeStatus.FAILED,
+                    "UPSTREAM_PAYLOAD_TOO_LARGE",
+                    f"upstream data exceeds {UPSTREAM_PAYLOAD_LIMIT_BYTES} bytes",
+                )
+                return None
+            client_input = {
+                key: value
+                for key, value in task.input_data.items()
+                if key not in RESERVED_RUNTIME_INPUT_KEYS
+            }
+            if upstream:
+                client_input[UPSTREAM_RESULTS_KEY] = upstream
             worker_task = AgentTask(
                 id=f"{task.id}:{worker.worker_id}",
                 agent_type=str(worker.worker_type),
                 input_data={
-                    **task.input_data,
+                    **client_input,
                     "execution_plan_id": str(plan.execution_plan_id),
                     "worker_id": str(worker.worker_id),
                     "objective": worker.objective,
@@ -315,10 +388,15 @@ class ExecutionPlanTopologyExecutor:
             # A worker may swallow the error and return a failed result; the
             # ledger still knows a ceiling was crossed.
             ledger.ensure_not_exceeded()
-            completed.update(zip(ready, results, strict=True))
             pending.difference_update(ready)
             for worker_id, result in zip(ready, results, strict=True):
+                if result is None:
+                    outcomes[worker_id] = preflight_failures[worker_id]
+                    continue
+                completed[worker_id] = result
                 outcomes[worker_id] = classify_worker_result(workers[worker_id], result)
+            # A failed worker leaves its dependents unscheduled, so a worker only
+            # ever sees parents that succeeded.
             if not all(outcomes[worker_id].succeeded for worker_id in ready):
                 break
 
