@@ -523,7 +523,9 @@ async def test_oversized_code_is_rejected_by_the_schema(client: _Client) -> None
     assert (await client.login("1" * 33)).status_code == 422
 
 
-@pytest.mark.parametrize("key", ["", Fernet.generate_key().decode()])
+@pytest.mark.parametrize(
+    "key", ["", Fernet.generate_key().decode()], ids=["empty", "foreign_key"]
+)
 async def test_unusable_encryption_key_is_a_typed_audited_503(
     client: _Client,
     audit: _AuditSpy,
