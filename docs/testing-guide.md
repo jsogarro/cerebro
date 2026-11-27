@@ -15,7 +15,7 @@ This guide covers the Python test suite under `tests/`, the live-provider evalua
 | `tests/e2e/` | Python API tests against a running stack on `http://localhost:8000` |
 | `tests/integration/` | Tests that need PostgreSQL and Redis containers |
 | `tests/load/` | Locust file |
-| `tests/regression/` | Golden-dataset and hallucination-detector regression tests |
+| `tests/regression/` | Golden-dataset regression tests |
 | `tests/security/` | Authentication boundary, tenant isolation, rate limit, audit and the adversarial corpus in `security/adversarial/` |
 | `tests/factories/`, `tests/fixtures/`, `tests/utils/` | Shared test data and helpers ([Factories and fixtures](#factories-and-fixtures)) |
 | `evals/live/` | Live-provider evaluation suite ([Live evaluations](#live-evaluations)) |
@@ -75,7 +75,7 @@ pytest tests/security -v
 
 **Adversarial corpus.** `tests/security/adversarial/` holds the scenarios (`scenarios/`), the registry and the harness that runs them against the real tool boundary. Verdicts are `HELD`, `HELD_VIA_FLOOR`, `VIOLATED` and `NOT_EXERCISABLE` (`harness.py`). `test_corpus_execution.py` records a violated guarantee as `xfail(strict=True)`, so fixing the defect turns the test red until the marker is removed.
 
-**Regression.** `tests/regression/test_golden_dataset.py` validates `tests/fixtures/golden_dataset.json` (at least 50 cases) and scores agent outputs through `src/services/evaluation_regression.py`; `test_hallucination_detector.py` checks `HallucinationDetector`. CI runs them first with `pytest -o addopts='' tests/regression -q`.
+**Regression.** `tests/regression/test_golden_dataset.py` validates `tests/fixtures/golden_dataset.json` (at least 50 cases) and scores agent outputs through `src/services/evaluation_regression.py`. CI runs them first with `pytest -o addopts='' tests/regression -q`.
 
 **Architecture.** `tests/architecture/test_module_reachability.py` builds a static import graph from `src.api.main`, `src.cli.main`, `src.mcp.server` and `src.evals.pilot_runner` (the cost pilot) and fails on a module under `src/` that none of them reach, apart from the entries in its `KNOWN_UNREACHABLE` set. `tests/architecture/test_settings_read_sites.py` fails on a setting in `src/core/config.py` that nothing reads, apart from `KNOWN_UNREAD`. Both sets can only shrink: an entry that has become reachable or read also fails.
 

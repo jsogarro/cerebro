@@ -217,7 +217,7 @@ Redis runs from `redis:7-alpine`. For "OOM command not allowed", check usage wit
 
 ### Standalone MASR container
 
-The `masr-router` container (port 9100, profile `legacy-masr-service`) runs the Multi-Agent System Router (MASR) as a standalone service. It is not on the query path: routing runs in the `api` process, and `MASR_SERVICE_URL` is not read by the application. See [MASR routing](reference/06-masr-routing.md).
+The `masr-router` container (port 9100, profile `legacy-masr-service`) does not start: its command module `src.ai_brain.router.masr_service` no longer exists. It is not on the query path: routing runs in the `api` process, and `MASR_SERVICE_URL` is not read by the application. See [MASR routing](reference/06-masr-routing.md).
 
 ## Debug logging
 

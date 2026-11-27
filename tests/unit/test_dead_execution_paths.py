@@ -13,7 +13,6 @@ from src.services.exporters.latex_exporter import LaTeXExporter
 ROOT = Path(__file__).resolve().parents[2]
 NO_EXEC_MODULES = [
     "src/services/exporters/latex_exporter.py",
-    "src/models/db/migrations.py",
     "src/ai_brain/learning/supervision_feedback.py",
 ]
 

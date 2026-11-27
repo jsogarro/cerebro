@@ -54,7 +54,7 @@ Tests that exercise it: `tests/unit/ai_brain/experimentation/test_continuous_bet
 
 > **Not wired.** `ModelConfigManager` in `src/ai_brain/config/model_config_manager.py` loads `configs/models/base.yaml` and an environment file (`development.yaml` or `production.yaml`). It is constructed only by `ConfigurationIntegrationService` (`integration_service.py`) and by the module-level `get_model_config_manager`, and no production code calls either. `MASRouter`, `CostOptimizer` and the providers accept an optional `model_config_manager` argument that production code never passes, so the YAML files are never loaded.
 
-Other modules in the group: `legacy_adapter.py` (`LegacyConfigurationAdapter`, `LegacyProviderWrapper`), which nothing imports. `model_schemas.py` is in use: `ModelTier` and `RoutingStrategy` are imported by `MASRRoutingService` and `src/models/masr_api_models.py`. `supervisor_config.py` is imported by `MASRRoutingService`, which stores a `SupervisorConfigurationManager` in `self.config_manager`; nothing reads that attribute.
+Other modules in the group: `model_schemas.py` is in use: `ModelTier` and `RoutingStrategy` are imported by `MASRRoutingService` and `src/models/masr_api_models.py`. `supervisor_config.py` is imported by `MASRRoutingService`, which stores a `SupervisorConfigurationManager` in `self.config_manager`; nothing reads that attribute.
 
 ## Prompt manager and versioning
 
@@ -95,16 +95,9 @@ Tests that exercise them live in `tests/unit/core/claims/` and `tests/unit/core/
 | Module | What it holds | Imported by |
 |---|---|---|
 | `src/agents/delegation_contract.py` | `DelegationContract` | `tests/test_fast_path.py` |
-| `src/api/services/masr_analytics.py` | `MASRAnalyticsService` | nothing |
-| `src/core/production_config.py` and the top-level `config/` package | `ProductionSettings` and per-environment settings classes | `config/` is imported by `production_config.py` and tests; `production_config.py` by `tests/docker/test_production_jwt_contract.py` |
-| `src/services/gemini_metrics.py` | Prometheus series and `GeminiMetrics` for the Gemini service | nothing |
-| `src/services/hallucination_detector.py`, `src/services/evaluation_regression.py` | Offline claim and citation checks, and golden-dataset regression scoring | `tests/regression/` |
+| `src/services/evaluation_regression.py` | Golden-dataset regression scoring | `tests/regression/` |
 | `src/services/visualization_generator.py` | `VisualizationGenerator` (Plotly and NetworkX) | `tests/test_visualization*.py` |
 | `src/services/text_alignment/` | Deterministic span alignment over source text | `tests/unit/services/test_text_alignment.py` |
-| `src/services/parsers/base_parser.py` | Base parser utilities | `tests/test_gemini_parsers.py` |
-| `src/models/base.py` | A SQLAlchemy `declarative_base()` | `tests/utils/db_utils.py` |
-| `src/models/db/migrations.py` | `MigrationManager` | nothing |
-| `src/ai_brain/router/masr_service.py` | The standalone MASR service (see [configuration](02-configuration.md)) | nothing in `src`; it runs only as the command of the `legacy-masr-service` compose profile, and `KNOWN_UNREACHABLE` in `tests/architecture/test_module_reachability.py` lists it |
 
 ## Dead execution attributes
 

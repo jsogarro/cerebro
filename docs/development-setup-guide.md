@@ -90,7 +90,7 @@ Optional profiles:
 make legacy-masr                                   # the standalone MASR (Multi-Agent System Router) diagnostics service on port 9100
 ```
 
-The Makefile describes `legacy-masr` as the "non-authoritative standalone MASR diagnostics service". The API routes through the in-process router (see [MASR routing](reference/06-masr-routing.md)).
+`make legacy-masr` targets the `legacy-masr-service` profile, whose command module no longer exists, so it does not start. The API routes through the in-process router (see [MASR routing](reference/06-masr-routing.md)).
 
 ## Get an access token
 
@@ -255,7 +255,7 @@ src/
   repositories/     Database repositories
   research_platform/ Entry point named by the research-platform script
   security/         Audit logger and middleware, security headers, content sanitizer, login throttle
-  services/         Gemini service, report generation, exporters, hallucination detector
+  services/         Gemini service, report generation, exporters
   templates/        Jinja report templates
   utils/            Async, serialization, and type-coercion helpers
 tests/              Test suite (see the testing guide)

@@ -115,4 +115,4 @@ Logs go to standard output through structlog; `LOG_LEVEL` does not change their 
 
 ## Legacy standalone MASR service
 
-`masr-router` is an optional container behind the `legacy-masr-service` profile (`make legacy-masr` starts it). The API does not call it: routing runs in-process in the `api` container. See [MASR routing](reference/06-masr-routing.md).
+`masr-router` is a container behind the `legacy-masr-service` profile (`make legacy-masr`). The module `src.ai_brain.router.masr_service` no longer exists, but the `masr-router` image (`docker/Dockerfile.masr`) still names it as its command, so the `legacy-masr-service` compose profile does not start. The API does not call it: routing runs in-process in the `api` container. See [MASR routing](reference/06-masr-routing.md).

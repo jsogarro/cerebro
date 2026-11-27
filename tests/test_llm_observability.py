@@ -53,14 +53,12 @@ MCP_MODULES = [
     SRC_DIR / "mcp" / "tools" / "statistics_tool.py",
 ]
 AI_BRAIN_CONFIG_MODULES = [
-    SRC_DIR / "ai_brain" / "config" / "legacy_adapter.py",
     SRC_DIR / "ai_brain" / "config" / "model_config_manager.py",
     SRC_DIR / "ai_brain" / "config" / "supervisor_config.py",
     SRC_DIR / "ai_brain" / "config" / "integration_service.py",
 ]
 AI_BRAIN_ROUTER_MODULES = [
     SRC_DIR / "ai_brain" / "router" / "masr.py",
-    SRC_DIR / "ai_brain" / "router" / "masr_service.py",
     SRC_DIR / "ai_brain" / "router" / "query_analyzer.py",
     SRC_DIR / "ai_brain" / "router" / "cost_optimizer.py",
     SRC_DIR / "ai_brain" / "router" / "hierarchical_cost_model.py",
@@ -221,7 +219,6 @@ def test_provider_modules_use_structlog_logger() -> None:
 
 def test_models_db_session_modules_use_structlog_logger() -> None:
     for module_path in [
-        MODELS_DB_DIR / "migrations.py",
         MODELS_DB_DIR / "session.py",
     ]:
         assert_no_stdlib_logging_logger(module_path)

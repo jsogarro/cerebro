@@ -105,6 +105,12 @@ class ClaimSupportStatus(StrEnum):
     latter and says why. ``disputed`` replaces ``contradicted``, because
     sources disagreeing with each other is not the same as a source refuting
     the claim, and treating them alike hid the distinction a reviewer needs.
+
+    Do not map ``contradicted`` to ``disputed``. ``disputed`` means sources
+    disagree with each other; a source *refuting* a claim is ``unsupported``
+    with the evidence cited. Moving refuted claims into ``disputed`` would take
+    them out of ``n(unsupported)``, the numerator of the release gate, and the
+    gate would improve because refutations stopped counting.
     """
 
     SUPPORTED = "supported"

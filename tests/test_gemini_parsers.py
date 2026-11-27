@@ -276,7 +276,7 @@ class TestResponseSanitization:
 
     def test_sanitize_html(self):
         """Test HTML sanitization from responses."""
-        from src.services.parsers.base_parser import sanitize_html
+        from src.services.parsers.response_sanitizer import sanitize_html
 
         text_with_html = (
             "<p>This is <b>bold</b> text with <script>alert('xss')</script></p>"
@@ -291,7 +291,7 @@ class TestResponseSanitization:
 
     def test_remove_personal_info(self):
         """Test removal of personal information."""
-        from src.services.parsers.base_parser import remove_personal_info
+        from src.services.parsers.response_sanitizer import remove_personal_info
 
         text = """
         Contact John at john.doe@email.com or call 555-123-4567.
@@ -304,22 +304,9 @@ class TestResponseSanitization:
         assert "555-123-4567" not in clean_text
         assert "123-45-6789" not in clean_text
 
-    def test_validate_response_length(self):
-        """Test response length validation."""
-        from src.services.parsers.base_parser import validate_length
-
-        short_response = "Too short"
-        assert validate_length(short_response, min_length=20) is False
-
-        normal_response = "This is a normal length response with adequate content."
-        assert validate_length(normal_response, min_length=20, max_length=1000) is True
-
-        long_response = "word " * 1000
-        assert validate_length(long_response, max_length=100) is False
-
     def test_detect_language(self):
         """Test language detection in responses."""
-        from src.services.parsers.base_parser import detect_language
+        from src.services.parsers.response_sanitizer import detect_language
 
         english_text = "This is an English text about research."
         assert detect_language(english_text) == "en"
