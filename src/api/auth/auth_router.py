@@ -414,12 +414,21 @@ async def _checked_mfa_code(
     await throttle.clear(key)
 
 
+def _require_enrolment_enabled() -> None:
+    """New enrolment is switchable; enforcement and ``/disable`` never are."""
+    if not settings.ENABLE_MFA:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="MFA enrolment is disabled"
+        )
+
+
 @router.post("/mfa/enroll", response_model=MfaEnrollResponse)
 async def mfa_enroll(
     db: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> MfaEnrollResponse:
     """Generate a pending TOTP secret; it takes effect once a code verifies it."""
+    _require_enrolment_enabled()
     if user.totp_enabled:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="MFA is already enabled"
@@ -448,6 +457,7 @@ async def mfa_verify(
     throttle: LoginThrottle = Depends(get_login_throttle),
 ) -> MfaActivateResponse:
     """Activate MFA with a code from the pending secret and issue recovery codes."""
+    _require_enrolment_enabled()
     if user.totp_enabled or user.totp_secret_enc is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="No MFA enrolment is pending"

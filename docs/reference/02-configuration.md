@@ -70,6 +70,7 @@ A field is listed here when a production module outside `src/core/config.py` rea
 | `JWT_PUBLIC_KEY_PATH` | `/secrets/jwt_public.pem` | `src/middleware/auth_middleware.py` (`get_jwt_service`), `src/auth/jwt_service.py` | RS256 public key file; same rules as the private key |
 | `BCRYPT_ROUNDS` | `12` | `src/api/auth/auth_router.py` (`get_password_service`) | bcrypt cost factor |
 | `PASSWORD_MIN_LENGTH` | `12` | `src/api/auth/auth_router.py` (`get_password_service`) | minimum password length |
+| `ENABLE_MFA` | `false` | `src/api/auth/auth_router.py` (`_require_enrolment_enabled`) | allows new MFA enrolment; enforcement for enrolled accounts and `/mfa/disable` ignore it |
 | `MFA_ISSUER` | `ResearchPlatform` | `src/auth/mfa.py` (`provisioning_uri`) | issuer name in the TOTP provisioning URI |
 
 ### Database and Redis
@@ -218,7 +219,6 @@ The table lists 96 rows: 95 fields of `Settings` and `OTEL_EXPORTER_OTLP_ENDPOIN
 | `SESSION_EXPIRE_HOURS` | `24` | Authentication, sessions and OAuth |
 | `RATE_LIMIT_REQUESTS` | `100` | Authentication, sessions and OAuth |
 | `RATE_LIMIT_PERIOD` | `60` | Authentication, sessions and OAuth |
-| `ENABLE_MFA` | `false` | Authentication, sessions and OAuth |
 | `AI_BRAIN_ENABLED` | `true` | Brain mode switches |
 | `AI_BRAIN_MODE` | `hybrid` | Brain mode switches |
 | `MODEL_PROVIDERS_ENABLED` | `true` | Provider switches and model router |

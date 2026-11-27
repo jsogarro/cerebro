@@ -111,6 +111,7 @@ def _cipher_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         settings, "DOCUMENT_ENCRYPTION_KEY", Fernet.generate_key().decode()
     )
+    monkeypatch.setattr(settings, "ENABLE_MFA", True)
 
 
 @pytest_asyncio.fixture(name="user_id")
@@ -387,6 +388,27 @@ async def test_failed_activation_codes_are_throttled(client: _Client) -> None:
     ]
 
     assert statuses[-1] == 429
+
+
+async def test_flag_off_refuses_new_enrolment_but_never_weakens_enrolled_accounts(
+    client: _Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    token = (await client.login()).json()["tokens"]["access_token"]
+    pending = (await client.post("/auth/mfa/enroll", {}, token)).json()["secret"]
+    secret, token, _ = await _enrol(client)
+    monkeypatch.setattr(settings, "ENABLE_MFA", False)
+
+    assert (await client.post("/auth/mfa/enroll", {}, token)).status_code == 403
+    assert (
+        await client.post("/auth/mfa/verify", {"code": "000000"}, token)
+    ).status_code == 403
+    assert (await client.login()).status_code == 401  # enforcement stays
+    assert (await client.login(_code(secret, steps_ahead=1))).status_code == 200
+    done = await client.post(
+        "/auth/mfa/disable", {"code": _code(secret, steps_ahead=2)}, token
+    )
+    assert done.status_code == 204
+    assert pending  # enrolment above ran while the flag was on
 
 
 def test_every_token_issuing_call_site_is_known() -> None:

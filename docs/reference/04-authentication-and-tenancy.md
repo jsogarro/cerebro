@@ -72,8 +72,8 @@ All routes are in `src/api/auth/auth_router.py`, mounted at `/api/v1/auth`.
 | `POST` | `/register` | `RegisterRequest` | `AuthResponse` (201) | Rejects an existing email or username (`409`; the unique indexes `uq_users_email_lower` and `uq_users_username_lower` from migration `b5d7e9f1a3c2` make the match case-insensitive), checks password strength and the breach list (`400`), creates the user with a new organization id, stores an email verification token, records the password in history, commits and returns the user and a token pair with `roles` `[user.role]` (or `["user"]`) and no `device_id`. |
 | `POST` | `/login` | `LoginRequest` | `AuthResponse` | Counts the attempt against the lockout (`429` with `Retry-After` when locked), checks email and password (`401`), requires an active account (`403`), requires a valid `totp_code` when the account has MFA enabled (`401` otherwise; a failure keeps the attempt counted and is audited as a failed login), clears the lockout counter, records the login, assigns an organization id if the user has none and returns a token pair. Superusers receive the extra role `admin` and permissions `["*"]`. |
 | `POST` | `/refresh` | `RefreshRequest` | `TokenPair` | See [Tokens](#tokens). |
-| `POST` | `/mfa/enroll` | none | `MfaEnrollResponse` | Authenticated. Stores a new Fernet-encrypted TOTP secret as pending and returns it with an `otpauth://` URI. `409` if MFA is already enabled. |
-| `POST` | `/mfa/verify` | `MfaCodeRequest` | `MfaActivateResponse` | Authenticated. Activates MFA when `code` is valid for the pending secret and returns ten recovery codes, once (`409` if nothing is pending, `401` for a wrong code, `429` when locked). |
+| `POST` | `/mfa/enroll` | none | `MfaEnrollResponse` | Authenticated. `403` when `ENABLE_MFA` is false. Stores a new Fernet-encrypted TOTP secret as pending and returns it with an `otpauth://` URI. `409` if MFA is already enabled. |
+| `POST` | `/mfa/verify` | `MfaCodeRequest` | `MfaActivateResponse` | Authenticated. `403` when `ENABLE_MFA` is false. Activates MFA when `code` is valid for the pending secret and returns ten recovery codes, once (`409` if nothing is pending, `401` for a wrong code, `429` when locked). |
 | `POST` | `/mfa/disable` | `MfaCodeRequest` | 204 | Authenticated. Clears the secret and recovery codes; needs a valid TOTP or recovery code (`401`, `429`; `409` if MFA is off). |
 | `POST` | `/logout` | none | 204 | Blacklists the presented access token for its remaining lifetime and deletes the paired refresh record (`503` if revocation fails). |
 | `POST` | `/forgot-password` | `PasswordResetRequest` | `{"message": ...}` (202) | Persists a one-hour reset token for an active account. The response is identical for unknown and inactive accounts. No email is sent: the application has no email provider. `503` when the token store is unavailable. |
@@ -100,7 +100,7 @@ All routes are in `src/api/auth/auth_router.py`, mounted at `/api/v1/auth`.
 
 `src/auth/mfa.py` implements TOTP (RFC 6238, `pyotp`, 30-second steps, one step of drift). The secret is stored in `users.totp_secret_enc` encrypted by `document_cipher()` (`DOCUMENT_ENCRYPTION_KEY`). `users.totp_enabled` turns the second factor on once `/mfa/verify` accepts a code. A code is accepted once: `users.totp_last_step` is advanced by a conditional `UPDATE`, so a replay in the same step loses in the database. Recovery codes are ten random 40-bit codes; `mfa_recovery_codes` holds only their SHA-256 and a `used_at` stamp that a conditional `UPDATE` sets once. Failed codes at login count against the account's lockout; on `/mfa/*` they count against a separate per-user counter (`mfa:<user id>`) in the same `LoginThrottle`. A wrong login code sets the audit subject, so the request is audited as `LOGIN_FAILED` for that account.
 
-Every call to `JWTService.generate_token_pair` is in `register` (a new account has no MFA), `login` (which checks the factor and sets `mfa_verified`) or `JWTService.refresh_tokens` (which copies the refresh token's `mfa` claim); a test pins that set.
+Every call to `JWTService.generate_token_pair` is in `register` (a new account has no MFA), `login` (which checks the factor and sets `mfa_verified`) or `JWTService.refresh_tokens` (which copies the refresh token's `mfa` claim); a test pins that set. `ENABLE_MFA` (default `false`) gates only new enrolment (`/mfa/enroll`, `/mfa/verify`); login enforcement and `/mfa/disable` work for enrolled accounts whatever its value.
 
 ## Passwords and login protection
 
@@ -153,7 +153,7 @@ Tokens carry `roles` and `permissions` lists (see [Auth endpoints](#auth-endpoin
 
 ## Settings with no effect
 
-> **Not wired.** These settings are declared in `src/core/config.py` (`Settings`) and read nowhere in `src`: `ENABLE_MFA`, `SESSION_SECRET_KEY`, `SESSION_EXPIRE_HOURS`, `JWT_ALGORITHM`, `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_PERIOD`. MFA is opt-in per account and `ENABLE_MFA` does not gate it. There are no OAuth login routes, no session-count limit and no session lifetime other than the token lifetimes.
+> **Not wired.** These settings are declared in `src/core/config.py` (`Settings`) and read nowhere in `src`: `SESSION_SECRET_KEY`, `SESSION_EXPIRE_HOURS`, `JWT_ALGORITHM`, `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_PERIOD`. MFA is opt-in per account. There are no OAuth login routes, no session-count limit and no session lifetime other than the token lifetimes.
 
 `SECRET_KEY` is validated at startup (at least 32 characters; the placeholder value is rejected when `ENVIRONMENT` is `production`) and is not used for token signing, which uses the RSA key pair.
 
