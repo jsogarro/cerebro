@@ -21,7 +21,6 @@ fi
 . .venv/bin/activate
 
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r requirements-dev.txt
-python -m pip install -e .
+python -m pip install -e ".[dev]"
 
 echo "Environment ready. Activate it with: . .venv/bin/activate"

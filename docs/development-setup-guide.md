@@ -21,7 +21,7 @@ make install            # uv pip install -e ".[dev]"
 pre-commit install
 ```
 
-`make install-pip` is the alternative that does not need uv: it runs `scripts/setup-python-env.sh`, which creates `.venv` with `python3.11` (or `python3.12`, or the interpreter named in `PYTHON`), installs `requirements-dev.txt`, then runs `pip install -e .`. Activate it with `. .venv/bin/activate`.
+`make install-pip` is the alternative that does not need uv: it runs `scripts/setup-python-env.sh`, which creates `.venv` with `python3.11` (or `python3.12`, or the interpreter named in `PYTHON`), then runs `pip install -e ".[dev]"`. It resolves from the ranges in `pyproject.toml`, not from `uv.lock`, so its versions can differ from CI. Activate it with `. .venv/bin/activate`.
 
 The `dev` extra in `pyproject.toml` contains pytest and its plugins, `ruff`, `black`, `mypy`, `pre-commit`, `testcontainers`, `locust`, `playwright`, `factory-boy`, `faker`, `aiosqlite` and the `mcp` and `stats` extras (`fastmcp`, `scipy`) that some tests import.
 

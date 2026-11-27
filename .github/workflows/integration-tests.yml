@@ -64,7 +64,7 @@ jobs:
     
     - name: Install dependencies
       run: |
-        uv pip install --system -e ".[dev]"
+        UV_SYSTEM_PYTHON=1 scripts/install-locked.sh --extra dev
     
     
     - name: Run database migrations

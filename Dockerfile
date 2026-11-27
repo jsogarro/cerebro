@@ -29,11 +29,11 @@ WORKDIR /app
 FROM base as development
 
 # Copy dependency files
-COPY pyproject.toml .
-COPY README.md .
+COPY pyproject.toml uv.lock README.md ./
+COPY scripts/install-locked.sh ./scripts/
 
 # Install all dependencies including dev and MCP support
-RUN uv pip install -e ".[dev,mcp]"
+RUN scripts/install-locked.sh --extra dev --extra mcp
 
 # Copy application code
 COPY src/ ./src/
@@ -58,11 +58,11 @@ CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--re
 FROM base as builder
 
 # Copy dependency files
-COPY pyproject.toml .
-COPY README.md .
+COPY pyproject.toml uv.lock README.md ./
+COPY scripts/install-locked.sh ./scripts/
 
 # Install production dependencies only
-RUN uv pip install -e .
+RUN scripts/install-locked.sh
 
 # Copy application code
 COPY src/ ./src/
