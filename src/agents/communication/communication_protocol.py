@@ -578,6 +578,7 @@ class CommunicationProtocol:
                 # Aliases used by different agents
                 "research_question": query_text,
                 "text": query_text,
+                "background": getattr(msg_content, "background", ""),
             }
             if (
                 hasattr(msg_content, "intermediate_outputs")
