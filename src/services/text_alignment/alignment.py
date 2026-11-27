@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 NORMALIZER_VERSION = "1"
@@ -174,23 +174,47 @@ class SpanMatch:
     coverage: ContainmentResult | None = None
 
 
+@dataclass(frozen=True)
+class PreparedSource:
+    """A source normalized once, so many quotes can be located without re-normalizing."""
+
+    raw: str
+    normalized: NormalizedText
+
+
+def prepare(source: str) -> PreparedSource:
+    return PreparedSource(source, normalize(source))
+
+
+def locate_prepared(quote: str, prepared: PreparedSource) -> SpanMatch:
+    """``locate`` over a prepared source; NOT_FOUND carries no coverage."""
+    if not quote.strip():
+        return SpanMatch(MatchKind.NOT_FOUND)
+    start = prepared.raw.find(quote)
+    if start >= 0:
+        return SpanMatch(MatchKind.EXACT, start, start + len(quote))
+    normalized_quote = normalize(quote)
+    spans = prepared.normalized.raw_spans
+    at = prepared.normalized.text.find(normalized_quote.text)
+    if not normalized_quote.text or at < 0:
+        return SpanMatch(MatchKind.NOT_FOUND)
+    raw_start = spans[at][0]
+    raw_end = spans[at + len(normalized_quote.text) - 1][1]
+    return SpanMatch(
+        MatchKind.NORMALIZED,
+        raw_start,
+        raw_end,
+        normalized_quote.applied | normalize(prepared.raw[raw_start:raw_end]).applied,
+    )
+
+
 def locate(quote: str, source: str) -> SpanMatch:
-    if quote.strip():
-        start = source.find(quote)
-        if start >= 0:
-            return SpanMatch(MatchKind.EXACT, start, start + len(quote))
-        normalized_quote = normalize(quote)
-        normalized_source = normalize(source)
-        at = normalized_source.text.find(normalized_quote.text)
-        if normalized_quote.text and at >= 0:
-            raw_start = normalized_source.raw_spans[at][0]
-            raw_end = normalized_source.raw_spans[at + len(normalized_quote.text) - 1][
-                1
-            ]
-            return SpanMatch(
-                MatchKind.NORMALIZED,
-                raw_start,
-                raw_end,
-                normalized_quote.applied | normalize(source[raw_start:raw_end]).applied,
-            )
-    return SpanMatch(MatchKind.NOT_FOUND, coverage=containment(quote, source))
+    if not quote.strip():
+        return SpanMatch(MatchKind.NOT_FOUND, coverage=containment(quote, source))
+    start = source.find(quote)
+    if start >= 0:
+        return SpanMatch(MatchKind.EXACT, start, start + len(quote))
+    match = locate_prepared(quote, prepare(source))
+    if match.kind is MatchKind.NOT_FOUND:
+        return replace(match, coverage=containment(quote, source))
+    return match

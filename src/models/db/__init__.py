@@ -11,6 +11,7 @@ from src.models.db.audit_log import AuditEventType, AuditLog, AuditSeverity
 from src.models.db.base import Base, BaseModel
 from src.models.db.capability import AgentCapabilityApproval, AgentCapabilityGrant
 from src.models.db.claim_support import AgentClaimSupport
+from src.models.db.document_critique import CritiqueFinding, DocumentCritique
 from src.models.db.evidence import AgentEvidence
 from src.models.db.experiment import (
     Experiment,
@@ -63,6 +64,8 @@ __all__ = [
     "AuditSeverity",
     "Base",
     "BaseModel",
+    "CritiqueFinding",
+    "DocumentCritique",
     "EventDeliveryStatus",
     "Experiment",
     "ExperimentAnalysis",

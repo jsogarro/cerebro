@@ -13,10 +13,13 @@ from .alignment import (
     ContainmentResult,
     MatchKind,
     NormalizedText,
+    PreparedSource,
     SpanMatch,
     containment,
     locate,
+    locate_prepared,
     normalize,
+    prepare,
 )
 
 __all__ = [
@@ -26,9 +29,12 @@ __all__ = [
     "ContainmentResult",
     "MatchKind",
     "NormalizedText",
+    "PreparedSource",
     "SpanMatch",
     "alignment",
     "containment",
     "locate",
+    "locate_prepared",
     "normalize",
+    "prepare",
 ]
