@@ -190,9 +190,9 @@ class CostOptimizer:
         models = {}
 
         # Basic tier models
-        models["llama-3.3-70b"] = ModelSpec(
-            name="llama-3.3-70b",
-            provider="ollama",
+        models["llama3.3:70b"] = ModelSpec(
+            name="llama3.3:70b",
+            provider="llama",
             tier=ModelTier.STANDARD,
             cost_per_1k_tokens=0.0008,
             avg_latency_ms=30,
@@ -222,7 +222,7 @@ class CostOptimizer:
 
         models["gemini-pro"] = ModelSpec(
             name="gemini-pro",
-            provider="google",
+            provider="gemini",
             tier=ModelTier.STANDARD,
             cost_per_1k_tokens=0.001,
             avg_latency_ms=100,
@@ -233,36 +233,6 @@ class CostOptimizer:
             rate_limit=5000,
             supports_streaming=False,
             quality_score=0.85,
-        )
-
-        models["claude-3-haiku"] = ModelSpec(
-            name="claude-3-haiku",
-            provider="anthropic",
-            tier=ModelTier.BASIC,
-            cost_per_1k_tokens=0.0005,
-            avg_latency_ms=20,
-            context_window=200000,
-            strengths=["speed", "cost", "concise"],
-            weaknesses=["complex_reasoning"],
-            availability=0.99,
-            rate_limit=15000,
-            supports_streaming=True,
-            quality_score=0.70,
-        )
-
-        models["qwen3-72b"] = ModelSpec(
-            name="qwen3-72b",
-            provider="alibaba",
-            tier=ModelTier.SPECIALIZED,
-            cost_per_1k_tokens=0.0015,
-            avg_latency_ms=40,
-            context_window=150000,
-            strengths=["multilingual", "translation", "international"],
-            weaknesses=["english_reasoning"],
-            availability=0.97,
-            rate_limit=2000,
-            supports_streaming=True,
-            quality_score=0.80,
         )
 
         custom_models = self.config.get("custom_models", {})
@@ -468,7 +438,6 @@ class CostOptimizer:
 
         perfect_fits = {
             "deepseek-v3": ["analytical", "logical", "mathematical"],
-            "qwen3-72b": ["multilingual", "translation"],
             "gemini-pro": ["multimodal", "general"],
         }
 

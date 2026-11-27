@@ -12,6 +12,7 @@ limit. Tool failures are returned as structured failures without a fabricated
 model answer.
 """
 
+import hashlib
 import json
 from dataclasses import dataclass
 from decimal import Decimal
@@ -191,6 +192,9 @@ class PlanProviderUnavailableError(RuntimeError):
     """
 
 
+_PLAN_ROUTERS: dict[tuple[str, str, int], Any] = {}
+
+
 @dataclass(frozen=True)
 class _GenerationRoute:
     """A resolved provider router plus the exact routing decision to use."""
@@ -358,13 +362,23 @@ class LLMWorkerAgentBase(BaseAgent):
         model_name = policy["primary"]["model"]
         provider_configs = settings.get_ai_brain_config()["providers"]
         provider_config = {**provider_configs.get(provider_name, {}), "enabled": True}
-        router = ModelRouter(
-            {
-                "providers": {provider_name: provider_config},
-                "enable_fallback": False,
-            },
-            component_registry=self.config.get("component_registry"),
-        )
+        registry = self.config.get("component_registry")
+        # A router per call would rebuild the provider and refetch its catalog
+        # on every worker call; one per (provider, config, registry) is enough.
+        # Hashed so the cache never holds the provider credential itself.
+        fingerprint = hashlib.sha256(
+            repr(sorted(provider_config.items())).encode()
+        ).hexdigest()
+        cache_key = (provider_name, fingerprint, id(registry))
+        router = _PLAN_ROUTERS.get(cache_key)
+        if router is None:
+            router = _PLAN_ROUTERS[cache_key] = ModelRouter(
+                {
+                    "providers": {provider_name: provider_config},
+                    "enable_fallback": False,
+                },
+                component_registry=registry,
+            )
         return _GenerationRoute(
             router=router,
             routing_decision={

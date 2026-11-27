@@ -39,10 +39,16 @@ async def test_readiness_reports_grammar_checker():
     assert "grammar" in await _checks()
 
 
+async def test_readiness_reports_providers_informationally():
+    # Unprobed readiness is "unknown", never "ok", and never gates /ready (J4:18).
+    assert (await _checks())["providers"] in {"unknown", "unconfigured"}
+
+
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="P04: provider circuit state is not surfaced by readiness",
+    reason="P04-C: observed provider health and circuit state are not surfaced",
 )
-async def test_readiness_reports_provider_circuit():
-    assert "providers" in await _checks()
+async def test_readiness_reports_observed_provider_state():
+    assert (await _checks())["providers"] not in {"unknown", "unconfigured"}
+    pytest.fail("observed provider state landed: assert the circuit state value")

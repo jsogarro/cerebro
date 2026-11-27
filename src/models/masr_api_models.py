@@ -251,8 +251,8 @@ class RouterStatus(BaseModel):
     performance_metrics: dict[str, dict[str, float]] = Field(
         description="Performance metrics by strategy"
     )
-    model_availability: dict[str, bool] = Field(
-        description="Model provider availability"
+    model_availability: dict[str, bool | None] = Field(
+        description="Model provider availability; null when configured but not probed"
     )
     learning_metrics: dict[str, Any] = Field(description="Learning system metrics")
 

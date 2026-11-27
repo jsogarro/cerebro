@@ -167,11 +167,23 @@ async def test_routing_picks_only_from_the_shapes_provider_allowlist():
     router = MASRouter(
         config=settings_to_router_config(get_settings(), fixture_mode=True)
     )
-    for provider in ("google", "deepseek"):
+    for provider in ("gemini", "deepseek"):
         shape = replace(ENTRY.shape(), provider_allowlist=(provider,))
         decision = await router.route("What is photosynthesis?", {}, shape=shape)
         assert decision.optimization_result.primary_model.provider == provider
         assert decision.optimization_result.fallback_models == []
+
+
+@pytest.mark.asyncio
+async def test_an_allowlist_no_model_satisfies_is_refused_not_rerouted():
+    from dataclasses import replace
+
+    router = MASRouter(
+        config=settings_to_router_config(get_settings(), fixture_mode=True)
+    )
+    shape = replace(ENTRY.shape(), provider_allowlist=("no-such-provider",))
+    with pytest.raises(WorkflowShapeUnsupportedError):
+        await router.route("What is photosynthesis?", {}, shape=shape)
 
 
 @pytest.mark.asyncio

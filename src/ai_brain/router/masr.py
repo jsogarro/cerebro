@@ -621,6 +621,12 @@ class MASRouter:
                             error=str(trace_err),
                             query_id=query_id,
                         )
+                if shape is not None:
+                    # The fallback decision ignores the shape, so a constrained
+                    # launch would run outside its catalogue entry.
+                    raise WorkflowShapeUnsupportedError(
+                        f"no route satisfies the workflow shape: {type(e).__name__}"
+                    ) from e
                 return self._create_fallback_decision(query_id, query, e)
 
     def _select_routing_strategy(
@@ -1884,8 +1890,8 @@ class MASRouter:
         )
 
         fallback_model = ModelSpec(
-            name="llama-3.3-70b",
-            provider="ollama",
+            name="llama3.3:70b",
+            provider="llama",
             tier=ModelTier.STANDARD,
             cost_per_1k_tokens=0.0008,
             avg_latency_ms=30,
@@ -1894,7 +1900,7 @@ class MASRouter:
         )
 
         fallback_estimate = CostEstimate(
-            model_name="llama-3.3-70b",
+            model_name="llama3.3:70b",
             estimated_tokens=1000,
             cost_per_request=0.0008,
             total_monthly_cost=80.0,

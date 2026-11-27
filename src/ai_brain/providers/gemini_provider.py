@@ -63,11 +63,6 @@ class GeminiProvider(BaseProvider):
 
         self.gemini_service: GeminiService | None = None
         if GEMINI_SERVICE_AVAILABLE and GeminiServiceClass is not None:
-            gemini_config_obj: dict[str, Any] = {
-                "api_key": self.api_key,
-                "model": self.default_model,
-            }
-            gemini_config_obj.update(config.get("gemini_service_config", {}))
             self.gemini_service = GeminiServiceClass(self.api_key)
         else:
             logger.warning("GeminiService not available, using direct API calls")
@@ -97,7 +92,7 @@ class GeminiProvider(BaseProvider):
     def _get_provider_name(self) -> str:
         return "gemini"
 
-    def _get_supported_capabilities(self) -> list[ModelCapability]:
+    def _get_supported_capabilities_legacy(self) -> list[ModelCapability]:
         return [
             ModelCapability.TEXT_GENERATION,
             ModelCapability.CHAT,
@@ -106,7 +101,7 @@ class GeminiProvider(BaseProvider):
             ModelCapability.MULTIMODAL,
         ]
 
-    def _get_supported_models(self) -> list[str]:
+    def _get_supported_models_legacy(self) -> list[str]:
         return list(self.model_specs.keys())
 
     def _get_model_context_window(self, model_name: str) -> int:
@@ -125,6 +120,8 @@ class GeminiProvider(BaseProvider):
         self, request: ModelRequest, model_name: str | None = None
     ) -> ModelResponse:
         """Generate response using Gemini models."""
+
+        await self.ensure_configuration_loaded()
 
         if not await self.validate_request(request):
             return self._create_error_response(
@@ -175,11 +172,9 @@ class GeminiProvider(BaseProvider):
             raise ValueError("GeminiService not available")
 
         try:
-            # This would use the existing GeminiService method
-            service_response = await self.gemini_service.generate_research_plan(
-                query=prompt
-            )
-            service_text = str(service_response)
+            service_text = await self.gemini_service.generate_content(prompt)
+            # The service runs its own configured model, whatever was requested.
+            model_name = self.gemini_service.model_name
 
             end_time = datetime.now()
             latency_ms = int((end_time - start_time).total_seconds() * 1000)

@@ -27,6 +27,8 @@ from .base_provider import (
 
 logger = get_logger(__name__)
 
+_REQUEST_FAULTS = frozenset({"validation_error", "model_error"})
+
 
 @dataclass
 class ProviderRegistry:
@@ -203,17 +205,12 @@ class ModelRouter:
         if not provider:
             raise ValueError(f"Provider not available: {provider_name}")
 
-        health_status = await self._get_provider_health(provider_name)
-        if not health_status.healthy:
+        if self._is_observed_unhealthy(provider_name):
             raise RuntimeError(f"Provider {provider_name} is unhealthy")
 
-        # Generate response
         response = await provider.generate(request, model_name)
 
-        if not response.success:
-            health_status.recent_errors.append(
-                f"{datetime.now()}: {response.error_message}"
-            )
+        self._record_outcome(provider_name, response)
 
         return response
 
@@ -225,18 +222,8 @@ class ModelRouter:
 
         available_providers = [
             name
-            for name, provider in self.registry.providers.items()
-            if isinstance(self.registry.health_status.get(name), ProviderHealthStatus)
-            and self.registry.health_status.get(
-                name,
-                ProviderHealthStatus(
-                    provider_name=name,
-                    healthy=False,
-                    avg_latency_ms=0,
-                    last_check=datetime.now(),
-                    error_rate=0.0,
-                ),
-            ).healthy
+            for name in self.registry.providers
+            if not self._is_observed_unhealthy(name)
         ]
 
         if not available_providers:
@@ -279,6 +266,36 @@ class ModelRouter:
             ],
         }
 
+    def _record_outcome(self, provider_name: str, response: ModelResponse) -> None:
+        """Let real requests, not paid probes, tell us a provider is down.
+
+        Request-specific rejections say nothing about the provider, so they
+        neither mark nor clear it.
+        """
+        if response.error_type in _REQUEST_FAULTS:
+            return
+        now = datetime.now()
+        status = self.registry.health_status.setdefault(
+            provider_name, ProviderHealthStatus(provider_name=provider_name)
+        )
+        status.healthy = response.success
+        self.registry.last_health_check[provider_name] = now
+        if not response.success:
+            status.last_error = response.error_message
+            status.recent_errors.append(f"{now}: {response.error_message}")
+
+    def _is_observed_unhealthy(self, provider_name: str) -> bool:
+        """Whether an explicit probe recently found the provider down.
+
+        Request paths must not probe: a probe is a paid model call. A provider
+        nobody has probed is attempted, and the call's own outcome decides.
+        """
+        status = self.registry.health_status.get(provider_name)
+        checked = self.registry.last_health_check.get(provider_name)
+        if status is None or checked is None or status.healthy:
+            return False
+        return datetime.now() - checked <= timedelta(seconds=self.health_check_interval)
+
     async def _get_provider_health(self, provider_name: str) -> ProviderHealthStatus:
         """Get provider health status with caching."""
 
@@ -305,6 +322,7 @@ class ModelRouter:
                         provider_name=provider_name, healthy=False, last_error=str(e)
                     )
                     self.registry.health_status[provider_name] = health_status
+                    self.registry.last_health_check[provider_name] = now
 
         return self.registry.health_status.get(
             provider_name,
@@ -329,9 +347,7 @@ class ModelRouter:
         available_models = {}
 
         for provider_name, provider in self.registry.providers.items():
-            health_status = await self._get_provider_health(provider_name)
-
-            if health_status.healthy:
+            if not self._is_observed_unhealthy(provider_name):
                 available_models[provider_name] = provider.supported_models
 
         return available_models
@@ -405,8 +421,7 @@ class ModelRouter:
             yield f"Error: Provider {primary_provider} not available"
             return
 
-        health_status = await self._get_provider_health(primary_provider)
-        if not health_status.healthy:
+        if self._is_observed_unhealthy(primary_provider):
             yield f"Error: Provider {primary_provider} is unhealthy"
             return
 
