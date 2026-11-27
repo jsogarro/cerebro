@@ -133,10 +133,11 @@ class EvaluationDispatcher:
         repository: EvaluationResultRepository,
     ) -> int:
         try:
-            results = self._validated(evaluator, ctx, await evaluator.evaluate(ctx))
+            results = self._validated(evaluator, ctx, await _evaluate(evaluator, ctx))
         except _ContractViolationError:
             results = [self._error(evaluator, ctx, EVALUATOR_CONTRACT_VIOLATION_CODE)]
-        except Exception as exc:
+        except _EvaluatorRaisedError as failure:
+            exc = failure.__cause__
             logger.warning(
                 "evaluator_raised",
                 evaluator_id=evaluator.evaluator_id,
@@ -161,12 +162,7 @@ class EvaluationDispatcher:
             await ctx.session.commit()
         except Exception:
             await ctx.session.rollback()
-            logger.exception(
-                "evaluation_write_failed",
-                evaluator_id=evaluator.evaluator_id,
-                run_id=ctx.run_id,
-            )
-            return 0
+            raise
         return written
 
     @staticmethod
@@ -237,3 +233,18 @@ class EvaluationDispatcher:
 
 class _ContractViolationError(Exception):
     """An evaluator returned a batch the dispatcher refuses to store."""
+
+
+class _EvaluatorRaisedError(Exception):
+    """An evaluator raised; its failure is recorded as an error row."""
+
+
+async def _evaluate(
+    evaluator: Evaluator, ctx: EvaluationContext
+) -> Collection[EvaluationResult]:
+    # Evaluators are pluggable, so any failure is translated at this one
+    # boundary rather than letting one evaluator abort its siblings.
+    try:
+        return await evaluator.evaluate(ctx)
+    except Exception as exc:
+        raise _EvaluatorRaisedError from exc

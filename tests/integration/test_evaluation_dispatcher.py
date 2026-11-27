@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from src.core.contracts import (
@@ -344,3 +345,15 @@ async def test_claims_of_another_artifact_are_not_counted(
 
     (row,) = await _rows(factory)
     assert (row.status, row.details["material_claims"]) == ("passed", 1)
+
+
+async def test_a_failed_write_is_raised_not_reported_as_nothing_to_record(
+    factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fail(*_: Any, **__: Any) -> Any:
+        raise OperationalError("INSERT", None, Exception("connection lost"))
+
+    monkeypatch.setattr(EvaluationResultRepository, "append_evaluation", fail)
+
+    with pytest.raises(OperationalError):
+        await _run(_dispatcher(factory, _Probe("a")))
