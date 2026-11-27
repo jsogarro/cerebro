@@ -15,11 +15,11 @@ from src.models.report import (
     VisualizationType,
     format_score,
 )
-from src.services.report_config import ReportQualityConfig, ReportTemplateConfig
-from src.services.visualization_generator import (
+from src.services.chart_specs import (
     create_confidence_radar_viz,
     create_source_distribution_viz,
 )
+from src.services.report_config import ReportQualityConfig, ReportTemplateConfig
 
 logger = get_logger()
 

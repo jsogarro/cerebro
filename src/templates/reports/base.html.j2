@@ -320,6 +320,12 @@
                 <div class="metadata-label">Generated</div>
                 <div class="metadata-value">{{ report.metadata.generated_at.strftime('%B %d, %Y at %H:%M UTC') }}</div>
             </div>
+            {% if report.metadata.source_kind | source_label %}
+            <div class="metadata-item">
+                <div class="metadata-label">Content source</div>
+                <div class="metadata-value">{{ report.metadata.source_kind | source_label }}</div>
+            </div>
+            {% endif %}
             <div class="metadata-item">
                 <div class="metadata-label">Quality Score</div>
                 <div class="metadata-value">{{ report.metadata.quality_score | format_score }}</div>
@@ -404,13 +410,13 @@
     </main>
     {% endblock %}
     
-    {% if report.visualizations and config.include_visualizations %}
+    {% if report.visualizations and config.include_visualizations and settings.enable_visualizations %}
     {% block visualizations %}
     <div class="visualizations-section">
         <h2>Visualizations</h2>
         {% for viz in report.visualizations %}
         <div id="viz-{{ viz.id }}" class="visualization">
-            {{ viz_body(viz, visualization_images.get(viz.id)) }}
+            {{ viz_body(viz) }}
             {% if viz.caption %}
             <div class="visualization-caption">{{ viz.caption }}</div>
             {% endif %}

@@ -82,6 +82,7 @@ def _row() -> MagicMock:
         page_count=1,
         quality_score=0.5,
         confidence_score=0.5,
+        configuration={},
         generation_time_seconds=1.0,
         formats=[],
     )

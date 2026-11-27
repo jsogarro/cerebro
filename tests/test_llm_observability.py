@@ -71,7 +71,6 @@ REPORT_SERVICE_MODULES = [
     SRC_DIR / "services" / "report_output_generator.py",
     SRC_DIR / "services" / "report_structure_builder.py",
     SRC_DIR / "services" / "report_storage.py",
-    SRC_DIR / "services" / "visualization_generator.py",
     SRC_DIR / "services" / "exporters" / "pdf_exporter.py",
     SRC_DIR / "services" / "exporters" / "docx_exporter.py",
     SRC_DIR / "services" / "exporters" / "latex_exporter.py",

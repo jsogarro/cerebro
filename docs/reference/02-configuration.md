@@ -343,10 +343,7 @@ No variable named `GEMINI_TIMEOUT` or `GEMINI_RETRY_*` is read anywhere in `src`
 | `TEMPLATE_CACHE_TTL` | `3600` | none | no effect |
 | `MIN_REPORT_WORD_COUNT` | `100` | `ReportQualityConfig.get_min_word_count` | fallback for a report type with no entry; every `ReportType` has an entry, so the value is never used |
 | `MIN_REPORT_SOURCES` | `1` | `ReportQualityConfig.get_min_sources` | fallback for a report type with no entry; every `ReportType` has an entry, so the value is never used |
-| `ENABLE_VISUALIZATIONS` | `true` | `VisualizationGenerator` | when false no chart image is rendered and charts appear as value tables |
-| `MAX_VISUALIZATIONS_PER_REPORT` | `20` | `VisualizationGenerator` | caps the charts rendered per report |
-| `DEFAULT_CHART_WIDTH` | `800` | `VisualizationGenerator` | chart width in pixels |
-| `DEFAULT_CHART_HEIGHT` | `600` | `VisualizationGenerator` | chart height in pixels |
+| `ENABLE_VISUALIZATIONS` | `true` | `_visualization.html.j2` callers in the HTML templates | when false the HTML report omits the chart data tables |
 
 ### CLI
 

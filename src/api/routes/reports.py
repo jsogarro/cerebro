@@ -37,6 +37,7 @@ from src.services.report_generator import ReportGenerator
 from src.services.report_source_projection import (
     ReportSourceRepository,
     ReportSourceUnavailableError,
+    SourceKind,
 )
 from src.services.report_storage import (
     ReportStorageError,
@@ -111,6 +112,7 @@ class ReportResponse(BaseModel):
     page_count: int
     quality_score: float | None = None
     confidence_score: float | None = None
+    source_kind: str | None = None
     created_at: str
     generation_time_seconds: float | None = None
     download_urls: dict[str, str] = Field(default_factory=dict)
@@ -137,6 +139,7 @@ class ReportResponse(BaseModel):
             page_count=report.page_count or 0,
             quality_score=report.quality_score,
             confidence_score=report.confidence_score,
+            source_kind=(report.configuration or {}).get("source_kind"),
             created_at=report.created_at.isoformat(),
             generation_time_seconds=report.generation_time_seconds,
             download_urls=download_urls,
@@ -210,7 +213,7 @@ async def _validate_project_access(
     if project_id is None:
         return None
     try:
-        projection = await ReportSourceRepository(session).load_project_source(
+        visible = await ReportSourceRepository(session).assert_available(
             project_id, user_id=user_id, organization_id=organization_id
         )
     except ReportSourceUnavailableError as exc:
@@ -218,7 +221,7 @@ async def _validate_project_access(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "report_source_unavailable", "message": str(exc)},
         ) from exc
-    if projection is None:
+    if not visible:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Project {project_id} not found",
@@ -324,7 +327,14 @@ async def generate_report(
             project_id=trusted_project_id,
             organization_id=organization_id,
             domains=request.domains,
-            configuration=config.model_dump(mode="json"),
+            configuration={
+                **config.model_dump(mode="json"),
+                "source_kind": (
+                    SourceKind.PROJECT_RESULTS
+                    if trusted_project_id
+                    else SourceKind.USER_SUPPLIED
+                ).value,
+            },
             formats_generated=[],
             generation_status="pending",
             created_by=str(authenticated_user_id),

@@ -132,6 +132,7 @@ class TestReportsAPI:
             pending_report.word_count = 0
             pending_report.page_count = 0
             pending_report.quality_score = 0.0
+            pending_report.configuration = {}
             pending_report.confidence_score = 0.0
             pending_report.created_at = datetime.now()
             pending_report.generation_time_seconds = None
@@ -173,6 +174,7 @@ class TestReportsAPI:
         mock_report.word_count = 1500
         mock_report.page_count = 5
         mock_report.quality_score = 0.85
+        mock_report.configuration = {}
         mock_report.confidence_score = 0.78
         mock_report.created_at.isoformat.return_value = "2024-01-01T00:00:00Z"
         mock_report.generation_time_seconds = 45.0
@@ -294,6 +296,7 @@ class TestReportsAPI:
                 page_count=3,
                 quality_score=0.8,
                 confidence_score=0.7,
+                configuration={},
                 created_at=MagicMock(),
                 generation_time_seconds=30.0,
                 formats=[],
@@ -308,6 +311,7 @@ class TestReportsAPI:
                 page_count=2,
                 quality_score=0.9,
                 confidence_score=0.8,
+                configuration={},
                 created_at=MagicMock(),
                 generation_time_seconds=20.0,
                 formats=[],
@@ -365,6 +369,7 @@ class TestReportsAPI:
                 page_count=7,
                 quality_score=0.85,
                 confidence_score=0.8,
+                configuration={},
                 created_at=MagicMock(),
                 generation_time_seconds=60.0,
                 formats=[],
@@ -565,6 +570,7 @@ class TestReportsAPI:
         report.word_count = 0
         report.page_count = 0
         report.quality_score = 0.0
+        report.configuration = {}
         report.confidence_score = 0.0
         report.created_at = datetime.now()
         report.generation_time_seconds = None
@@ -729,6 +735,62 @@ async def _seed_project(
         return project.id
 
 
+async def test_soft_deleted_result_rows_are_not_reported(project_db):
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+
+    from src.models.db.research_result import ResearchResult
+    from src.services.report_source_projection import ReportSourceRepository
+
+    user_id, org_id = uuid4(), uuid4()
+    project_id = await _seed_project(
+        project_db, user_id=user_id, organization_id=org_id
+    )
+    async with project_db() as session:
+        await session.execute(
+            update(ResearchResult)
+            .where(ResearchResult.result_type == "finding")
+            .values(deleted_at=datetime.now(UTC))
+        )
+        await session.commit()
+        projection = await ReportSourceRepository(session).load_project_source(
+            project_id, user_id=user_id, organization_id=org_id
+        )
+
+    assert projection is not None
+    assert "STORED-FINDING-SENTINEL" not in str(projection.input_data)
+
+
+async def test_project_whose_only_results_are_soft_deleted_is_a_conflict(project_db):
+    from datetime import UTC, datetime
+
+    from fastapi import BackgroundTasks, HTTPException
+    from sqlalchemy import update
+
+    from src.api.routes import reports as routes
+    from src.models.db.research_result import ResearchResult
+
+    user_id, org_id = uuid4(), uuid4()
+    project_id = await _seed_project(
+        project_db, user_id=user_id, organization_id=org_id
+    )
+    async with project_db() as session:
+        await session.execute(
+            update(ResearchResult).values(deleted_at=datetime.now(UTC))
+        )
+        await session.commit()
+        with pytest.raises(HTTPException) as raised:
+            await routes.generate_report(
+                _generate_request(project_id),
+                BackgroundTasks(),
+                session,
+                TenantContext(str(user_id), str(org_id)),
+            )
+
+    assert raised.value.status_code == 409
+
+
 def _generate_request(project_id, **overrides):
     from src.api.routes.reports import CreateReportRequest
 
@@ -747,6 +809,8 @@ async def test_project_report_renders_stored_results_not_caller_data(
     from fastapi import BackgroundTasks
 
     from src.api.routes import reports as routes
+    from src.api.routes.reports import ReportResponse
+    from src.repositories.report_repository import ReportRepository
     from src.services.report_config import ReportSettings
 
     settings = ReportSettings(
@@ -780,6 +844,12 @@ async def test_project_report_renders_stored_results_not_caller_data(
     assert "0.99" not in payload
     assert '"quality_score": null' in payload
     assert '"source_kind": "project_results"' in payload
+    async with project_db() as session:
+        stored = await ReportRepository(session).get_report_with_formats(
+            response.id, organization_id=org_id, user_id=user_id
+        )
+    assert stored.configuration["source_kind"] == "project_results"
+    assert ReportResponse.from_db_report(stored).source_kind == "project_results"
     assert "Not evaluated" in html
     assert "<td>ai</td>" in html and "<td>2</td>" in html
 
@@ -874,6 +944,7 @@ def test_report_response_keeps_unknown_scores_unknown() -> None:
     report.word_count = 0
     report.page_count = 0
     report.quality_score = None
+    report.configuration = {}
     report.confidence_score = None
     report.created_at = datetime.now()
     report.generation_time_seconds = None

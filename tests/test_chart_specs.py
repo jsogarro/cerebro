@@ -1,7 +1,7 @@
 """Tests for visualization helper factory functions."""
 
 from src.models.report import VisualizationType
-from src.services.visualization_generator import (
+from src.services.chart_specs import (
     create_confidence_radar_viz,
     create_source_distribution_viz,
 )

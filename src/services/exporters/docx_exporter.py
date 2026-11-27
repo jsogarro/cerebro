@@ -32,6 +32,7 @@ from src.models.report import (
     ReportOutput,
     ReportSection,
     format_score,
+    source_label,
 )
 from src.services.report_config import ReportSettings
 
@@ -202,6 +203,9 @@ class DOCXExporter:
             ("Citations", str(report.metadata.total_citations)),
             ("Word Count", f"{report.metadata.word_count:,}"),
         ]
+
+        if label := source_label(report.metadata.source_kind):
+            metadata_items.append(("Content source", label))
 
         if report.domains:
             metadata_items.append(("Research Domains", ", ".join(report.domains)))

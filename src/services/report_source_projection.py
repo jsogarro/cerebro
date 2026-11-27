@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.db.research_project import ProjectStatus, ResearchProject
@@ -41,7 +41,15 @@ class ReportSourceProjection:
 
     @classmethod
     def user_supplied(cls, data: dict[str, Any]) -> "ReportSourceProjection":
-        return cls(SourceKind.USER_SUPPLIED, EvaluationAvailability.NOT_ATTEMPTED, data)
+        # Scores the caller typed in are claims, not evaluations; keeping them
+        # would print an unmeasured 99% as if the platform had measured it.
+        results = dict(data.get("aggregated_results", {}))
+        results.pop("confidence_score", None)
+        content = {k: v for k, v in data.items() if k != "quality_report"}
+        content["aggregated_results"] = results
+        return cls(
+            SourceKind.USER_SUPPLIED, EvaluationAvailability.UNAVAILABLE, content
+        )
 
     def as_input_data(self) -> dict[str, Any]:
         return {
@@ -93,11 +101,53 @@ def _aggregate(
     return results
 
 
+def _visible_to(
+    project_id: UUID, user_id: UUID, organization_id: UUID
+) -> tuple[Any, ...]:
+    return (
+        ResearchProject.id == project_id,
+        ResearchProject.user_id == user_id,
+        ResearchProject.organization_id == organization_id,
+        ResearchProject.deleted_at.is_(None),
+    )
+
+
+def _require_reportable(status: ProjectStatus, has_results: bool) -> None:
+    if status != ProjectStatus.COMPLETED:
+        raise ReportSourceUnavailableError(
+            f"Project is {status.value}; results are not final"
+        )
+    if not has_results:
+        raise ReportSourceUnavailableError("Project has no stored results")
+
+
 class ReportSourceRepository:
     """Reads a report's source from one project, scoped to its owner."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def assert_available(
+        self, project_id: UUID, *, user_id: UUID, organization_id: UUID
+    ) -> bool:
+        """Cheap pre-flight for the route: False when the caller cannot see the
+        project; raises when it is theirs but has nothing final to report."""
+        state = (
+            await self.session.execute(
+                select(
+                    ResearchProject.status,
+                    exists().where(
+                        ResearchResult.project_id == ResearchProject.id,
+                        ResearchResult.deleted_at.is_(None),
+                    ),
+                ).where(*_visible_to(project_id, user_id, organization_id))
+            )
+        ).one_or_none()
+        if state is None:
+            return False
+        status, has_results = state
+        _require_reportable(status, has_results)
+        return True
 
     async def load_project_source(
         self, project_id: UUID, *, user_id: UUID, organization_id: UUID
@@ -116,20 +166,13 @@ class ReportSourceRepository:
                     ResearchProject.status,
                     ResearchProject.quality_score,
                     ResearchProject.workflow_id,
-                ).where(
-                    ResearchProject.id == project_id,
-                    ResearchProject.user_id == user_id,
-                    ResearchProject.organization_id == organization_id,
-                    ResearchProject.deleted_at.is_(None),
-                )
+                ).where(*_visible_to(project_id, user_id, organization_id))
             )
         ).one_or_none()
         if project is None:
             return None
         if project.status != ProjectStatus.COMPLETED:
-            raise ReportSourceUnavailableError(
-                f"Project is {project.status.value}; results are not final"
-            )
+            _require_reportable(project.status, True)
 
         rows = (
             await self.session.execute(
@@ -145,8 +188,7 @@ class ReportSourceRepository:
                 .order_by(ResearchResult.created_at, ResearchResult.id)
             )
         ).all()
-        if not rows:
-            raise ReportSourceUnavailableError("Project has no stored results")
+        _require_reportable(project.status, bool(rows))
 
         return ReportSourceProjection(
             source_kind=SourceKind.PROJECT_RESULTS,

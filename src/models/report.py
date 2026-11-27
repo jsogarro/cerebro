@@ -207,6 +207,17 @@ def format_score(score: float | None) -> str:
     return "Not evaluated" if score is None else f"{score:.2%}"
 
 
+_SOURCE_LABELS = {
+    "user_supplied": "User-supplied content \u2014 not evaluated",
+    "project_results": "Stored project results \u2014 claim support not evaluated",
+}
+
+
+def source_label(source_kind: str | None) -> str | None:
+    """The line every output prints so supplied content is not read as verified."""
+    return _SOURCE_LABELS.get(source_kind or "")
+
+
 class ReportMetadata(BaseModel):
     """Metadata for a research report."""
 

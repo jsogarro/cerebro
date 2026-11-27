@@ -23,7 +23,7 @@ except ImportError:
     markdown_module = None
     MARKDOWN_AVAILABLE = False
 
-from src.models.report import Report, ReportType, format_score
+from src.models.report import Report, ReportType, format_score, source_label
 from src.services.report_config import ReportSettings, ReportTemplateConfig
 
 logger = get_logger()
@@ -137,6 +137,7 @@ class TemplateRenderer:
             "format_number": self._format_number_filter,
             "format_percentage": self._format_percentage_filter,
             "format_score": format_score,
+            "source_label": source_label,
             "strip_markdown": self._strip_markdown_filter,
             "format_citation_count": self._format_citation_count_filter,
             "capitalize_words": self._capitalize_words_filter,
@@ -154,12 +155,7 @@ class TemplateRenderer:
             "format_date": self._format_date,
         }
 
-    def render_report(
-        self,
-        report: Report,
-        template_name: str | None = None,
-        visualization_images: dict[str, str] | None = None,
-    ) -> str:
+    def render_report(self, report: Report, template_name: str | None = None) -> str:
         """
         Render a report using the appropriate template.
 
@@ -183,7 +179,6 @@ class TemplateRenderer:
 
             # Prepare template context
             context = self._build_template_context(report)
-            context["visualization_images"] = visualization_images or {}
 
             # Render template
             rendered = template.render(**context)

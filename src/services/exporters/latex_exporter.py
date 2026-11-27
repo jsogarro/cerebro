@@ -16,6 +16,7 @@ from src.models.report import (
     ReportFormat,
     ReportOutput,
     ReportSection,
+    source_label,
 )
 from src.services.report_config import ReportSettings
 
@@ -199,6 +200,11 @@ class LaTeXExporter:
         title_parts = []
 
         title_parts.append("\\maketitle")
+
+        if label := source_label(report.metadata.source_kind):
+            title_parts.append(
+                f"\\begin{{center}}\\textit{{{self._escape_latex(label)}}}\\end{{center}}"
+            )
 
         # Research question box
         title_parts.extend(

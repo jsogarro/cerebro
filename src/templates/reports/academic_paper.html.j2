@@ -425,12 +425,12 @@
 {% endblock %}
 
 {% block visualizations %}
-{% if report.visualizations %}
+{% if report.visualizations and settings.enable_visualizations %}
 <div class="academic-section">
     <h2>{{ section_counter.value }}. Figures and Tables</h2>
     {% for viz in report.visualizations %}
     <div class="figure">
-        {{ viz_body(viz, visualization_images.get(viz.id)) }}
+        {{ viz_body(viz) }}
         <div class="figure-caption">
             <strong>Figure {{ loop.index }}.</strong> {{ viz.title }}. 
             {% if viz.caption %}{{ viz.caption }}{% endif %}

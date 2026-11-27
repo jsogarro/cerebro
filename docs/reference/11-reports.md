@@ -12,7 +12,7 @@ The reports subsystem renders structured research reports into HTML, Markdown, J
 | HTML, Markdown and JSON output | Active | `ReportOutputGenerator.generate_formats` | `src/services/report_output_generator.py` (`ReportOutputGenerator`) |
 | PDF, LaTeX and DOCX export | Active | `ReportOutputGenerator.generate_formats` | `src/services/exporters/` (`PDFExporter`, `LaTeXExporter`, `DOCXExporter`) |
 | Report storage and integrity check | Active | `ReportStorageService` | `src/services/report_storage.py` (`ReportStorageService`) |
-| Chart image generation | Active, needs `kaleido` | `ReportOutputGenerator.generate_html` | `src/services/visualization_generator.py` (`VisualizationGenerator`) |
+| Chart data tables | Active | `ReportOutputGenerator.generate_html` | `src/services/chart_specs.py`, `src/templates/reports/_visualization.html.j2` |
 | Completion notification | Not wired | `notify_completion` request field | `src/api/routes/reports.py` (`CreateReportRequest`) |
 
 ## Routes
@@ -69,7 +69,7 @@ The first entry of `formats` becomes the configuration's `format`. `include_meth
 
 With a `project_id`, the route checks the project through `ReportSourceRepository.load_project_source`, then the background task opens its own session and loads it again under the authenticated user and organization passed from the route, never from `workflow_data`. The projection is read only for a project that belongs to the caller, is not deleted and has status `completed` with at least one `research_results` row. Result rows map to report input by `result_type`: `finding` (grouped by `content.category`), `source`, `citation`, `methodology`, `comparison`, and `synthesis` or `summary` (insights and recommendations). The title, query and domains come from the project row; the caller's `workflow_data` is ignored when `project_id` is present. The report confidence is the mean of the result confidences, and the quality score is the project's stored `quality_score`. Either is `null` when the project has none.
 
-Without a `project_id`, the route merges the caller's `workflow_data` with `title`, `query` and `domains` from the request, and the report is labelled `user_supplied`. `_validate_workflow_data` requires `title` and `query`. No quality default is added: a report whose input carries no `quality_report.quality_score` has `quality_score` `null`, and the Markdown, HTML, DOCX and LaTeX outputs print `Not evaluated`. Section content comes from the keys of `aggregated_results`: `sources`, `findings`, `insights`, `citations`, `recommendations`, `methodologies`, `comparisons`, `conflict_resolutions`, `limitations`, `metrics` and `confidence_score`.
+Without a `project_id`, the route merges the caller's `workflow_data` with `title`, `query` and `domains` from the request, and the report is labelled `user_supplied` with evaluation `unavailable`. `_validate_workflow_data` requires `title` and `query`. Scores the caller supplies (`quality_report`, `aggregated_results.confidence_score`) are dropped, so `quality_score` and `confidence_score` are `null` and the Markdown, HTML, DOCX and LaTeX outputs print `Not evaluated` and a content-source line (`User-supplied content — not evaluated`). The source kind is stored in the report row's `configuration` and returned as `source_kind` in `ReportResponse`. Section content comes from the keys of `aggregated_results`: `sources`, `findings`, `insights`, `citations`, `recommendations`, `methodologies`, `comparisons`, `conflict_resolutions`, `limitations`, `metrics` and `confidence_score`.
 
 ## Generation pipeline
 
@@ -98,9 +98,9 @@ Formats:
 
 ### Templates
 
-`TemplateRenderer` builds a Jinja environment over `REPORT_TEMPLATE_PATH` with `FileSystemLoader`, HTML and XML autoescaping, `trim_blocks` and `lstrip_blocks` and registers filters (`markdown`, `truncate_words`, `format_number`, `format_percentage`, `format_score`, `strip_markdown`, `format_citation_count`, `capitalize_words`, `extract_first_sentence`, `format_duration`) and helper functions. The directory `src/templates/reports/` holds four templates: `base.html.j2`, `comprehensive_report.html.j2`, `executive_summary.html.j2` and `academic_paper.html.j2`, plus the partial `_visualization.html.j2` that the base and academic templates import. The report types `literature_review`, `methodology` and `synthesis` name templates that do not exist; the renderer then uses `base.html.j2`. When even the base template is missing, `generate_html` logs a warning and returns the basic HTML page. With `ENABLE_TEMPLATE_CACHE` true, loaded templates are cached per renderer instance with no expiry.
+`TemplateRenderer` builds a Jinja environment over `REPORT_TEMPLATE_PATH` with `FileSystemLoader`, HTML and XML autoescaping, `trim_blocks` and `lstrip_blocks` and registers filters (`markdown`, `truncate_words`, `format_number`, `format_percentage`, `format_score`, `source_label`, `strip_markdown`, `format_citation_count`, `capitalize_words`, `extract_first_sentence`, `format_duration`) and helper functions. The directory `src/templates/reports/` holds four templates: `base.html.j2`, `comprehensive_report.html.j2`, `executive_summary.html.j2` and `academic_paper.html.j2`, plus the partial `_visualization.html.j2` that the base and academic templates import. The report types `literature_review`, `methodology` and `synthesis` name templates that do not exist; the renderer then uses `base.html.j2`. When even the base template is missing, `generate_html` logs a warning and returns the basic HTML page. With `ENABLE_TEMPLATE_CACHE` true, loaded templates are cached per renderer instance with no expiry.
 
-`ReportOutputGenerator.generate_html` renders each visualization specification through `VisualizationGenerator` to a PNG and embeds it as a `data:image/png;base64,...` image; only strictly base64 payloads are embedded. PNG export needs the `kaleido` package, which is not a declared dependency; without it no image is produced and the templates print the plotted values as an escaped table. The builder records a source-by-year bar chart when sources span more than one year, and a pie of sources per domain when sources carry at least two distinct `domain` values.
+Charts appear in the HTML report as escaped tables of the plotted values; no chart image is rendered. `ReportStructureBuilder` records a source-by-year bar, a pie of sources per domain (when sources carry at least two distinct `domain` values) and a confidence radar (when at least three finding categories carry confidences), through `src/services/chart_specs.py`. `ENABLE_VISUALIZATIONS=false` omits the tables.
 
 ## Configuration
 
@@ -128,7 +128,7 @@ Stored files are written to `<REPORT_STORAGE_PATH>/<report_id>/report.<extension
 - `src/services/exporters/`: PDF, LaTeX and DOCX exporters
 - `src/services/report_storage.py`: file and database storage, search, statistics, integrity, deletion
 - `src/services/report_config.py`: `ReportSettings` and the type, format and quality tables
-- `src/services/visualization_generator.py`: chart generator with no production importer
+- `src/services/chart_specs.py`: chart specifications for the builder
 - `src/templates/reports/`: Jinja templates
 - `src/models/report.py`: `Report`, `ReportConfiguration`, request models and enums
 - `src/models/db/generated_report.py`: `GeneratedReport` and `ReportFormat` tables

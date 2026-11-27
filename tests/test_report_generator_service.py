@@ -263,7 +263,7 @@ class TestTruthfulReportInput:
         assert report.metadata.quality_score is None
         assert report.metadata.confidence_score is None
         assert report.metadata.source_kind == "user_supplied"
-        assert report.metadata.evaluation_availability == "not_attempted"
+        assert report.metadata.evaluation_availability == "unavailable"
 
     @pytest.mark.asyncio
     async def test_unknown_quality_is_explicit_in_every_output(
@@ -291,7 +291,7 @@ class TestTruthfulReportInput:
             assert "0.0%" not in text and "0.00%" not in text and "80.0%" not in text
 
     @pytest.mark.asyncio
-    async def test_user_supplied_quality_is_kept_and_labelled(
+    async def test_caller_supplied_scores_are_never_presented_as_evaluated(
         self, generator: ReportGenerator
     ) -> None:
         from src.models.report import ReportGenerationRequest
@@ -300,15 +300,39 @@ class TestTruthfulReportInput:
             workflow_data={
                 "title": "T",
                 "query": "q",
-                "quality_report": {"quality_score": 0.42},
-            }
+                "quality_report": {"quality_score": 0.99},
+                "aggregated_results": {"confidence_score": 0.97},
+            },
+            formats=[ReportFormat.HTML],
         )
         report = await generator._build_report_structure(
             await generator._extract_input_data(request), ReportConfiguration(), "r1"
         )
 
-        assert report.metadata.quality_score == 0.42
-        assert report.metadata.source_kind == "user_supplied"
+        assert report.metadata.quality_score is None
+        assert report.metadata.confidence_score is None
+        label = "User-supplied content \u2014 not evaluated"
+        outputs = {
+            "md": (await generator._generate_markdown(report)).content,
+            "basic_html": generator._generate_basic_html(report),
+            "html": (await generator._generate_html(report)).content,
+            "latex": generator.output_generator._get_latex_exporter()
+            .export_to_latex(report)
+            .content,
+        }
+        for name, text in outputs.items():
+            assert label in text, name
+            for leaked in ("99.0%", "97.0%", "99.00%", "97.00%", "0.99", "0.97"):
+                assert leaked not in text, (name, leaked)
+        docx = generator.output_generator._get_docx_exporter().export_to_docx(report)
+        import io
+
+        from docx import Document
+
+        doc = Document(io.BytesIO(docx.content))
+        cells = [c.text for t in doc.tables for row in t.rows for c in row.cells]
+        assert label in cells
+        assert not [c for c in cells if "99" in c or "97" in c]
 
     @pytest.mark.asyncio
     async def test_project_projection_feeds_the_report_and_is_labelled(
@@ -420,57 +444,16 @@ class TestDomainVisualization:
         assert not [v for v in report.visualizations if v.id == "domain_distribution"]
 
     @pytest.mark.asyncio
-    async def test_html_embeds_generated_chart_and_real_values(
+    async def test_html_shows_chart_values_as_an_escaped_table(
         self, tmp_path: Path
     ) -> None:
-        from unittest.mock import patch
-
         from src.models.report import Visualization, VisualizationType
 
-        settings = ReportSettings(
-            report_storage_path=str(tmp_path),
-            template_path=str(TEMPLATES),
-        )
-        generator = ReportGenerator(settings)
-        report = Report(
-            id="r", title="T", query="q", configuration=ReportConfiguration()
-        )
-        report.add_visualization(
-            Visualization(
-                id="domain_distribution",
-                type=VisualizationType.PIE_CHART,
-                title="Domains",
-                data={"labels": ["ai", "edu"], "values": [3, 1]},
-                config={},
-                caption=None,
-                width=None,
-                height=None,
+        generator = ReportGenerator(
+            ReportSettings(
+                report_storage_path=str(tmp_path), template_path=str(TEMPLATES)
             )
         )
-        png = {"domain_distribution": {"format": "png", "data": "QUJD"}}
-
-        with patch(
-            "src.services.report_output_generator.VisualizationGenerator"
-        ) as gen_cls:
-            gen_cls.return_value.generate_report_visualizations.return_value = png
-            html = (await generator._generate_html(report)).content
-
-        gen_cls.return_value.generate_report_visualizations.assert_called_once()
-        assert "data:image/png;base64,QUJD" in html
-
-    @pytest.mark.asyncio
-    async def test_html_falls_back_to_a_values_table_without_a_chart_image(
-        self, tmp_path: Path
-    ) -> None:
-        from unittest.mock import patch
-
-        from src.models.report import Visualization, VisualizationType
-
-        settings = ReportSettings(
-            report_storage_path=str(tmp_path),
-            template_path=str(TEMPLATES),
-        )
-        generator = ReportGenerator(settings)
         report = Report(
             id="r", title="T", query="q", configuration=ReportConfiguration()
         )
@@ -487,15 +470,44 @@ class TestDomainVisualization:
             )
         )
 
-        with patch(
-            "src.services.report_output_generator.VisualizationGenerator"
-        ) as gen_cls:
-            gen_cls.return_value.generate_report_visualizations.return_value = {}
-            html = (await generator._generate_html(report)).content
+        html = (await generator._generate_html(report)).content
 
         assert "would be rendered here" not in html
         assert "<td>ai</td>" in html and "<td>3</td>" in html
         assert "&lt;b&gt;edu&lt;/b&gt;" in html and "<b>edu</b>" not in html
+
+    @pytest.mark.asyncio
+    async def test_enable_visualizations_false_omits_the_chart_tables(
+        self, tmp_path: Path
+    ) -> None:
+        from src.models.report import Visualization, VisualizationType
+
+        generator = ReportGenerator(
+            ReportSettings(
+                report_storage_path=str(tmp_path),
+                template_path=str(TEMPLATES),
+                enable_visualizations=False,
+            )
+        )
+        report = Report(
+            id="r", title="T", query="q", configuration=ReportConfiguration()
+        )
+        report.add_visualization(
+            Visualization(
+                id="v",
+                type=VisualizationType.PIE_CHART,
+                title="Domains",
+                data={"labels": ["ai-sentinel"], "values": [3]},
+                config={},
+                caption=None,
+                width=None,
+                height=None,
+            )
+        )
+
+        html = (await generator._generate_html(report)).content
+
+        assert "ai-sentinel" not in html
 
 
 class TestRealDataCharts:
@@ -529,3 +541,33 @@ class TestRealDataCharts:
         radar = by_id["confidence_radar"].data
         assert radar["categories"] == ["A B", "C", "D"]
         assert radar["values"] == [0.5, 0.7, 0.9]
+
+    @pytest.mark.asyncio
+    async def test_radar_values_render_as_a_table(self, tmp_path: Path) -> None:
+        generator = ReportGenerator(
+            ReportSettings(
+                report_storage_path=str(tmp_path), template_path=str(TEMPLATES)
+            )
+        )
+        report = Report(
+            id="r", title="T", query="q", configuration=ReportConfiguration()
+        )
+        data = {
+            "aggregated_results": {
+                "findings": {
+                    n: [{"text": "x", "confidence": c}]
+                    for n, c in (("alpha", 0.5), ("beta", 0.7), ("gamma", 0.9))
+                }
+            }
+        }
+        await generator._generate_visualizations(report, data)
+
+        html = (await generator._generate_html(report)).content
+
+        for cell in (
+            "<td>Alpha</td>",
+            "<td>0.5</td>",
+            "<td>Gamma</td>",
+            "<td>0.9</td>",
+        ):
+            assert cell in html
