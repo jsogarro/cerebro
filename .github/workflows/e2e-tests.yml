@@ -40,7 +40,7 @@ jobs:
 
     - name: Install Python dependencies
       run: |
-        uv pip install --system -e ".[dev]"
+        UV_SYSTEM_PYTHON=1 scripts/install-locked.sh --extra dev
 
     - name: Install web dependencies and Chromium
       working-directory: cerebro/web
