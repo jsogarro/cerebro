@@ -101,9 +101,31 @@ See [durable runs and events](08-durable-runs-and-events.md) for the tables and 
 
 `execute` runs workers in waves. In each wave every worker whose dependencies have completed runs under `asyncio.gather`, bounded by a semaphore of `budget.max_parallel_tasks`. Dependencies come from edges between workers. Each worker runs through `MASRSupervisorBridge._execute_plan_worker`, which builds the agent class from the registry with a config holding the worker's `permission_scopes` and `tool_allowlist` and gives the worker task a timeout of `budget.task_timeout_seconds`. When `MCP_TOOL_PATH_ENABLED` is true the worker also receives an `MCPIntegration` built from the run's capability grants (default `true`).
 
-The result maps each stable `worker_id` to that worker's output, and `workers_used` is the number of workers that ran. A `PlanProviderUnavailableError` from a worker records an observability event and propagates.
+The result maps each stable `worker_id` to that worker's output, and `workers_used` is the number of workers that ran. A `PlanProviderUnavailableError` from a worker records an observability event and propagates. See [Worker outcomes and data handoff](#worker-outcomes-and-data-handoff) for what counts as success.
 
 `BudgetLedger` is created once per execution when `_execute_research_workflow` first runs, and passed to every worker through the task context key `BUDGET_LEDGER_CONTEXT_KEY`, so a workflow retry draws on spend already recorded. Before each model call the ledger reserves the prompt estimate plus `max_tokens` and refuses a call that cannot fit; a response that reports no usage is charged its reservation and the ledger then refuses further calls. The executor checks `ledger.ensure_not_exceeded()` before each worker and after each wave. `BudgetExceededError` has code `BUDGET_EXCEEDED` and is never retried.
+
+## Worker outcomes and data handoff
+
+`classify_worker_result` normalizes every legacy `AgentResult` into a `WorkerOutcome` (`worker_id`, `status`, `code`, `reason`). Only `status == "success"` counts; the status is one of `success`, `failed`, `timed_out` or `invalid_output`, with these codes:
+
+| Code | Status | Cause |
+| --- | --- | --- |
+| `WORKER_FAILED` | `failed` | The worker returned `failed`. |
+| `WORKER_TIMEOUT` | `timed_out` | The worker returned `timeout`, `timed_out` or `timed-out`. |
+| `WORKER_STATUS_UNKNOWN` | `failed` | Any other non-`success` status. |
+| `ZERO_CONFIDENCE` | `invalid_output` | The worker reported `success` at confidence 0 or below, an abstention rather than a finding. |
+| `OUTPUT_SCHEMA_VIOLATION` | `invalid_output` | The output does not validate against the worker's non-empty `output_schema` (JSON Schema draft 2020-12, local `$ref` only). `reason` names the path and keyword, never the content. |
+| `UPSTREAM_PAYLOAD_TOO_LARGE` | `failed` | The rendered upstream data for the worker exceeds 64 KiB (`UPSTREAM_PAYLOAD_LIMIT_BYTES`); it is never truncated and the worker is not called. |
+| `UPSTREAM_FAILED` | `blocked` | Reported in `failures` only: a predecessor did not succeed, so the worker never ran. |
+
+`PlanExecutionResult.succeeded` is true only when no worker is blocked and every outcome succeeded. After a wave with any unsuccessful worker no further wave is scheduled. `failures` lists one content-free record per unsuccessful or blocked worker.
+
+When the aggregate is not successful, `_fail_run_on_worker_outcomes` records run, task and attempt `failed` with event `run.failed` and failure code `WORKER_FAILED`, without retrying the workflow. The event payload carries `failures` and `partial_worker_ids`, the workers that succeeded. The journaled `agent_results` keeps every worker's output as diagnostics, `final_output` stays unset, no final report or claim support is written, and `successful_executions` is not incremented.
+
+A worker with direct predecessors receives their validated outputs in the reserved input key `upstream_results`: a mapping from each direct predecessor's `worker_id` to `{"worker_id", "task_id", "execution_plan_id", "output"}`. Siblings, descendants and unrelated workers never appear in it. `adapt_upstream_input` turns the mapping into what the worker class reads, as escaped `<upstream_result worker="...">` blocks of untrusted evidence: `previous_result` for a class with `upstream_input = UpstreamInput.SINGLE` (one parent) or `agent_outputs`, keyed by parent, for `UpstreamInput.KEYED`. A worker class that cannot consume its parent count is rejected at admission. Plans whose `workflow_definition_version` has a major version below 2 are rejected when they contain a dependency edge.
+
+`RESERVED_RUNTIME_INPUT_KEYS` (`upstream_results`, `previous_result`, `agent_outputs`, `background`) belong to the runtime: client-supplied values for them are dropped before a worker is called, and `objective`, `output_schema`, `permission_scopes`, `tool_allowlist` and `provider_model_policy` are always set from the plan.
 
 ## Fixture mode
 

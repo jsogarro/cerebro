@@ -87,7 +87,11 @@ async def test_cli_create_and_status_match_the_database(db, new_account):
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="P01: a project has no results to export (CLI exits 1: 'Results not found')",
+    reason=(
+        "P08: a project has no results to export (CLI exits 1: 'Results not "
+        "found'); needs a launchable dry run (P02-A) and a durable results read "
+        "surface (P08)"
+    ),
 )
 async def test_cli_results_exports_csv(new_account):
     account = await new_account("cli")
