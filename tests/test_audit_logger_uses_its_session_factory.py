@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from src.models.db.audit_log import AuditEventType, AuditLog, AuditSeverity
-from src.models.db.security_alert import SecurityAlert
+from src.models.db.security_alert import AlertSeverity, AlertType, SecurityAlert
 from src.security.audit_logger import AuditLogger, AuditPersistenceError
 
 
@@ -206,3 +206,30 @@ async def test_audit_logger_without_a_store_exposes_persistence_failure() -> Non
 
     assert logger.metrics["events_flushed"] == 0
     assert logger.metrics["errors"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "alert_type",
+    [
+        AlertType.FAILED_LOGIN_ATTEMPTS,
+        AlertType.SUSPICIOUS_LOGIN,
+        AlertType.API_RATE_LIMIT,
+    ],
+)
+async def test_critical_alert_records_no_remediation_nothing_performed(
+    alert_type: AlertType,
+) -> None:
+    """Nothing locks accounts or sends resets, so the alert must not claim it did."""
+    session_factory = _RecordingSessionFactory()
+    logger = AuditLogger(session_factory=session_factory, buffer_size=100)
+
+    await logger._generate_security_alert(
+        {"user_id": "user-1", "ip_address": "203.0.113.7"},
+        AlertSeverity.CRITICAL,
+        alert_type,
+    )
+
+    [alert] = [row for row in session_factory.rows if isinstance(row, SecurityAlert)]
+    assert not alert.actions_taken
+    assert not alert.auto_remediated
