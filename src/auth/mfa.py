@@ -31,6 +31,14 @@ class MfaUnavailableError(RuntimeError):
     """The stored TOTP secret cannot be decrypted (key missing or rotated away)."""
 
 
+_TOTP_FORMAT = re.compile(r"[0-9]{6}")
+
+
+def is_totp_format(code: str) -> bool:
+    """Exactly six ASCII digits; other scripts' digits would crash the comparison."""
+    return _TOTP_FORMAT.fullmatch(code) is not None
+
+
 def new_secret() -> str:
     return pyotp.random_base32()
 
@@ -108,6 +116,8 @@ async def _recovery_rows(db: AsyncSession, user: User) -> list[MfaRecoveryCode]:
 
 async def consume_totp(db: AsyncSession, user: User, code: str) -> bool:
     """Accept ``code`` once: only a step newer than the last accepted one passes."""
+    if not is_totp_format(code):
+        return False
     secret = _secret_of(user)
     step = matching_step(secret, code) if secret else None
     if step is None:
@@ -135,6 +145,6 @@ async def consume_recovery_code(db: AsyncSession, user: User, code: str) -> bool
 async def verify_second_factor(db: AsyncSession, user: User, code: str) -> bool:
     """Check a TOTP code, falling back to a recovery code."""
     code = code.strip()
-    if re.fullmatch(r"[0-9]{6}", code):
+    if is_totp_format(code):
         return await consume_totp(db, user, code)
     return await consume_recovery_code(db, user, code)

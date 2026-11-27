@@ -171,12 +171,15 @@ class _Client:
         self.app, self.email = app, email
 
     async def post(self, path: str, body: dict[str, Any], token: str | None = None):
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
         async with httpx.AsyncClient(
             transport=ASGITransport(app=self.app, raise_app_exceptions=False),
             base_url="http://test",
         ) as client:
-            return await client.post(path, json=body, headers=headers)
+            return await client.post(
+                path,
+                json=body,
+                headers={"Authorization": f"Bearer {token}"} if token else {},
+            )
 
     async def login(self, code: str | None = None, password: str = PASSWORD):
         body: dict[str, Any] = {"email": self.email, "password": password}
@@ -471,6 +474,49 @@ async def test_non_ascii_digits_are_a_failed_code_not_a_crash(
         e["event_type"] == AuditEventType.LOGIN_FAILED and e["user_id"] == user_id
         for e in audit.events
     )
+
+
+@pytest.mark.parametrize("code", ["١٢٣٤٥٦", "\uff11\uff12\uff13\uff14\uff15\uff16"])
+async def test_verify_treats_non_ascii_digits_as_a_failed_code(
+    client: _Client, code: str
+) -> None:
+    token = (await client.login()).json()["tokens"]["access_token"]
+    await client.post("/auth/mfa/enroll", ENROLL, token)
+
+    assert (
+        await client.post("/auth/mfa/verify", {"code": code}, token)
+    ).status_code == 401
+
+
+async def test_a_login_racing_activation_does_not_get_an_mfa_session(
+    client: _Client, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The claim means a code was checked in this request, not 'MFA is on now'."""
+    token = (await client.login()).json()["tokens"]["access_token"]
+    secret = (await client.post("/auth/mfa/enroll", ENROLL, token)).json()["secret"]
+    throttle = app.dependency_overrides[auth_router.get_login_throttle]()
+    real_clear = throttle.clear
+
+    async def activate_during_login(identifier: str) -> None:
+        if identifier == client.email:  # the password-only login's own clear
+            monkeypatch.setattr(throttle, "clear", real_clear)
+            activated = await client.post(
+                "/auth/mfa/verify", {"code": _code(secret)}, token
+            )
+            assert activated.status_code == 200
+        await real_clear(identifier)
+
+    monkeypatch.setattr(throttle, "clear", activate_during_login)
+
+    raced = await client.login()
+
+    assert raced.status_code == 200
+    tokens = raced.json()["tokens"]
+    assert jose_jwt.get_unverified_claims(tokens["access_token"])["mfa"] is False
+    refreshed = await client.post(
+        "/auth/refresh", {"refresh_token": tokens["refresh_token"]}
+    )
+    assert refreshed.status_code == 401
 
 
 async def test_oversized_code_is_rejected_by_the_schema(client: _Client) -> None:

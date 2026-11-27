@@ -337,8 +337,11 @@ async def login(
             status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled"
         )
 
+    # Read once, before any await: the claim minted below must mean a code was
+    # checked in this request, not that MFA happens to be on by then.
+    code_required = user.totp_enabled
     try:
-        second_factor_ok = not user.totp_enabled or bool(
+        second_factor_ok = not code_required or bool(
             request.totp_code
             and await mfa.verify_second_factor(db, user, request.totp_code)
         )
@@ -374,7 +377,7 @@ async def login(
         permissions=permissions,
         device_id=device_id,
         organization_id=str(organization_id),
-        mfa_verified=user.totp_enabled,
+        mfa_verified=code_required,
     )
 
     logger.info(
