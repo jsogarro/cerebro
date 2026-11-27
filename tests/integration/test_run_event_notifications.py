@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from src.api.services.event_publisher import EventPublisher
@@ -193,5 +194,53 @@ async def test_a_malformed_message_does_not_stop_the_subscriber(
                 if await _woken(owner, 0.25):
                     break
             assert owner.is_set()
+    finally:
+        await subscriber.stop()
+
+
+class _FlakyRedis:
+    """Fails the first subscription the way a dropped connection does."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.attempts = 0
+
+    def pubsub(self) -> Any:
+        self.attempts += 1
+        if self.attempts == 1:
+            raise RedisConnectionError("connection dropped")
+        return self._inner.pubsub()
+
+
+@pytest.mark.asyncio
+async def test_the_subscriber_resubscribes_after_the_connection_drops(
+    factory: async_sessionmaker[AsyncSession], redis_client: Any
+) -> None:
+    hub = RunStreamHub()
+    flaky = _FlakyRedis(redis_client)
+    subscriber = RunEventWakeupSubscriber(
+        redis_client=flaky,  # type: ignore[arg-type]
+        session_factory=factory,
+        stream_hub=hub,
+    )
+    publisher = EventPublisher()
+    publisher.redis_client = redis_client
+
+    subscriber.start()
+    try:
+        async with hub.subscribe(organization_id=ORG_A, run_id=RUN) as owner:
+            for _ in range(20):
+                await publisher.publish_run_event(
+                    run_id=RUN,
+                    event_type="run.admitted",
+                    payload={},
+                    event_id="e-1",
+                    sequence=1,
+                    idempotency_key="k-1",
+                )
+                if await _woken(owner, 0.25):
+                    break
+            assert owner.is_set()
+        assert flaky.attempts >= 2
     finally:
         await subscriber.stop()
