@@ -23,7 +23,7 @@ from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 from src.repositories.base import BaseRepository
 from src.repositories.tenant_scope import normalize_organization_id
 
-_QueryT = TypeVar("_QueryT", bound="Select[Any] | Delete")
+_QueryT = TypeVar("_QueryT", bound="Select[Any] | Select[Any, Any] | Delete")
 
 
 class CheckpointIdentityError(ValueError):
