@@ -20,7 +20,6 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.config import settings
 from src.core.contracts import RunEvent, RunEventCursor, delivery_idempotency_key
 from src.core.evaluation.events import (
     EVALUATION_DESTINATION,
@@ -92,6 +91,10 @@ class RunEventRepository:
                 f"run {run_id!r} does not belong to organization "
                 f"{normalized_organization_id}"
             )
+
+        # Imported here: ``Settings()`` validates the environment at import, and
+        # this module is imported by processes that never append events.
+        from src.core.config import settings
 
         if (
             settings.EVALUATION_DISPATCH_ENABLED
