@@ -63,7 +63,7 @@ def _plan(
         plan_version=1,
         run_id="run-1",
         workflow_definition_id="workflow-1",
-        workflow_definition_version="1",
+        workflow_definition_version="2" if edges else "1",
         routing_policy_id="policy-1",
         routing_policy_version="1",
         compiled_at=now,
@@ -328,3 +328,196 @@ async def test_service_still_completes_when_all_workers_succeed():
     assert status.status == "completed"
     assert status.final_output == {"a": {"v": 1}}
     assert service.execution_stats["successful_executions"] == 1
+
+
+# --- P01-B: dependency edges carry validated data -----------------------------
+
+
+def _edges(*pairs: tuple[str, str]) -> tuple[RoutingEdge, ...]:
+    """``("root", "a")`` delegates from the supervisor; any other pair is a dependency."""
+
+    return tuple(
+        RoutingEdge(
+            source_node_id=source,
+            target_node_id=target,
+            relation="delegates" if source == "root" else "depends_on",
+        )
+        for source, target in pairs
+    )
+
+
+def _recording_executor(outputs: dict[str, dict[str, Any]], seen: dict[str, Any]):
+    async def execute(worker: WorkerAssignment, task: AgentTask) -> AgentResult:
+        seen[str(worker.worker_id)] = task.input_data
+        return _result(task, "success", outputs[str(worker.worker_id)])
+
+    return ExecutionPlanTopologyExecutor(
+        worker_executor=execute, capability_checker=lambda _: True
+    )
+
+
+@pytest.mark.asyncio
+async def test_child_receives_only_its_direct_parents_validated_output():
+    seen: dict[str, Any] = {}
+    plan = _plan(
+        tuple(_worker(w) for w in ("a", "b", "unrelated", "c")),
+        _edges(("root", "a"), ("root", "b"), ("root", "unrelated"), ("a", "c")),
+    )
+
+    result = await _recording_executor(
+        {
+            "a": {"v": "SENTINEL-A"},
+            "b": {"v": "SENTINEL-B"},
+            "unrelated": {"v": "SENTINEL-X"},
+            "c": {"v": "done"},
+        },
+        seen,
+    ).execute(plan, _ROOT)
+
+    assert result.succeeded
+    upstream = seen["c"]["upstream_results"]
+    assert set(upstream) == {"a"}
+    assert upstream["a"]["output"] == {"v": "SENTINEL-A"}
+    assert upstream["a"]["worker_id"] == "a"
+    assert upstream["a"]["task_id"] == "root:a"
+    assert "SENTINEL-B" not in str(seen["c"]) and "SENTINEL-X" not in str(seen["c"])
+    assert "upstream_results" not in seen["a"]
+
+
+@pytest.mark.asyncio
+async def test_client_supplied_reserved_runtime_keys_never_reach_a_worker():
+    seen: dict[str, Any] = {}
+    forged = {
+        "upstream_results": {"ghost": {"output": "FORGED"}},
+        "previous_result": "FORGED-PREV",
+        "agent_outputs": {"ghost": "FORGED-OUT"},
+        "background": "FORGED-BACKGROUND",
+        "objective": "FORGED-OBJECTIVE",
+        "provider_model_policy": {"primary": {"provider": "evil", "model": "x"}},
+    }
+    root = AgentTask(id="root", agent_type="execution_plan", input_data=dict(forged))
+    plan = _plan(
+        (_worker("a"), _worker("b")),
+        _edges(("root", "a"), ("a", "b")),
+    )
+
+    await _recording_executor({"a": {"v": "real"}, "b": {"v": 1}}, seen).execute(
+        plan, root
+    )
+
+    for worker_id in ("a", "b"):
+        assert "FORGED" not in str(seen[worker_id].get("objective"))
+        assert seen[worker_id]["provider_model_policy"]["primary"]["provider"] == (
+            "gemini"
+        )
+    assert "upstream_results" not in seen["a"]
+    for key in ("previous_result", "agent_outputs", "background"):
+        assert key not in seen["a"] and key not in seen["b"]
+    assert set(seen["b"]["upstream_results"]) == {"a"}
+    assert "FORGED" not in str(seen["b"]["upstream_results"])
+
+
+@pytest.mark.asyncio
+async def test_oversized_parent_payload_fails_the_child_without_dispatch_or_truncation():
+    seen: dict[str, Any] = {}
+    plan = _plan(
+        (_worker("a"), _worker("b")),
+        _edges(("root", "a"), ("a", "b")),
+    )
+
+    result = await _recording_executor(
+        {"a": {"blob": "x" * (64 * 1024 + 1)}, "b": {"v": 1}}, seen
+    ).execute(plan, _ROOT)
+
+    assert "b" not in seen
+    assert not result.succeeded
+    assert "b" not in result.worker_results
+    failure = next(f for f in result.failures if f["worker_id"] == "b")
+    assert failure["code"] == "UPSTREAM_PAYLOAD_TOO_LARGE"
+    assert failure["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_failed_parent_blocks_children_but_records_running_siblings():
+    calls: list[str] = []
+    plan = _plan(
+        (_worker("a"), _worker("sibling"), _worker("child")),
+        _edges(("root", "a"), ("root", "sibling"), ("a", "child")),
+    )
+
+    result = await _executor(
+        {
+            "a": ("failed", {}, 0.0),
+            "sibling": ("success", {"v": 1}, 0.9),
+            "child": ("success", {"v": 2}, 0.9),
+        },
+        calls,
+    ).execute(plan, _ROOT)
+
+    assert sorted(calls) == ["a", "sibling"]
+    assert "child" not in result.worker_results
+    assert result.blocked_worker_ids == ("child",)
+    assert "sibling" in result.worker_results
+    assert {f["worker_id"]: f["status"] for f in result.failures} == {
+        "a": "failed",
+        "child": "blocked",
+    }
+
+
+def test_admission_rejects_a_consumer_that_cannot_use_its_upstream_data():
+    plan = _plan((_worker("a"), _worker("b")), _edges(("root", "a"), ("a", "b")))
+    asked: list[tuple[str, int]] = []
+
+    def checker(worker_type: str, parent_count: int) -> bool:
+        asked.append((worker_type, parent_count))
+        return worker_type != "b"
+
+    executor = ExecutionPlanTopologyExecutor(
+        worker_executor=AsyncMock(),
+        capability_checker=lambda _: True,
+        upstream_checker=checker,
+    )
+
+    with pytest.raises(ExecutionTopologyUnsupportedError, match=r"'b'.*upstream"):
+        executor.admit(plan)
+    assert ("b", 1) in asked and all(count >= 1 for _, count in asked)
+
+
+def test_obsolete_workflow_version_with_dependency_edges_is_unsupported():
+    plan = _plan((_worker("a"), _worker("b")), _edges(("root", "a"), ("a", "b")))
+    obsolete = plan.model_copy(update={"workflow_definition_version": "1"})
+
+    with pytest.raises(ExecutionTopologyUnsupportedError, match="workflow version"):
+        _executor({}).admit(obsolete)
+    _executor({}).admit(plan)
+
+
+@pytest.mark.asyncio
+async def test_the_size_bound_counts_the_escaped_text_that_reaches_the_prompt():
+    seen: dict[str, Any] = {}
+    plan = _plan((_worker("a"), _worker("b")), _edges(("root", "a"), ("a", "b")))
+
+    # 20,000 "<" is ~20 KB as JSON but 120 KB once escaped for the prompt.
+    result = await _recording_executor(
+        {"a": {"t": "<" * 20_000}, "b": {"v": 1}}, seen
+    ).execute(plan, _ROOT)
+
+    assert "b" not in seen
+    assert any(f["code"] == "UPSTREAM_PAYLOAD_TOO_LARGE" for f in result.failures)
+
+
+@pytest.mark.parametrize("version", ["\u00b2", "\uff12", "\u0662", "v2", "", "2."])
+def test_non_ascii_or_malformed_workflow_versions_are_rejected_and_recorded(version):
+    plan = _plan((_worker("a"), _worker("b")), _edges(("root", "a"), ("a", "b")))
+    bad = plan.model_copy(update={"workflow_definition_version": version})
+
+    with pytest.raises(ExecutionTopologyUnsupportedError, match="workflow version"):
+        _executor({}).admit(bad)
+
+
+def test_dotted_workflow_versions_at_or_above_two_are_accepted():
+    plan = _plan((_worker("a"), _worker("b")), _edges(("root", "a"), ("a", "b")))
+    for version in ("2", "2.1", "10.0.3"):
+        _executor({}).admit(
+            plan.model_copy(update={"workflow_definition_version": version})
+        )
