@@ -105,7 +105,9 @@ class _RoutingDecisionStub:
     )
 
 
-def _make_binding(run_id: str) -> ExecutionAuthorityBinding:
+def _make_binding(
+    run_id: str, *, deadline: datetime | None = None
+) -> ExecutionAuthorityBinding:
     raw = ExecutionAuthorityBinding.create_for_test(
         authority_id="restart-authority",
         authority_version="1",
@@ -145,7 +147,7 @@ def _make_binding(run_id: str) -> ExecutionAuthorityBinding:
         ),
         stop_conditions=("complete",),
         evaluator_requirements=(),
-        deadline=NOW + timedelta(minutes=5),
+        deadline=deadline or datetime.now(UTC) + timedelta(hours=1),
         compiled_at=NOW,
     )
     return dataclasses.replace(
@@ -240,7 +242,7 @@ async def test_restart_recovers_non_terminal_run_into_active_executions(
     assert restored_count == 1
     assert execution_id in service_b.active_executions
     recovered = service_b.active_executions[execution_id]
-    assert recovered.status == "failed"
+    assert recovered.status == "running"
     assert recovered.run_id == run_id
     assert recovered.project_id == str(project.id)
 

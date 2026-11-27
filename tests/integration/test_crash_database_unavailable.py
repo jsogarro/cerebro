@@ -541,15 +541,15 @@ async def test_outcome_lost_to_a_dead_process_recovers_as_unfinished_work(
 
     recovered = service_b.active_executions.get("exec-db-down-terminal-lost")
     assert recovered is not None
-    assert recovered.status == "failed"
+    assert recovered.status == "running"
     assert recovered.unconfirmed_terminal_status is None
     async with session_factory() as session:
         row = await RunLifecycleRepository(session).get_run(
             run_id, organization_id=ORG_ID
         )
         assert row is not None
-        assert row.status == RunStatus.FAILED.value
-        assert row.status_reason == "interrupted by restart"
+        assert row.status == RunStatus.RUNNING.value
+        assert row.completed_at is None
 
     await service.close()
     await service_b.close()

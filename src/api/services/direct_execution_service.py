@@ -144,6 +144,7 @@ _RUN_STATUS_TO_EXECUTION_STATUS: dict[str, str] = {
 # about it: the ``@retry`` decorator, and the failure path's decision about
 # whether a terminal FAILED may be persisted yet.
 INTERRUPTED_BY_RESTART = "interrupted by restart"
+RESTORE_DEADLINE_MARGIN = timedelta(minutes=5)
 _WORKFLOW_MAX_ATTEMPTS = 3
 
 
@@ -327,6 +328,9 @@ class ExecutionStatus:
     status: str  # pending, running, completed, failed
     progress_percentage: float = 0.0
     current_phase: str = "initialization"
+
+    # Rehydrated from the database; this process runs no task for it.
+    restored: bool = False
 
     # The tenant that owns this execution, so a reader can be scoped to it.
     # ``active_executions`` is one process-wide dictionary holding every
@@ -1745,9 +1749,10 @@ class DirectExecutionService:
         before any authenticated request context exists. Only non-terminal
         runs are restored; a run that reached a terminal status before the
         restart already has its outcome durably recorded and does not need
-        an in-memory placeholder. A restored run has no live task and is not
-        resumed, so it is recorded as failed with reason "interrupted by
-        restart".
+        an in-memory placeholder. A restored run past its own deadline (plus
+        a margin) is recorded as failed with reason "interrupted by restart";
+        one still within it may be running on another replica and is left
+        alone, without counting against this process's concurrency cap.
 
         Returns:
             The number of executions rehydrated.
@@ -1768,30 +1773,46 @@ class DirectExecutionService:
                     execution_id = execution_status.execution_id
                     if execution_id in self.active_executions:
                         continue
-                    # Nothing in this process is running the work, and nothing
-                    # resumes it (see issue #296), so a restored placeholder
-                    # would read "running" forever and hold a concurrency slot.
-                    outcome = await self._persist_transition(
-                        execution_status,
-                        run_target=RunStatus.FAILED,
-                        task_target=TaskStatus.FAILED,
-                        attempt_target=AttemptStatus.FAILED,
-                        event_type="run.interrupted",
-                        payload={"reason": INTERRUPTED_BY_RESTART},
-                        reason=INTERRUPTED_BY_RESTART,
-                    )
-                    self._settle_terminal_state(
-                        execution_status,
-                        outcome=outcome,
-                        status="failed",
-                        phase="failed",
-                    )
+                    # Another replica may still be running this work, and
+                    # nothing here resumes it (issue #296), so only a run that
+                    # is past its own deadline is known to be dead.
+                    if await self._is_past_deadline(session, run_row):
+                        outcome = await self._persist_transition(
+                            execution_status,
+                            run_target=RunStatus.FAILED,
+                            task_target=TaskStatus.FAILED,
+                            attempt_target=AttemptStatus.FAILED,
+                            event_type="run.interrupted",
+                            payload={"reason": INTERRUPTED_BY_RESTART},
+                            reason=INTERRUPTED_BY_RESTART,
+                        )
+                        self._settle_terminal_state(
+                            execution_status,
+                            outcome=outcome,
+                            status="failed",
+                            phase="failed",
+                        )
+                    else:
+                        execution_status.restored = True
                     self.active_executions[execution_id] = execution_status
                     self._execution_ids_by_run_id[run_row.run_id] = execution_id
                     restored += 1
         except (SQLAlchemyError, OSError) as exc:
             logger.warning("active_execution_restore_failed", error=str(exc))
         return restored
+
+    async def _is_past_deadline(self, session: Any, run_row: Any) -> bool:
+        """Whether the run's own snapshot deadline, plus a margin, has passed.
+
+        A run with no readable snapshot cannot be proven dead, so it is not.
+        """
+        snapshot = await RunConfigSnapshotRepository(session).get_by_run(
+            run_row.run_id, organization_id=run_row.organization_id
+        )
+        if snapshot is None:
+            return False
+        deadline = datetime.fromisoformat(snapshot.configuration["deadline"])
+        return datetime.now(UTC) > deadline + RESTORE_DEADLINE_MARGIN
 
     async def _rehydrate_execution(
         self, lifecycle_repo: RunLifecycleRepository, run_row: Any
@@ -2196,7 +2217,7 @@ class DirectExecutionService:
         in_flight = sum(
             1
             for execution in self.active_executions.values()
-            if execution.status in ("pending", "running")
+            if execution.status in ("pending", "running") and not execution.restored
         )
         if in_flight >= self.max_concurrent_executions:
             raise RuntimeError(

@@ -197,3 +197,15 @@ async def test_admission_loads_an_authority_the_cache_has_not_seen() -> None:
     assert execution_id in service.active_executions
     await _drain(service)
     await service.close()
+
+
+@pytest.mark.asyncio
+async def test_restored_placeholders_do_not_consume_capacity() -> None:
+    service = _capacity_service(cap=1)
+    service.active_executions["restored"] = ExecutionStatus(
+        execution_id="restored", project_id="p", status="running", restored=True
+    )
+
+    await _admit(service)
+    await _drain(service)
+    await service.close()
