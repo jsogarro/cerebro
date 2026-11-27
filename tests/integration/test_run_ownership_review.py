@@ -186,29 +186,24 @@ async def test_work_stops_when_its_heartbeat_crashes(factory, monkeypatch) -> No
     assert work.cancelled() and status._lease_lost
 
 
-# --- 5: a parked success outlives a database outage longer than the lease ----
+# --- 5: a parked success outlives a lease that expired -------------------------
 
 
-async def test_a_parked_success_is_recorded_after_an_outage_longer_than_the_lease(
-    factory,
-) -> None:
-    flaky = _Flaky(factory)
-    service = _service(flaky)
-    service.lease_ttl_seconds, service.lease_renew_seconds = 1.0, 0.2
-    service.cancel_poll_seconds = 0.05
-    service.durable_write_retry_seconds = 0.01
-    service.durable_reconcile_interval_seconds = 0.1
-    status = await _running(service, "rev-parked")
-    status.final_output = {"ok": True}
-    finish = asyncio.Event()
-    work = asyncio.create_task(finish.wait())
-    service._workflow_tasks[status.execution_id] = work
-    service._start_lease_heartbeat(status, work)
-
-    flaky.down = True
+async def _park_success(factory, run_id: str, **tuning: float):
+    """A running run whose success the database refused: parked, db healthy again."""
     from src.api.services.direct_execution_service import DurableWriteOutcome
     from src.core.contracts import AttemptStatus, TaskStatus
 
+    flaky = _Flaky(factory)
+    service = _service(flaky)
+    service.lease_ttl_seconds = 30.0
+    service.durable_write_retry_seconds = 0.0
+    service.durable_reconcile_interval_seconds = 3600.0
+    for name, value in tuning.items():
+        setattr(service, name, value)
+    status = await _running(service, run_id)
+    status.final_output = {"ok": True}
+    flaky.down = True
     outcome = await service._persist_transition(
         status,
         run_target=RunStatus.SUCCEEDED,
@@ -217,18 +212,102 @@ async def test_a_parked_success_is_recorded_after_an_outage_longer_than_the_leas
         event_type="run.succeeded",
         payload={},
     )
-    assert outcome is DurableWriteOutcome.UNAVAILABLE
-    finish.set()
-    await work
-    await asyncio.sleep(2.0)  # the lease would have expired twice over
     flaky.down = False
-    for _ in range(200):
-        if not service._pending_terminal_outcomes:
-            break
-        await asyncio.sleep(0.1)
+    assert outcome is DurableWriteOutcome.UNAVAILABLE
+    return service, status
+
+
+async def _lease(factory, run_id: str):
+    return (
+        await _sql(
+            factory,
+            "SELECT lease_expires_at FROM agent_runs WHERE run_id = :r",
+            r=run_id,
+        )
+    ).scalar_one()
+
+
+async def test_a_parked_success_lands_even_if_its_lease_expired_and_cannot_be_renewed(
+    factory, monkeypatch
+) -> None:
+    service, _ = await _park_success(factory, "rev-parked")
+    await _expire(factory, "rev-parked")
+
+    async def no_renewal(_status) -> None:
+        return None
+
+    monkeypatch.setattr(service, "_renew_lease_now", no_renewal)
+    assert await service.reconcile_pending_terminal_transitions() == 1
     await service.close()
 
     assert (await _row(factory, "rev-parked")).status == RunStatus.SUCCEEDED.value
+
+
+async def test_a_parked_outcome_renews_its_lease_before_each_retry(factory) -> None:
+    service, _ = await _park_success(factory, "rev-parked-renew")
+    await _expire(factory, "rev-parked-renew")
+
+    assert await service.reconcile_pending_terminal_transitions() == 1
+    await service.close()
+
+    result = await _sql(
+        factory,
+        "SELECT lease_expires_at > clock_timestamp() FROM agent_runs WHERE run_id = :r",
+        r="rev-parked-renew",
+    )
+    assert result.scalar_one() is True
+
+
+async def test_the_lease_is_renewed_while_a_parked_outcome_outlives_its_workflow(
+    factory,
+) -> None:
+    service, status = await _park_success(
+        factory, "rev-parked-beat", cancel_poll_seconds=0.02, lease_renew_seconds=0.0
+    )
+    finish = asyncio.Event()
+    work = asyncio.create_task(finish.wait())
+    service._workflow_tasks[status.execution_id] = work
+    beat = service._start_lease_heartbeat(status, work)
+    finish.set()
+    await work
+
+    seen = [await _lease(factory, "rev-parked-beat")]
+    for _ in range(250):
+        latest = await _lease(factory, "rev-parked-beat")
+        if latest > seen[-1]:
+            seen.append(latest)
+        if len(seen) >= 3:
+            break
+        await asyncio.sleep(0.02)
+    assert len(seen) >= 3 and not beat.done()
+
+    service._pending_terminal_outcomes.clear()
+    await asyncio.wait_for(beat, 5)
+    await service.close()
+
+
+async def test_a_parked_outcome_is_dropped_when_its_own_window_ends(factory) -> None:
+    service, status = await _park_success(
+        factory, "rev-parked-window", durable_reconcile_max_seconds=0.0
+    )
+
+    assert await service.reconcile_pending_terminal_transitions() == 0
+
+    assert not service._pending_terminal_outcomes
+    assert (await _row(factory, "rev-parked-window")).status == RunStatus.RUNNING.value
+    await service.close()
+
+
+async def test_a_scan_does_not_fail_this_processs_own_parked_success(factory) -> None:
+    service, _ = await _park_success(factory, "rev-parked-scan")
+    await _expire(factory, "rev-parked-scan")
+
+    assert await service.reconcile_expired_runs() == 0
+    assert (await _row(factory, "rev-parked-scan")).status == RunStatus.RUNNING.value
+
+    assert await service.reconcile_pending_terminal_transitions() == 1
+    await service.close()
+    assert (await _row(factory, "rev-parked-scan")).status == RunStatus.SUCCEEDED.value
 
 
 # --- 6: SQLite has no leases and no failure -----------------------------------

@@ -368,14 +368,17 @@ class RunLifecycleRepository:
         return row
 
     async def require_fence(self, run_id: str, fencing_token: int) -> None:
-        """Lock the run and prove ``fencing_token`` is its live lease.
+        """Lock the run and prove ``fencing_token`` is still its owner's.
 
-        The row lock is what serializes this writer against a reconciler: one
-        of them commits first and the other then sees the changed row.
+        Expiry is deliberately not part of the fence: a takeover raises the
+        token, so a stale writer is one whose token no longer matches, and an
+        owner whose lease merely lapsed (a database outage) keeps its right to
+        write until someone actually takes the run over. The row lock
+        serializes this writer against a reconciler: one of them commits first
+        and the other then sees the changed row.
 
         Raises:
-            StaleFenceError: The lease expired, was taken over, or the run is
-                terminal.
+            StaleFenceError: The run was taken over, or never had this owner.
         """
         held = await self.session.execute(
             select(AgentRun.id)
@@ -383,7 +386,6 @@ class RunLifecycleRepository:
                 AgentRun.run_id == run_id,
                 AgentRun.fencing_token == fencing_token,
                 AgentRun.owner_instance_id.is_not(None),
-                AgentRun.lease_expires_at > func.clock_timestamp(),
             )
             .with_for_update()
         )

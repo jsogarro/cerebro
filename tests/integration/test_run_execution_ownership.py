@@ -482,6 +482,13 @@ async def test_cancelling_settles_the_runs_open_model_calls(factory) -> None:
 # --- heartbeat --------------------------------------------------------------
 
 
+async def _lease_expiry(factory, run_id: str):
+    result = await _sql(
+        factory, "SELECT lease_expires_at FROM agent_runs WHERE run_id = :r", r=run_id
+    )
+    return result.scalar_one()
+
+
 async def _lease_live(factory, run_id: str) -> bool:
     result = await _sql(
         factory,
@@ -495,23 +502,36 @@ async def test_the_heartbeat_keeps_a_lease_alive_and_stops_when_it_is_lost(
     factory,
 ) -> None:
     service = _service(factory)
-    service.lease_ttl_seconds, service.lease_renew_seconds = 1.0, 0.2
-    service.cancel_poll_seconds = 0.05
+    service.lease_renew_seconds = 0.0
+    service.cancel_poll_seconds = 0.02
     status = await _running(service, "own-beat")
-    work = asyncio.create_task(asyncio.sleep(60))
+    work = asyncio.create_task(asyncio.sleep(3600))
     service._workflow_tasks[status.execution_id] = work
-    beat = asyncio.create_task(service._hold_lease(status))
+    beat = service._start_lease_heartbeat(status, work)
 
-    await asyncio.sleep(2.5)
-    assert await _lease_live(factory, "own-beat")
+    seen = [await _lease_expiry(factory, "own-beat")]
+    for _ in range(250):
+        latest = await _lease_expiry(factory, "own-beat")
+        if latest > seen[-1]:
+            seen.append(latest)
+        if len(seen) >= 3:
+            break
+        await asyncio.sleep(0.02)
+    assert len(seen) >= 3, "the lease was not renewed twice"
 
-    await _expire(factory, "own-beat")
-    async with factory() as session:
-        await RunLifecycleRepository(session).acquire_lease(
-            "own-beat", owner="other", ttl_seconds=30
-        )
-        await session.commit()
-    await asyncio.wait_for(asyncio.gather(beat, return_exceptions=True), timeout=5)
+    # Another owner takes the run once the lease is expired. The heartbeat may
+    # renew in between, so retry until the acquisition lands.
+    for _ in range(100):
+        await _expire(factory, "own-beat")
+        async with factory() as session:
+            token = await RunLifecycleRepository(session).acquire_lease(
+                "own-beat", owner="other", ttl_seconds=30
+            )
+            await session.commit()
+        if token is not None:
+            break
+    assert token is not None
+    await asyncio.wait_for(beat, 5)
     await asyncio.sleep(0)
 
     assert status._lease_lost and work.cancelled()

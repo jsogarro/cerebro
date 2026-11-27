@@ -175,7 +175,7 @@ async def test_checkpoint_on_repository_error_degrades_gracefully(
 
 @pytest.mark.asyncio
 async def test_resume_execution_refuses_and_revives_nothing(
-    execution_service_with_checkpoint,
+    execution_service_with_checkpoint, _project_in_caller_org
 ):
     """A checkpoint is a diagnostic snapshot: resume raises and registers nothing."""
     with (
@@ -189,8 +189,25 @@ async def test_resume_execution_refuses_and_revives_nothing(
         )
 
     assert refused.value.code == "RESUME_UNSUPPORTED"
+    _project_in_caller_org.return_value.get.assert_awaited_once()
+    assert _project_in_caller_org.return_value.get.await_args.kwargs == {
+        "organization_id": ORG
+    }
     mock_repo_cls.assert_not_called()
     assert execution_service_with_checkpoint.active_executions == {}
+
+
+@pytest.mark.asyncio
+async def test_resume_execution_reads_as_not_found_for_a_project_outside_the_org(
+    execution_service_with_checkpoint, _project_in_caller_org
+):
+    _project_in_caller_org.return_value.get = AsyncMock(return_value=None)
+
+    result = await execution_service_with_checkpoint.resume_execution(
+        uuid.uuid4(), organization_id=ORG
+    )
+
+    assert result is None
 
 
 @pytest.mark.asyncio

@@ -334,6 +334,9 @@ class _PendingTerminalOutcome:
     observable_status: str
     observable_phase: str
     observable_progress: float | None
+    # Monotonic instant after which this outcome is given up on, so each one
+    # has its own retry window however late it was parked.
+    expires_at: float
 
 
 def _discard_unretrieved_admission_error(future: "asyncio.Future[str]") -> None:
@@ -1496,7 +1499,7 @@ class DirectExecutionService:
 
     def _start_lease_heartbeat(
         self, execution_status: ExecutionStatus, workflow_task: "asyncio.Task[None]"
-    ) -> None:
+    ) -> "asyncio.Task[None]":
         """Renew the run's lease for as long as its workflow (or its outcome) needs it."""
         lease_task = asyncio.create_task(self._hold_lease(execution_status))
         self._background_tasks.add(lease_task)
@@ -1513,6 +1516,7 @@ class DirectExecutionService:
                 lease_task.cancel()
 
         workflow_task.add_done_callback(workflow_ended)
+        return lease_task
 
     def _heartbeat_ended(
         self, execution_status: ExecutionStatus, task: "asyncio.Task[None]"
@@ -1593,31 +1597,32 @@ class DirectExecutionService:
         while True:
             await asyncio.sleep(self.cancel_poll_seconds)
             finished_at = execution_status._workflow_finished_at
-            if finished_at is not None and (
-                execution_status.execution_id not in self._pending_terminal_outcomes
-                or time.monotonic() - finished_at > self.durable_reconcile_max_seconds
+            if (
+                finished_at is not None
+                and execution_status.execution_id not in self._pending_terminal_outcomes
             ):
                 return
             sent_at = time.monotonic()
+            refused = False
             try:
                 async with self.session_factory() as session:
                     repo = RunLifecycleRepository(session)
                     if sent_at - last_renewed >= self.lease_renew_seconds:
-                        if not await repo.renew_lease(
+                        refused = not await repo.renew_lease(
                             run_id,
                             owner=self.owner_instance_id,
                             fencing_token=token,
                             ttl_seconds=self.lease_ttl_seconds,
-                        ):
-                            self._lose_lease(execution_status, reason="renewal refused")
-                            return
-                        await session.commit()
-                        last_renewed = sent_at
-                        execution_status._lease_confirmed_until = (
-                            sent_at + self.lease_ttl_seconds
                         )
+                        if not refused:
+                            await session.commit()
+                            last_renewed = sent_at
+                            execution_status._lease_confirmed_until = (
+                                sent_at + self.lease_ttl_seconds
+                            )
                     if (
-                        execution_status.status != "cancelled"
+                        not refused
+                        and execution_status.status != "cancelled"
                         and await repo.cancellation_requested(run_id)
                     ):
                         await self._adopt_remote_cancellation(execution_status)
@@ -1627,6 +1632,11 @@ class DirectExecutionService:
                     run_id=run_id,
                     error=str(exc),
                 )
+            # Outside the session block: cancelling the workflow ends this
+            # task's own cancel-on-finish callback race with session cleanup.
+            if refused:
+                self._lose_lease(execution_status, reason="renewal refused")
+                return
             if (
                 finished_at is None
                 and time.monotonic() >= execution_status._lease_confirmed_until
@@ -1665,7 +1675,14 @@ class DirectExecutionService:
             async with self.session_factory() as session:
                 repo = RunLifecycleRepository(session)
                 interrupted = []
+                parked = {
+                    p.transition.run.run_id
+                    for p in self._pending_terminal_outcomes.values()
+                }
                 for run_row in await repo.list_expired_runs():
+                    if run_row.run_id in parked:
+                        # This process is still trying to record its outcome.
+                        continue
                     rebuilt = await self._rehydrate_execution(repo, run_row)
                     if rebuilt is not None:
                         interrupted.append(rebuilt)
@@ -2068,6 +2085,7 @@ class DirectExecutionService:
                 observable_status=execution_status.status,
                 observable_phase=execution_status.current_phase,
                 observable_progress=None,
+                expires_at=time.monotonic() + self.durable_reconcile_max_seconds,
             )
         )
         logger.error(
@@ -2169,6 +2187,16 @@ class DirectExecutionService:
         """
         reconciled = 0
         for execution_id, pending in list(self._pending_terminal_outcomes.items()):
+            if time.monotonic() >= pending.expires_at:
+                # Dropping it also ends the renewal of its lease.
+                self._pending_terminal_outcomes.pop(execution_id, None)
+                logger.error(
+                    "terminal_outcome_reconciliation_abandoned",
+                    execution_id=execution_id,
+                    run_id=pending.transition.run.run_id,
+                    elapsed_seconds=self.durable_reconcile_max_seconds,
+                )
+                continue
             await self._renew_lease_now(pending.execution_status)
             outcome = await self._commit_transition(pending.transition)
             if outcome is DurableWriteOutcome.UNAVAILABLE:
@@ -2217,15 +2245,8 @@ class DirectExecutionService:
         self._terminal_reconciler.add_done_callback(self._background_tasks.discard)
 
     async def _reconcile_until_drained(self) -> None:
-        """Retry parked terminal outcomes until they land or time runs out.
-
-        Bounded on purpose: an outage longer than
-        ``durable_reconcile_max_seconds`` is not something a process-memory
-        backlog can outlive anyway, and the loop says so loudly instead of
-        spinning forever.
-        """
-        deadline = time.monotonic() + self.durable_reconcile_max_seconds
-        while self._pending_terminal_outcomes and time.monotonic() < deadline:
+        """Retry parked terminal outcomes until each lands or its own window ends."""
+        while self._pending_terminal_outcomes:
             await asyncio.sleep(self.durable_reconcile_interval_seconds)
             try:
                 await self.reconcile_pending_terminal_transitions()
@@ -2233,12 +2254,6 @@ class DirectExecutionService:
                 raise
             except Exception as exc:
                 logger.warning("terminal_outcome_reconciliation_failed", error=str(exc))
-        if self._pending_terminal_outcomes:
-            logger.error(
-                "terminal_outcome_reconciliation_abandoned",
-                execution_ids=sorted(self._pending_terminal_outcomes),
-                elapsed_seconds=self.durable_reconcile_max_seconds,
-            )
 
     async def _persist_cancellation(
         self, execution_status: ExecutionStatus
