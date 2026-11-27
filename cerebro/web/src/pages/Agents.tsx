@@ -113,7 +113,7 @@ export function Agents() {
                                 {agentList.find((a) => a.id === selectedAgent)?.name || 'Terminal'} - Logs
                             </CardTitle>
                             <div className="flex gap-2">
-                                <Badge variant="secondary" className="font-mono text-[10px] tracking-wider uppercase bg-primary/10 text-primary">Connected</Badge>
+                                <Badge variant="secondary" className="font-mono text-[10px] tracking-wider uppercase bg-primary/10 text-[hsl(var(--signal-strong))]">Connected</Badge>
                             </div>
                         </CardHeader>
                         <CardContent className="p-0 flex-1 relative overflow-hidden bg-[#0A0B10] text-[#E2E8F0] font-mono text-xs p-4 rounded-b-lg">
