@@ -41,7 +41,7 @@ The persistence layer is SQLAlchemy 2.1 over an async engine (`asyncpg` on Postg
 
 `BaseModel` also provides `is_deleted`, `soft_delete()`, `restore()` and `to_dict()`.
 
-Fourteen tables extend `Base` directly and carry their own columns:
+Fifteen tables extend `Base` directly and carry their own columns:
 
 | Table | Primary key | Append-only |
 |---|---|---|
@@ -67,7 +67,7 @@ The other 21 tables extend `BaseModel`, so they have soft deletion. `generated_r
 
 ## Tables
 
-The models declare 35 tables.
+The models declare 36 tables.
 
 | Table | Model class | Module | Tenant column | RLS policy | Append-only | Owner subsystem |
 |---|---|---|---|---|---|---|
