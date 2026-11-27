@@ -230,16 +230,105 @@ class TestGeminiService:
         from src.services.gemini_service import GeminiCircuitOpenError, GeminiService
 
         service = GeminiService(api_key="test-key")
-        mock_gemini_model.ainvoke.side_effect = Exception("down")
+        mock_gemini_model.ainvoke.side_effect = TimeoutError("down")
         service.model = mock_gemini_model
 
         for _ in range(5):
-            with pytest.raises(Exception, match="down"):
+            with pytest.raises(TimeoutError):
                 await service.generate_content("p")
         with pytest.raises(GeminiCircuitOpenError):
             await service.generate_content("p")
 
         assert mock_gemini_model.ainvoke.call_count == 5
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            lambda: __import__("google.genai.errors", fromlist=["x"]).ServerError(
+                503, {}
+            ),
+            lambda: __import__("google.genai.errors", fromlist=["x"]).ClientError(
+                429, {}
+            ),
+            lambda: ConnectionError("reset"),
+        ],
+    )
+    async def test_provider_side_failures_open_the_breaker(
+        self, mock_gemini_model, error
+    ):
+        from src.services.gemini_service import GeminiCircuitOpenError, GeminiService
+
+        service = GeminiService(api_key="test-key")
+        mock_gemini_model.ainvoke.side_effect = lambda *_: (_ for _ in ()).throw(
+            error()
+        )
+        service.model = mock_gemini_model
+
+        for _ in range(5):
+            with pytest.raises(Exception):  # noqa: B017 - type varies by case
+                await service.generate_content("p")
+        with pytest.raises(GeminiCircuitOpenError):
+            await service.generate_content("p")
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            lambda: __import__("google.genai.errors", fromlist=["x"]).ClientError(
+                400, {}
+            ),
+            lambda: ValueError("prompt too long"),
+        ],
+    )
+    async def test_caller_caused_failures_never_open_the_breaker(
+        self, mock_gemini_model, error
+    ):
+        """One tenant's bad prompts must not take Gemini away from everyone."""
+        from src.services.gemini_service import GeminiService
+
+        service = GeminiService(api_key="test-key")
+        mock_gemini_model.ainvoke.side_effect = lambda *_: (_ for _ in ()).throw(
+            error()
+        )
+        service.model = mock_gemini_model
+
+        for _ in range(10):
+            with pytest.raises(Exception):  # noqa: B017 - type varies by case
+                await service.generate_content("p")
+
+        assert mock_gemini_model.ainvoke.call_count == 10
+
+    async def test_a_wrapped_provider_error_still_counts(self, mock_gemini_model):
+        from src.services.gemini_service import GeminiCircuitOpenError, GeminiService
+
+        def wrapped(*_):
+            try:
+                raise TimeoutError("upstream")
+            except TimeoutError as cause:
+                raise RuntimeError("langchain wrapper") from cause
+
+        service = GeminiService(api_key="test-key")
+        mock_gemini_model.ainvoke.side_effect = wrapped
+        service.model = mock_gemini_model
+
+        for _ in range(5):
+            with pytest.raises(RuntimeError):
+                await service.generate_content("p")
+        with pytest.raises(GeminiCircuitOpenError):
+            await service.generate_content("p")
+
+    async def test_the_sdk_client_makes_one_request_per_call(self, monkeypatch):
+        from src.services import gemini_service as module
+
+        seen: dict = {}
+
+        def capture(**kwargs):
+            seen.update(kwargs)
+
+        monkeypatch.setattr(module, "ChatGoogleGenerativeAI", capture)
+        module.GeminiService(api_key="test-key")
+
+        # The SDK default is 6 resends, each billed, under one reservation.
+        assert seen["max_retries"] == 1
 
     async def test_rate_limiting(self, mock_gemini_model, redis_client):
         """Test that rate limiting works correctly."""

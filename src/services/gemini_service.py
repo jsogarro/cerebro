@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from langchain_google_genai import ChatGoogleGenerativeAI
 from redis import asyncio as aioredis
 from redis.exceptions import RedisError
@@ -43,6 +44,29 @@ class GeminiResult:
     prompt_tokens: int | None
     completion_tokens: int | None
     total_tokens: int | None
+
+
+_PROVIDER_SIDE_HTTP = frozenset({408, 429})
+
+
+def _is_provider_side(error: BaseException) -> bool:
+    """Whether a failure says the provider is unhealthy, not that the request was bad.
+
+    Walks the cause chain because the SDK wrappers re-raise. Unclassified
+    errors are the caller's: one tenant's oversized or malformed prompt must
+    not open the breaker every other tenant shares.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, TimeoutError | OSError | httpx.TransportError):
+            return True
+        code = getattr(current, "code", None)
+        if isinstance(code, int) and not isinstance(code, bool):
+            return code >= 500 or code in _PROVIDER_SIDE_HTTP
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _reported_count(usage: Any, key: str) -> int | None:
@@ -113,6 +137,8 @@ class GeminiService:
             top_p=self.config.top_p,
             top_k=self.config.top_k,
             max_output_tokens=self.config.max_output_tokens,
+            # The SDK default is 6 resends, each billed under one reservation.
+            max_retries=1,
         )
 
         self.rate_limiter = RateLimiter(
@@ -141,21 +167,24 @@ class GeminiService:
         """
         if not self.circuit.allows(datetime.now(UTC)):
             raise GeminiCircuitOpenError("gemini circuit is open")
+        epoch = self.circuit.epoch
         started = time.monotonic()
         try:
             async with self.rate_limiter.acquire():
                 message = await self.model.ainvoke(prompt)
             result = _result_from(message)
         except BaseException as exc:
-            if isinstance(exc, Exception):
-                self.circuit.record_failure(datetime.now(UTC))
+            if isinstance(exc, Exception) and _is_provider_side(exc):
+                self.circuit.record_failure(datetime.now(UTC), epoch=epoch)
             else:
+                # Cancelled or caller-caused: no evidence about the provider,
+                # but a half-open trial slot must still go back.
                 self.circuit.record_abandoned()
             logger.error("gemini_api_error", error=str(exc))
             if record_metrics and isinstance(exc, Exception):
                 self._record_call(None, started, success=False)
             raise
-        self.circuit.record_success()
+        self.circuit.record_success(epoch=epoch)
         if record_metrics:
             self._record_call(result, started, success=True)
         return result

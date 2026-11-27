@@ -330,6 +330,7 @@ class MASRouter:
         breaker = self._routing_circuit_breaker
         if not breaker.allows(datetime.now(UTC)):
             raise RuntimeError("routing circuit breaker is open")
+        epoch = breaker.epoch
         try:
             decision = await routing()
         except WorkflowShapeUnsupportedError:
@@ -337,12 +338,12 @@ class MASRouter:
             breaker.record_abandoned()
             raise
         except Exception:
-            breaker.record_failure(datetime.now(UTC))
+            breaker.record_failure(datetime.now(UTC), epoch=epoch)
             raise
         except BaseException:
             breaker.record_abandoned()
             raise
-        breaker.record_success()
+        breaker.record_success(epoch=epoch)
         return decision
 
     async def route(
