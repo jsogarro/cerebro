@@ -1,6 +1,6 @@
 # CLI and web clients
 
-Two clients talk to the HTTP API: the `research-cli` command-line tool in `src/cli/` and the React workbench in `cerebro/web/`. Both authenticate with a bearer token. The CLI takes it from `RESEARCH_AUTH_TOKEN`; the workbench has a `/login` page that posts to `POST /api/v1/auth/login` and stores the access token, and every `/app` route redirects to `/login` without one. The login page has no second-factor step, and the access token is not refreshed: a `401` clears it and returns the browser to `/login`. The workflows, runs, run detail and memory pages call routes the API does not mount.
+Two clients talk to the HTTP API: the `research-cli` command-line tool in `src/cli/` and the React workbench in `cerebro/web/`. Both authenticate with a bearer token. The CLI takes it from `RESEARCH_AUTH_TOKEN`; the workbench has a `/login` page (linked from the landing page) and a sign-out button in the header. The login page posts to `POST /api/v1/auth/login` and stores the access token, and every `/app` route redirects to `/login` without one. The login page has no second-factor step, and the access token is not refreshed: a `401` clears it and returns the browser to `/login`. The workflows, runs, run detail and memory pages call routes the API does not mount.
 
 ## Summary
 
@@ -147,7 +147,7 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 
 ### Pages
 
-> **Not wired.** The workflows, runs, run detail and memory pages call routes the API does not mount. The API mounts `GET /api/v1/workflows` (the catalogue listing) but no `/api/v1/runs` list, create or detail route, no `/api/v1/runs/{id}/cancel`, no `/api/v1/memory/nodes` and no `/api/v1/agents/{id}/logs`. The only run route it mounts is `GET /api/v1/runs/{run_id}/events`, which streams server-sent events rather than returning a JSON collection. The dashboard, QA, costs and benchmarks pages never call the API and show a "not available" notice instead of figures. The memory page stays reachable at `/app/memory` but has no sidebar link; no sidebar link to agent logs exists either. The settings page has a switch with no handler.
+> **Not wired.** The workflows, runs, run detail and memory pages call routes the API does not mount. The API mounts `GET /api/v1/workflows` (the catalogue listing) but no `/api/v1/runs` list, create or detail route, no `/api/v1/runs/{id}/cancel`, and no `/api/v1/memory/nodes`. The only run route it mounts is `GET /api/v1/runs/{run_id}/events`, which streams server-sent events rather than returning a JSON collection. The dashboard, QA, costs and benchmarks pages never call the API and show a "not available" notice instead of figures. The memory page stays reachable at `/app/memory` but has no sidebar link; the agents page has no log panel. The settings page has a switch with no handler.
 
 | Route | Page | Backend calls | Backed |
 |---|---|---|---|
@@ -159,7 +159,7 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 | `/login` | `Login` | `POST /api/v1/auth/login` | Yes |
 | `/app/dashboard` | `Dashboard` | none | not available notice |
 | `/app/research`, `/app/research/:id` | `Research` | `GET` and `POST /api/v1/research/projects`; `GET /api/v1/research/projects/{id}`; WebSocket `/ws` | Yes |
-| `/app/agents` | `Agents` | `GET /api/v1/agents`; `GET /api/v1/agents/{id}/logs` | Partly: the list is mounted, the logs route is not |
+| `/app/agents` | `Agents` | `GET /api/v1/agents` | Yes |
 | `/app/memory` | `Memory` | `GET /api/v1/memory/nodes` | No |
 | `/app/qa` | `QA` | none | not available notice |
 | `/app/costs` | `Costs` | none | not available notice |

@@ -1,7 +1,8 @@
-import { Bell, Menu } from "lucide-react";
-import { matchPath, useLocation } from "react-router-dom";
+import { Bell, LogOut, Menu } from "lucide-react";
+import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { DialogTrigger } from "@/components/ui/dialog";
+import { setAccessToken } from "@/api/auth";
 
 type PageContext = {
     eyebrow: string;
@@ -32,6 +33,7 @@ function contextForPath(pathname: string): PageContext {
 
 export function Header() {
     const { pathname } = useLocation();
+    const navigate = useNavigate();
     const pageContext = contextForPath(pathname);
 
     return (
@@ -52,6 +54,17 @@ export function Header() {
             <div className="flex items-center gap-2 md:gap-3">
                 <Button aria-label="View notifications" variant="ghost" size="icon">
                     <Bell aria-hidden="true" className="h-5 w-5" />
+                </Button>
+                <Button
+                    aria-label="Sign out"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                        setAccessToken(null);
+                        navigate("/login", { replace: true });
+                    }}
+                >
+                    <LogOut aria-hidden="true" className="h-5 w-5" />
                 </Button>
                 <div
                     aria-label="Current user: Cerebro researcher"

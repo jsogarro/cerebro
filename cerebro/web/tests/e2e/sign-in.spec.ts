@@ -94,3 +94,34 @@ test.describe('pages show no invented data', () => {
         await expect(page.getByRole('link', { name: /logs/i })).toHaveCount(0);
     });
 });
+
+test.describe('landing link, sign-out and agent logs', () => {
+    test('the landing page links to the login page', async ({ page }) => {
+        await page.goto('/');
+        await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Sign in' }).click();
+        await expect(page).toHaveURL(/\/login$/);
+    });
+
+    test('sign out clears the token and returns to the login page', async ({ page }) => {
+        await mockApi(page);
+        await page.goto('/app/runs');
+        await page.getByRole('button', { name: 'Sign out' }).click();
+        await expect(page).toHaveURL(/\/login$/);
+        expect(await page.evaluate(() => localStorage.getItem('cerebro.access_token'))).toBeNull();
+        await page.goto('/app/runs');
+        await expect(page).toHaveURL(/\/login$/);
+    });
+
+    test('the agents page shows no log panel and requests no logs', async ({ page }) => {
+        await mockApi(page);
+        let logRequested = false;
+        page.on('request', (r) => {
+            if (r.url().includes('/logs')) logRequested = true;
+        });
+        await page.goto('/app/agents');
+        await expect(page.getByText('Researcher Alpha').first()).toBeVisible();
+        await expect(page.getByText(/- Logs/)).toHaveCount(0);
+        await expect(page.getByLabel('Agent log output')).toHaveCount(0);
+        expect(logRequested).toBe(false);
+    });
+});
