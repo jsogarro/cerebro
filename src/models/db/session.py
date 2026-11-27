@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import event, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -252,7 +253,7 @@ class DatabaseManager:
             async with self.engine.begin() as conn:
                 await conn.execute(text("SELECT 1"))
             return True
-        except Exception as e:
+        except (SQLAlchemyError, OSError) as e:
             logger.error("database_connection_check_failed", error=str(e))
             return False
 
@@ -342,7 +343,7 @@ class DatabaseManager:
                 }
                 for row in rows
             ]
-        except Exception as e:
+        except (SQLAlchemyError, OSError) as e:
             logger.warning("slow_queries_unavailable", error=str(e))
             return []
 

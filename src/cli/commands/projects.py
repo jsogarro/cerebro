@@ -8,11 +8,14 @@ from typing import Any
 from uuid import UUID
 
 import click
+import httpx
 from click.core import Context
 from click.exceptions import Exit
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
+from tenacity import RetryError
+from websockets.exceptions import WebSocketException
 
 from src.cli.client import APIError, ResearchAPIClient
 from src.cli.config import config
@@ -118,7 +121,14 @@ def create_project(
                 try:
                     project = await _create_single_project(project_data)
                     created.append(project)
-                except Exception as e:
+                except (
+                    Exit,
+                    APIError,
+                    httpx.HTTPError,
+                    RetryError,
+                    KeyError,
+                    ValueError,
+                ) as e:
                     failed.append((project_data["title"], str(e)))
 
             # Summary
@@ -299,7 +309,7 @@ def get_progress(
                 )
                 await _watch_progress()
 
-        except Exception as e:
+        except (OSError, WebSocketException) as e:
             if verbose:
                 print_error(f"WebSocket streaming error: {e}")
             print_warning("Falling back to polling mode")

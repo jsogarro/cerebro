@@ -127,7 +127,7 @@ class ResearchAPIClient:
         if response.status_code >= 400:
             try:
                 error_detail = response.json().get("detail", response.text)
-            except Exception:
+            except (ValueError, AttributeError):
                 error_detail = response.text
 
             raise APIError(response.status_code, error_detail)

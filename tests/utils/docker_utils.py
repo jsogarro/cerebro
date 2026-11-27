@@ -8,6 +8,8 @@ import time
 from contextlib import contextmanager
 from typing import Any
 
+from docker.errors import DockerException
+
 import docker
 
 logger = logging.getLogger(__name__)
@@ -136,7 +138,7 @@ class DockerTestManager:
                 if result.exit_code == 0:
                     logger.info("PostgreSQL is ready")
                     return
-            except Exception as e:
+            except (DockerException, OSError) as e:
                 logger.debug(f"Waiting for PostgreSQL: {e}")
 
             time.sleep(retry_delay)
@@ -153,7 +155,7 @@ class DockerTestManager:
                 if b"PONG" in result.output:
                     logger.info("Redis is ready")
                     return
-            except Exception as e:
+            except (DockerException, OSError) as e:
                 logger.debug(f"Waiting for Redis: {e}")
 
             time.sleep(retry_delay)
@@ -172,7 +174,7 @@ class DockerTestManager:
                 if result.exit_code == 0:
                     logger.info("Temporal is ready")
                     return
-            except Exception as e:
+            except (DockerException, OSError) as e:
                 logger.debug(f"Waiting for Temporal: {e}")
 
             time.sleep(retry_delay)
@@ -187,7 +189,7 @@ class DockerTestManager:
                 self.containers[name].remove()
                 del self.containers[name]
                 logger.info(f"Stopped container: {name}")
-            except Exception as e:
+            except (DockerException, OSError) as e:
                 logger.error(f"Error stopping container {name}: {e}")
 
     def cleanup(self):
@@ -201,7 +203,7 @@ class DockerTestManager:
             try:
                 network.remove()
                 logger.info(f"Removed network: {name}")
-            except Exception as e:
+            except (DockerException, OSError) as e:
                 logger.error(f"Error removing network {name}: {e}")
 
         # Remove volumes
@@ -209,7 +211,7 @@ class DockerTestManager:
             try:
                 volume.remove()
                 logger.info(f"Removed volume: {name}")
-            except Exception as e:
+            except (DockerException, OSError) as e:
                 logger.error(f"Error removing volume {name}: {e}")
 
         self.networks.clear()

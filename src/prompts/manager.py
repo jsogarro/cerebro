@@ -285,31 +285,26 @@ class PromptManager:
     async def register_template(self, template: PromptTemplate) -> bool:
         """Register a new template programmatically."""
 
-        try:
-            template_name = template.metadata.name
+        template_name = template.metadata.name
 
-            with self._lock:
-                # Store template
-                self._templates[template_name] = template
+        with self._lock:
+            # Store template
+            self._templates[template_name] = template
 
-                if template.inherits_from:
-                    self._template_inheritance[template_name] = template.inherits_from
+            if template.inherits_from:
+                self._template_inheritance[template_name] = template.inherits_from
 
-                # Invalidate cache
-                if self._cache:
-                    self._cache.invalidate(template_name)
+            # Invalidate cache
+            if self._cache:
+                self._cache.invalidate(template_name)
 
-                # Notify listeners
-                await self._notify_change_listeners(
-                    "created", "", template_name, None, template
-                )
+            # Notify listeners
+            await self._notify_change_listeners(
+                "created", "", template_name, None, template
+            )
 
-            logger.info(f"Registered template: {template_name}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to register template: {e}")
-            return False
+        logger.info(f"Registered template: {template_name}")
+        return True
 
     async def update_template_performance(
         self,
@@ -320,30 +315,25 @@ class PromptManager:
     ) -> bool:
         """Update template performance metrics."""
 
-        try:
-            template = self._templates.get(template_name)
-            if not template:
-                return False
-
-            template.metadata.usage_count += 1
-
-            # Update success rate (exponential moving average)
-            alpha = 0.1
-            template.metadata.success_rate = (
-                1 - alpha
-            ) * template.metadata.success_rate + alpha * (1.0 if success else 0.0)
-
-            template.metadata.avg_quality_score = (
-                1 - alpha
-            ) * template.metadata.avg_quality_score + alpha * quality_score
-
-            template.metadata.last_updated = datetime.now().isoformat()
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to update template performance {template_name}: {e}")
+        template = self._templates.get(template_name)
+        if not template:
             return False
+
+        template.metadata.usage_count += 1
+
+        # Update success rate (exponential moving average)
+        alpha = 0.1
+        template.metadata.success_rate = (
+            1 - alpha
+        ) * template.metadata.success_rate + alpha * (1.0 if success else 0.0)
+
+        template.metadata.avg_quality_score = (
+            1 - alpha
+        ) * template.metadata.avg_quality_score + alpha * quality_score
+
+        template.metadata.last_updated = datetime.now().isoformat()
+
+        return True
 
     async def get_template_stats(self) -> dict[str, Any]:
         """Get comprehensive prompt manager statistics."""
@@ -387,7 +377,7 @@ class PromptManager:
         for template_file in template_files:
             try:
                 await self._load_template_file(template_file)
-            except Exception as e:
+            except (OSError, yaml.YAMLError, ValueError, TypeError) as e:
                 logger.error(f"Failed to load template {template_file}: {e}")
 
         self.load_count += 1

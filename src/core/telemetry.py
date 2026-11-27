@@ -78,7 +78,7 @@ def telemetry_enabled() -> bool:
         from src.core.config import get_settings
 
         return bool(get_settings().ENABLE_CONTEXT_COMPACTION_TELEMETRY)
-    except Exception:
+    except (ImportError, ValueError, AttributeError):
         return False
 
 
@@ -102,7 +102,7 @@ def count_tokens(text: str) -> int:
         if enc is None:
             return 0
         return len(enc.encode(text))
-    except Exception as exc:
+    except (ValueError, OSError) as exc:
         logger.debug("count_tokens failed", error=str(exc))
         return 0
 

@@ -222,7 +222,7 @@ class AcademicSearchTool(BaseMCPTool):
 
             return results
 
-        except Exception as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.error(f"PubMed search error: {e!s}")
             return []
 
@@ -322,7 +322,7 @@ class AcademicSearchTool(BaseMCPTool):
 
             return results
 
-        except Exception as e:
+        except (httpx.HTTPError, ET.ParseError) as e:
             logger.error(f"arXiv search error: {e!s}")
             return []
 
@@ -386,7 +386,7 @@ class AcademicSearchTool(BaseMCPTool):
 
             return results
 
-        except Exception as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.error(f"Semantic Scholar search error: {e!s}")
             return []
 

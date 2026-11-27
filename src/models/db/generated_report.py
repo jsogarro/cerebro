@@ -399,5 +399,5 @@ class ReportFormat(BaseModel):
 
             current_hash = hashlib.sha256(content).hexdigest()
             return bool(current_hash == self.file_hash)
-        except Exception:
+        except (OSError, ValueError):
             return False

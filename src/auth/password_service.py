@@ -256,7 +256,7 @@ class PasswordService:
 
             return False
 
-        except Exception as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.error("Failed to check password breach", error=str(e))
             # Fail open - don't block on API failure
             return False
