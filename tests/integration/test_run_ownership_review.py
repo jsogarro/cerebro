@@ -287,7 +287,7 @@ async def test_the_lease_is_renewed_while_a_parked_outcome_outlives_its_workflow
 
 
 async def test_a_parked_outcome_is_dropped_when_its_own_window_ends(factory) -> None:
-    service, status = await _park_success(
+    service, _ = await _park_success(
         factory, "rev-parked-window", durable_reconcile_max_seconds=0.0
     )
 
