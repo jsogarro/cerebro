@@ -217,7 +217,7 @@ Redis runs from `redis:7-alpine`. For "OOM command not allowed", check usage wit
 
 ## Debug logging
 
-`DEBUG` (default `false`) only enables `/docs` and `/redoc`, which still require a token (nginx serves its own `/docs`, so these pages are reachable only on the API port). `LOG_LEVEL` is not read by the API process, so setting it does not change verbosity ([configuration](reference/02-configuration.md)). Logs go to standard output through structlog.
+`DEBUG` (default `false`) only enables `/docs` and `/redoc`, which still require a token (nginx serves its own `/docs`, so these pages are reachable only on the API port). `LOG_LEVEL` (default `INFO`) sets the minimum level of the API's structlog output; set `LOG_LEVEL=DEBUG` to see debug events ([configuration](reference/02-configuration.md)). Logs go to standard output through structlog.
 
 `DEV_ENABLE_AI_BRAIN_DEBUG`, `DEV_ENABLE_MEMORY_DEBUG` and `DEV_ENABLE_ROUTING_DEBUG` are declared in `src/core/config.py` and read nowhere else, so setting them has no effect.
 
