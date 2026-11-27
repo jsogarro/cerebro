@@ -30,6 +30,11 @@ from src.models.db.base import UUID as DBUUID
 from src.models.db.base import BaseModel
 
 
+def naive_utc_now() -> datetime:
+    """UTC now without tzinfo, for this module's ``DateTime`` (naive) columns."""
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 class GeneratedReport(BaseModel):
     """Database model for generated research reports."""
 
@@ -178,7 +183,7 @@ class GeneratedReport(BaseModel):
     def update_access_stats(self) -> None:
         """Update access statistics."""
         self.access_count += 1
-        self.last_accessed_at = datetime.now(UTC).replace(tzinfo=None)
+        self.last_accessed_at = naive_utc_now()
 
     def add_generation_error(self, error_message: str) -> None:
         """Add a generation error message."""
@@ -191,7 +196,7 @@ class GeneratedReport(BaseModel):
     def mark_generation_started(self) -> None:
         """Mark report generation as started."""
         self.generation_status = "generating"
-        self.generation_started_at = datetime.now(UTC)
+        self.generation_started_at = naive_utc_now()
 
     def mark_generation_completed(
         self,
@@ -201,7 +206,7 @@ class GeneratedReport(BaseModel):
     ) -> None:
         """Mark report generation as completed."""
         self.generation_status = "completed"
-        self.generation_completed_at = datetime.now(UTC)
+        self.generation_completed_at = naive_utc_now()
         self.formats_generated = formats
         self.file_sizes = file_sizes
 
@@ -214,7 +219,7 @@ class GeneratedReport(BaseModel):
     def mark_generation_failed(self, error_message: str) -> None:
         """Mark report generation as failed."""
         self.generation_status = "failed"
-        self.generation_completed_at = datetime.now(UTC)
+        self.generation_completed_at = naive_utc_now()
         self.add_generation_error(error_message)
 
     def to_dict(self, include_content: bool = False) -> dict[str, Any]:
@@ -333,9 +338,7 @@ class ReportFormat(BaseModel):
     content_binary: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
     # Generation information
-    generated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None)
-    )
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=naive_utc_now)
     generation_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     generator_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
 

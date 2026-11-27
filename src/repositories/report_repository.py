@@ -17,7 +17,11 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import Select
 from structlog import get_logger
 
-from src.models.db.generated_report import GeneratedReport, ReportFormat
+from src.models.db.generated_report import (
+    GeneratedReport,
+    ReportFormat,
+    naive_utc_now,
+)
 from src.repositories.base import BaseRepository
 
 logger = get_logger()
@@ -462,7 +466,7 @@ class ReportRepository(BaseRepository[GeneratedReport]):
         else:
             report.generation_status = status
             if status == "completed":
-                report.generation_completed_at = datetime.now(UTC)
+                report.generation_completed_at = naive_utc_now()
 
         await self.session.flush()
         await self.session.refresh(report)
