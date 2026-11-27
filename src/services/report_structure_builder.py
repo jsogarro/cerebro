@@ -16,6 +16,10 @@ from src.models.report import (
     format_score,
 )
 from src.services.report_config import ReportQualityConfig, ReportTemplateConfig
+from src.services.visualization_generator import (
+    create_confidence_radar_viz,
+    create_source_distribution_viz,
+)
 
 logger = get_logger()
 
@@ -374,26 +378,27 @@ class ReportStructureBuilder:
 
         sources = aggregated_results.get("sources", [])
         if sources and len(sources) > 1:
-            year_dist: dict[str, int] = {}
-            for source in sources:
-                year = source.get("year", "Unknown")
-                year_dist[str(year)] = year_dist.get(str(year), 0) + 1
+            if len({str(source.get("year", "Unknown")) for source in sources}) > 1:
+                report.add_visualization(create_source_distribution_viz(sources))
 
-            if len(year_dist) > 1:
-                viz = Visualization(
-                    id="source_distribution",
-                    type=VisualizationType.BAR_CHART,
-                    title="Source Distribution by Year",
-                    data={
-                        "years": list(year_dist.keys()),
-                        "counts": list(year_dist.values()),
-                    },
-                    config={"x_label": "Year", "y_label": "Number of Sources"},
-                    caption=None,
-                    width=None,
-                    height=None,
+        category_confidence = {
+            category: sum(c) / len(c)
+            for category, findings in aggregated_results.get("findings", {}).items()
+            if (
+                c := [
+                    f["confidence"]
+                    for f in findings
+                    if isinstance(f, dict) and f.get("confidence") is not None
+                ]
+            )
+        }
+        if len(category_confidence) >= 3:
+            report.add_visualization(
+                create_confidence_radar_viz(
+                    [name.replace("_", " ").title() for name in category_confidence],
+                    list(category_confidence.values()),
                 )
-                report.add_visualization(viz)
+            )
 
         # Only domains that sources actually carry are plotted: a pie of
         # domain names with no measured weight would be decoration.

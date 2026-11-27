@@ -496,3 +496,36 @@ class TestDomainVisualization:
         assert "would be rendered here" not in html
         assert "<td>ai</td>" in html and "<td>3</td>" in html
         assert "&lt;b&gt;edu&lt;/b&gt;" in html and "<b>edu</b>" not in html
+
+
+class TestRealDataCharts:
+    @pytest.mark.asyncio
+    async def test_year_bar_and_confidence_radar_carry_measured_values(
+        self, tmp_path: Path
+    ) -> None:
+        generator = ReportGenerator(
+            ReportSettings(
+                report_storage_path=str(tmp_path), template_path=str(tmp_path / "t")
+            )
+        )
+        report = Report(
+            id="r", title="T", query="q", configuration=ReportConfiguration()
+        )
+        findings = {
+            name: [{"text": "x", "confidence": conf}]
+            for name, conf in (("a_b", 0.5), ("c", 0.7), ("d", 0.9))
+        }
+        data = {
+            "aggregated_results": {
+                "sources": [{"year": 2020}, {"year": 2021}, {"year": 2021}],
+                "findings": findings,
+            }
+        }
+
+        await generator._generate_visualizations(report, data)
+
+        by_id = {v.id: v for v in report.visualizations}
+        assert by_id["source_dist"].data == {"x": ["2020", "2021"], "y": [1, 2]}
+        radar = by_id["confidence_radar"].data
+        assert radar["categories"] == ["A B", "C", "D"]
+        assert radar["values"] == [0.5, 0.7, 0.9]

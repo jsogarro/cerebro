@@ -804,13 +804,6 @@ class VisualizationGenerator:
         return visualizations
 
 
-def create_visualization_generator(
-    settings: ReportSettings | None = None,
-) -> VisualizationGenerator:
-    """Factory function to create a visualization generator."""
-    return VisualizationGenerator(settings)
-
-
 # Utility functions for creating common visualization specifications
 def create_source_distribution_viz(
     sources: list[dict[str, Any]], viz_id: str = "source_dist"
@@ -826,22 +819,6 @@ def create_source_distribution_viz(
         title="Source Distribution by Year",
         data={"x": list(year_counts.keys()), "y": list(year_counts.values())},
         config={"x_label": "Publication Year", "y_label": "Number of Sources"},
-        caption=None,
-        width=None,
-        height=None,
-    )
-
-
-def create_domain_coverage_viz(
-    domains: list[str], viz_id: str = "domain_coverage"
-) -> Visualization:
-    """Create visualization specification for domain coverage."""
-    return Visualization(
-        id=viz_id,
-        type=VisualizationType.PIE_CHART,
-        title="Research Domain Coverage",
-        data={"labels": domains, "values": [1] * len(domains)},
-        config={"donut": True},
         caption=None,
         width=None,
         height=None,
@@ -870,7 +847,5 @@ __all__ = [
     "VisualizationGenerationError",
     "VisualizationGenerator",
     "create_confidence_radar_viz",
-    "create_domain_coverage_viz",
     "create_source_distribution_viz",
-    "create_visualization_generator",
 ]
