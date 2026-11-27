@@ -178,7 +178,7 @@ class GeneratedReport(BaseModel):
     def update_access_stats(self) -> None:
         """Update access statistics."""
         self.access_count += 1
-        self.last_accessed_at = datetime.now(UTC)
+        self.last_accessed_at = datetime.now(UTC).replace(tzinfo=None)
 
     def add_generation_error(self, error_message: str) -> None:
         """Add a generation error message."""
