@@ -1,8 +1,14 @@
 """Model output and citation metadata must not reach TeX or WeasyPrint as markup."""
 
+import ast
+import html as html_lib
+import os
 import re
+import shutil
 import socket
+import subprocess
 import threading
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -15,6 +21,7 @@ from src.models.report import (
     ReportSection,
     ReportType,
 )
+from src.services import template_renderer
 from src.services.exporters import pdf_exporter
 from src.services.exporters.latex_exporter import LaTeXExporter
 from src.services.report_config import (
@@ -23,7 +30,7 @@ from src.services.report_config import (
     ReportTemplateConfig,
 )
 from src.services.report_output_generator import ReportOutputGenerator
-from src.services.template_renderer import TemplateRenderingError
+from src.services.template_renderer import TemplateRenderer, TemplateRenderingError
 
 ROOT = Path(__file__).resolve().parents[2]
 INJECTION = r"x}\input{/etc/passwd}%"
@@ -200,34 +207,61 @@ async def test_basic_html_fallback_escapes_everything() -> None:
     assert "&lt;img" in html and "&lt;link" in html
 
 
-def test_pdf_export_passes_the_data_only_fetcher_to_html_and_css(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def _stub_weasyprint(monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, MagicMock]:
     html_cls, css_cls = MagicMock(), MagicMock()
     monkeypatch.setattr(pdf_exporter, "HTML", html_cls)
     monkeypatch.setattr(pdf_exporter, "CSS", css_cls)
     monkeypatch.setattr(pdf_exporter, "WEASYPRINT_AVAILABLE", True)
     monkeypatch.setattr(pdf_exporter, "FontConfiguration", MagicMock())
-    exporter = pdf_exporter.PDFExporter(ReportSettings())
+    return html_cls, css_cls
+
+
+def _all_constructions(mock: MagicMock) -> list[object]:
+    return [call.kwargs.get("url_fetcher") for call in mock.call_args_list]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_every_weasyprint_construction_gets_the_deny_all_fetcher(
+    monkeypatch: pytest.MonkeyPatch, stream: bool
+) -> None:
+    html_cls, css_cls = _stub_weasyprint(monkeypatch)
+    exporter = pdf_exporter.PDFExporter(ReportSettings())  # constructs HTML() too
     monkeypatch.setattr(exporter, "_generate_pdf_bytes", lambda *_: b"%PDF")
-    exporter.export_to_pdf("<p>x</p>", Report(id="r", title="t", query="q"))
-    assert html_cls.call_args.kwargs["url_fetcher"] is pdf_exporter.DATA_ONLY_FETCHER
-    assert css_cls.call_args.kwargs["url_fetcher"] is pdf_exporter.DATA_ONLY_FETCHER
+    export = exporter.export_to_pdf_stream if stream else exporter.export_to_pdf
+    export("<p>x</p>", Report(id="r", title="t", query="q"), custom_css="p{}")
+    fetchers = _all_constructions(html_cls) + _all_constructions(css_cls)
+    assert len(fetchers) >= 4  # dependency probe, document, base CSS, custom CSS
+    assert all(f is pdf_exporter.DENY_ALL_FETCHER for f in fetchers)
 
 
 needs_weasyprint = pytest.mark.skipif(
-    not pdf_exporter.WEASYPRINT_AVAILABLE, reason="WeasyPrint not importable"
+    not pdf_exporter.WEASYPRINT_AVAILABLE
+    and not os.environ.get("CEREBRO_REQUIRE_WEASYPRINT"),
+    reason="WeasyPrint not importable",
 )
 
 
+@pytest.mark.skipif(
+    not os.environ.get("CEREBRO_REQUIRE_WEASYPRINT"),
+    reason="only the Linux renderer job sets CEREBRO_REQUIRE_WEASYPRINT",
+)
+def test_renderer_job_fails_when_weasyprint_is_missing() -> None:
+    assert pdf_exporter.WEASYPRINT_AVAILABLE, "renderer job needs WeasyPrint"
+
+
 @needs_weasyprint
-def test_data_only_fetcher_refuses_files_and_network() -> None:
-    fetcher = pdf_exporter.DATA_ONLY_FETCHER
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/passwd",
+        "http://127.0.0.1:1/",
+        "data:text/plain,a",
+        "ftp://example.com/x",
+    ],
+)
+def test_deny_all_fetcher_refuses_every_scheme(url: str) -> None:
     with pytest.raises(ValueError, match="disallowed"):
-        fetcher("file:///etc/passwd")
-    with pytest.raises(ValueError, match="disallowed"):
-        fetcher("http://127.0.0.1:1/")
-    assert fetcher("data:text/plain,a") is not None
+        pdf_exporter.DENY_ALL_FETCHER(url)
 
 
 def _loopback_listener() -> tuple[socket.socket, list[int]]:
@@ -250,22 +284,270 @@ def _loopback_listener() -> tuple[socket.socket, list[int]]:
     return server, hits
 
 
+def _hostile_html(sentinel: Path, port: int) -> str:
+    # Each reference is a different WeasyPrint fetch path: attachment, image,
+    # stylesheet import and a CSS background.
+    return (
+        "<html><head>"
+        f'<link rel="attachment" href="{sentinel.as_uri()}">'
+        f'<link rel="stylesheet" href="http://127.0.0.1:{port}/a.css">'
+        f'<style>@import url("{sentinel.as_uri()}");'
+        f'p{{background:url("http://127.0.0.1:{port}/b.png")}}</style></head>'
+        f'<body><p>x</p><img src="http://127.0.0.1:{port}/c.png"></body></html>'
+    )
+
+
 @needs_weasyprint
-@pytest.mark.parametrize(("hardened", "expected_hits"), [(True, 0), (False, 1)])
-def test_render_never_connects_to_remote_hosts(
-    hardened: bool, expected_hits: int
+@pytest.mark.parametrize(("hardened", "leaks"), [(True, False), (False, True)])
+def test_hostile_html_reaches_neither_file_nor_socket(
+    tmp_path: Path, hardened: bool, leaks: bool
 ) -> None:
-    # The control run (hardened=False) proves the listener would see a fetch.
+    # hardened=False is the control: it proves the sentinel and the listener
+    # would see a fetch, so the hardened run cannot pass because WeasyPrint is
+    # inert or the detector is blind.
+    sentinel = tmp_path / "sentinel.txt"
+    sentinel.write_text("SENTINEL-MARKER")
+    server, hits = _loopback_listener()
+    html = _hostile_html(sentinel, server.getsockname()[1])
+    if hardened:
+        exporter = pdf_exporter.PDFExporter(ReportSettings())
+        pdf = exporter.export_to_pdf(html, Report(id="r", title="t", query="q"))
+        pdf_bytes = pdf.content
+    else:
+        pdf_bytes = pdf_exporter.HTML(string=html).write_pdf()
+    server.close()
+    assert isinstance(pdf_bytes, bytes)
+    assert (b"EmbeddedFile" in pdf_bytes) is leaks
+    assert bool(hits) is leaks
+
+
+@needs_weasyprint
+@pytest.mark.parametrize("template_fails", [False, True])
+async def test_hostile_report_pdf_embeds_nothing_and_connects_nowhere(
+    tmp_path: Path, template_fails: bool
+) -> None:
+    sentinel = tmp_path / "sentinel.txt"
+    sentinel.write_text("SENTINEL-MARKER")
     server, hits = _loopback_listener()
     port = server.getsockname()[1]
-    html = f'<html><body><img src="http://127.0.0.1:{port}/x.png"></body></html>'
-    kwargs = {"url_fetcher": pdf_exporter.DATA_ONLY_FETCHER} if hardened else {}
-    pdf_exporter.HTML(string=html, **kwargs).write_pdf()
+    payload = (
+        f'<link rel="attachment" href="{sentinel.as_uri()}">'
+        f'<img src="http://127.0.0.1:{port}/c.png">'
+    )
+    report = Report(
+        id="r",
+        title=payload,
+        query="q",
+        executive_summary=payload,
+        sections=[ReportSection(title=payload, content=payload)],
+    )
+    generator = _generator()
+    if template_fails:
+        generator.template_renderer = MagicMock()
+        generator.template_renderer.render_report.side_effect = TemplateRenderingError(
+            "x"
+        )
+    pdf = (await generator.generate_pdf(report)).content
     server.close()
-    assert len(hits) == expected_hits
+    assert isinstance(pdf, bytes) and pdf.startswith(b"%PDF")
+    assert b"EmbeddedFile" not in pdf
+    assert not hits
 
 
 def test_report_configuration_has_no_custom_css_injection_point() -> None:
     assert "custom_css" not in ReportConfiguration.model_fields
     template = Path(ROOT / "src/templates/reports/base.html.j2").read_text()
     assert "custom_css" not in template
+
+
+def _renderer(
+    monkeypatch: pytest.MonkeyPatch, markdown_available: bool
+) -> TemplateRenderer:
+    monkeypatch.setattr(template_renderer, "MARKDOWN_AVAILABLE", markdown_available)
+    return TemplateRenderer(ReportSettings())
+
+
+@pytest.mark.parametrize("markdown_available", [False, True])
+def test_markdown_fallback_is_escaped_plain_text(
+    monkeypatch: pytest.MonkeyPatch, markdown_available: bool
+) -> None:
+    renderer = _renderer(monkeypatch, markdown_available)
+    if markdown_available:
+        monkeypatch.setattr(
+            template_renderer.markdown_module,
+            "Markdown",
+            MagicMock(side_effect=RuntimeError("boom")),
+        )
+    out = renderer._markdown_filter("a <img src=x onerror=1> **b**\n<<b>img src=y>")
+    assert "<img" not in out and "<b>" not in out
+    assert "&lt;img src=x onerror=1&gt;" in out
+    assert "<br>" in out
+
+
+@pytest.mark.parametrize(
+    ("payload", "forbidden"),
+    [
+        ("<<b>img src=x>", "<img"),
+        ("<scr<script>x</script>ipt>alert(1)</script>", "<script"),
+        ('<a href="javascript:alert(1)" onclick="x">l</a>', "javascript"),
+        ("<p onclick=x>t</p>", "onclick"),
+        ("<style>p{background:url(file:///etc/passwd)}</style>t", "file:"),
+        ("<!-- <img src=x> -->t", "<img"),
+    ],
+)
+def test_sanitizer_never_reconstructs_a_tag(
+    monkeypatch: pytest.MonkeyPatch, payload: str, forbidden: str
+) -> None:
+    out = _renderer(monkeypatch, True)._sanitize_rendered_html(payload)
+    assert forbidden not in out.lower()
+    assert "<p>" in _renderer(monkeypatch, True)._sanitize_rendered_html("<p>ok</p>")
+
+
+def test_sanitizer_work_is_linear_on_nested_tag_splices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    n = 20000
+    started = time.perf_counter()
+    out = _renderer(monkeypatch, True)._sanitize_rendered_html("<" * n + "b>" * n)
+    assert time.perf_counter() - started < 1.0
+    assert "<img" not in out
+
+
+def _compile_tex(tex: str, workdir: Path) -> subprocess.CompletedProcess[str]:
+    # Test tooling only: the server never compiles TeX. Scrubbed env, no network
+    # access is needed by pdflatex, and shell escape stays off.
+    (workdir / "report.tex").write_text(tex, encoding="utf-8")
+    return subprocess.run(
+        [
+            "pdflatex",
+            "-no-shell-escape",
+            "-interaction=nonstopmode",
+            "-halt-on-error",
+            "report.tex",
+        ],
+        cwd=workdir,
+        env={"PATH": os.environ["PATH"], "HOME": str(workdir)},
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+
+needs_pdflatex = pytest.mark.skipif(
+    shutil.which("pdflatex") is None and not os.environ.get("CEREBRO_REQUIRE_PDFLATEX"),
+    reason="pdflatex not installed",
+)
+
+
+def _tex_report() -> Report:
+    hostile = r"x}\input{/etc/passwd}% $ & # _ ^ ~"
+    return Report(
+        id="r",
+        title=f"Title {hostile}",
+        query="q",
+        abstract=f"**bold** and *italic* and `code` {hostile}",
+        sections=[
+            ReportSection(
+                title=f"Section {hostile}",
+                content=f"- item {hostile}\n- [link](https://example.org/a?b=1&c=2#d)\n\n**done**",
+                subsections=[ReportSection(title="Sub", content="plain")],
+            ),
+            ReportSection(title="Empty", content=""),
+        ],
+        citations=[
+            Citation(
+                id="c",
+                authors=["A. Author"],
+                title=f"T {hostile}",
+                journal="J",
+                volume="1",
+                pages="1--2",
+                doi="10.1000/abc.123",
+            )
+        ],
+    )
+
+
+@needs_pdflatex
+def test_generated_tex_compiles_to_a_pdf_with_the_expected_text(
+    tmp_path: Path,
+) -> None:
+    tex = LaTeXExporter().export_to_latex(_tex_report()).content
+    assert isinstance(tex, str)
+    result = _compile_tex(tex, tmp_path)
+    assert result.returncode == 0, result.stdout[-2000:]
+    pdf = tmp_path / "report.pdf"
+    assert pdf.read_bytes().startswith(b"%PDF")
+    log = (tmp_path / "report.log").read_text(errors="replace")
+    # \input of the hostile path would be logged as an opened file.
+    assert "/etc/passwd" not in log.replace("\\input{/etc/passwd}", "")
+    if shutil.which("pdftotext"):
+        text = subprocess.run(
+            ["pdftotext", str(pdf), "-"], capture_output=True, text=True, check=True
+        ).stdout
+        for expected in ("bold", "italic", "Section", "A. Author", "Empty"):
+            assert expected in text, text
+        # authblk prints this when \\author is never set.
+        assert "immediate" not in text
+
+
+@needs_pdflatex
+def test_compile_failure_control_detects_broken_tex(tmp_path: Path) -> None:
+    # Proves the compile test above would notice a regression.
+    tex = LaTeXExporter().export_to_latex(_tex_report()).content
+    assert isinstance(tex, str)
+    result = _compile_tex(
+        tex.replace("\\maketitle", "\\maketitle\\undefinedcommand"), tmp_path
+    )
+    assert result.returncode != 0
+
+
+def _empty_report(report_type: ReportType) -> Report:
+    report = Report(id="r", title="Empty", query="q")
+    report.configuration.type = report_type
+    return report
+
+
+@pytest.mark.parametrize("hostile", [True, False])
+@pytest.mark.parametrize("report_type", list(ReportType))
+def test_real_templates_render_every_report_type_and_autoescape(
+    report_type: ReportType, hostile: bool
+) -> None:
+    # Calls the renderer directly: the generator would hide a template failure
+    # behind the escaped fallback and let the escaping assertions pass vacuously.
+    report = _hostile_report(report_type) if hostile else _empty_report(report_type)
+    html = TemplateRenderer(ReportSettings()).render_report(report)
+    assert html_lib.escape(report.title) in html
+    if hostile:
+        assert "<img src=x>" not in html
+
+
+def test_template_environment_autoescapes_j2_html_templates() -> None:
+    renderer = TemplateRenderer(ReportSettings())
+    template = renderer.env.from_string("{{ v }}")
+    assert template.render(v="<b>") == "&lt;b&gt;"
+    assert renderer._get_template("base.html.j2").environment.autoescape("x.html.j2")
+
+
+EXPORTERS = (ROOT / "src/services/exporters").glob("*.py")
+
+
+@pytest.mark.parametrize("path", sorted(EXPORTERS), ids=lambda p: p.name)
+def test_exporters_cannot_run_a_subprocess_or_compiler(path: Path) -> None:
+    tree = ast.parse(path.read_text())
+    imported = {
+        alias.name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    } | {
+        node.module.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+    assert not imported & {"subprocess", "pty", "multiprocessing"}, path.name
+    assert not any(
+        isinstance(n, ast.Attribute) and n.attr in {"system", "popen", "spawn"}
+        for n in ast.walk(tree)
+    ), path.name

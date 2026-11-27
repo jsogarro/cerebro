@@ -5,8 +5,10 @@ This service handles Jinja2 template rendering with custom filters and functions
 following functional programming principles.
 """
 
+import html as html_lib
 import os
 import re
+from html.parser import HTMLParser
 from typing import Any, cast
 
 import jinja2
@@ -51,6 +53,35 @@ ALLOWED_REPORT_HTML_TAGS = {
     "tr",
     "ul",
 }
+
+
+class _AllowlistSanitizer(HTMLParser):
+    """Parses rather than pattern-matches, so stripping a tag cannot splice a new one."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.out: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: Any) -> None:
+        if tag in ("script", "style"):
+            self._skip_depth += 1
+        elif tag in ALLOWED_REPORT_HTML_TAGS and not self._skip_depth:
+            self.out.append(f"<{tag}>")
+
+    def handle_startendtag(self, tag: str, attrs: Any) -> None:
+        if tag in ALLOWED_REPORT_HTML_TAGS and not self._skip_depth:
+            self.out.append(f"<{tag}>")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style"):
+            self._skip_depth = max(0, self._skip_depth - 1)
+        elif tag in ALLOWED_REPORT_HTML_TAGS and not self._skip_depth:
+            self.out.append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip_depth:
+            self.out.append(html_lib.escape(data, quote=False))
 
 
 class TemplateRenderingError(Exception):
@@ -231,7 +262,7 @@ class TemplateRenderer:
 
         try:
             if not MARKDOWN_AVAILABLE:
-                return self._basic_markdown_filter(text)
+                return self._plain_text_filter(text)
 
             # Configure markdown extensions
             markdown_api = cast(Any, markdown_module)
@@ -254,50 +285,20 @@ class TemplateRenderer:
 
         except Exception as e:
             logger.warning(f"Markdown conversion failed: {e}")
-            return self._sanitize_rendered_html(text.replace("\n", "<br>"))
-
-    def _basic_markdown_filter(self, text: str) -> str:
-        """Render a small markdown subset when the optional package is unavailable."""
-        rendered = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
-        rendered = re.sub(r"\*(.+?)\*", r"<em>\1</em>", rendered)
-        return self._sanitize_rendered_html(rendered.replace("\n", "<br>"))
-
-    def _sanitize_rendered_html(self, html: str) -> str:
-        """Remove unsafe HTML before templates mark rendered markdown as safe."""
-
-        # Stripping a tag can splice its neighbours into a new one
-        # (`<<b>img>` -> `<img>`), so repeat until the output is stable.
-        sanitized = html
-        while True:
-            cleaned = self._strip_unsafe_html_once(sanitized)
-            if cleaned == sanitized:
-                return cleaned
-            sanitized = cleaned
+            return self._plain_text_filter(text)
 
     @staticmethod
-    def _strip_unsafe_html_once(html: str) -> str:
-        sanitized = re.sub(
-            r"<(script|style)[^>]*>.*?</\1>",
-            "",
-            html,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
+    def _plain_text_filter(text: str) -> str:
+        """Fallback when markdown cannot run: nothing in the input stays markup."""
+        return html_lib.escape(text).replace("\n", "<br>")
 
-        def replace_tag(match: re.Match[str]) -> str:
-            closing_slash = match.group(1)
-            tag_name = match.group(2).lower()
-            trailing_slash = match.group(3)
-            if tag_name not in ALLOWED_REPORT_HTML_TAGS:
-                return ""
-            if closing_slash:
-                return f"</{tag_name}>"
-            return f"<{tag_name}{trailing_slash}>"
-
-        return re.sub(
-            r"<\s*(/?)\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*(/?)\s*>",
-            replace_tag,
-            sanitized,
-        )
+    @staticmethod
+    def _sanitize_rendered_html(html: str) -> str:
+        """Re-emit only allowlisted tags, without attributes, in one linear pass."""
+        sanitizer = _AllowlistSanitizer()
+        sanitizer.feed(html)
+        sanitizer.close()
+        return "".join(sanitizer.out)
 
     def _truncate_words_filter(
         self, text: str, length: int = 50, suffix: str = "..."
