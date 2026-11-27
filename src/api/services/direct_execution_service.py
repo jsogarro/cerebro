@@ -584,11 +584,12 @@ class DirectExecutionService:
         """
         if not self.session_factory:
             return
-        if execution_status.organization_id is None:
-            # A checkpoint's tenant is its project's; with no owner recorded
-            # there is nothing to check it against.
+        run = execution_status._run
+        if run is None:
+            # A checkpoint's identity is its durable run's; the caller-visible
+            # owner on the status is not authority.
             logger.warning(
-                "Skipping checkpoint for an execution with no organization",
+                "Skipping checkpoint for an execution with no durable run",
                 execution_id=execution_status.execution_id,
             )
             return
@@ -625,8 +626,8 @@ class DirectExecutionService:
                     phase=phase,
                     checkpoint_type="automatic",
                     execution_metrics=execution_metrics,
-                    run_id=execution_status.run_id,
-                    organization_id=execution_status.organization_id,
+                    run_id=run.run_id,
+                    organization_id=run.tenant_id,
                 )
                 await session.commit()
 

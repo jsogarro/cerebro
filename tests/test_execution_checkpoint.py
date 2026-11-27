@@ -7,6 +7,7 @@ with mocked repository to avoid requiring a live database.
 
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,6 +24,11 @@ from src.repositories.checkpoint_repository import (
 )
 
 ORG = "11111111-1111-1111-1111-111111111111"
+
+
+def _admitted_run(run_id: str = "run-abc") -> SimpleNamespace:
+    """The durable run a checkpoint takes its identity from."""
+    return SimpleNamespace(run_id=run_id, tenant_id=ORG)
 
 
 @pytest.fixture(autouse=True)
@@ -93,6 +99,7 @@ async def test_checkpoint_with_repository_calls_create_checkpoint(
         progress_percentage=50.0,
         current_phase="supervisor_execution",
     )
+    execution_status._run = _admitted_run()
 
     with patch(
         "src.api.services.direct_execution_service.CheckpointRepository"
@@ -150,6 +157,7 @@ async def test_checkpoint_on_repository_error_degrades_gracefully(
         progress_percentage=50.0,
         current_phase="supervisor_execution",
     )
+    execution_status._run = _admitted_run()
 
     with patch(
         "src.api.services.direct_execution_service.CheckpointRepository"
@@ -317,6 +325,7 @@ async def test_checkpoint_captures_all_execution_state(
         warnings=["performance warning"],
         retry_count=2,
     )
+    execution_status._run = _admitted_run()
 
     with patch(
         "src.api.services.direct_execution_service.CheckpointRepository"
@@ -357,7 +366,7 @@ async def test_checkpoint_links_the_admitted_run(
         progress_percentage=50.0,
         current_phase="supervisor_execution",
     )
-    execution_status.run_id = "run-abc"
+    execution_status._run = _admitted_run("run-abc")
 
     with patch(
         "src.api.services.direct_execution_service.CheckpointRepository"
@@ -373,17 +382,18 @@ async def test_checkpoint_links_the_admitted_run(
 
 
 @pytest.mark.asyncio
-async def test_checkpoint_passes_the_executions_organization(
+async def test_checkpoint_takes_its_organization_from_the_run_not_the_status(
     execution_service_with_checkpoint,
 ):
     execution_status = ExecutionStatus(
         execution_id="exec-org",
         project_id=str(uuid.uuid4()),
-        organization_id=ORG,
+        organization_id="spoofed-owner",
         status="running",
         progress_percentage=1.0,
         current_phase="p",
     )
+    execution_status._run = _admitted_run()
 
     with patch(
         "src.api.services.direct_execution_service.CheckpointRepository"
@@ -398,7 +408,7 @@ async def test_checkpoint_passes_the_executions_organization(
 
 
 @pytest.mark.asyncio
-async def test_an_execution_with_no_organization_writes_no_checkpoint(
+async def test_an_execution_with_no_durable_run_writes_no_checkpoint(
     execution_service_with_checkpoint,
 ):
     execution_status = ExecutionStatus(
@@ -431,6 +441,7 @@ async def test_a_refused_checkpoint_does_not_fail_the_run(
         progress_percentage=1.0,
         current_phase="p",
     )
+    execution_status._run = _admitted_run()
 
     with patch(
         "src.api.services.direct_execution_service.CheckpointRepository"
@@ -451,6 +462,7 @@ async def test_a_malformed_project_id_still_raises(execution_service_with_checkp
         progress_percentage=1.0,
         current_phase="p",
     )
+    execution_status._run = _admitted_run()
 
     with pytest.raises(ValueError):
         await execution_service_with_checkpoint._checkpoint(execution_status, "p")
