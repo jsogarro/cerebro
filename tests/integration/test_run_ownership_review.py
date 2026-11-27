@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
+    DurableWriteOutcome,
     ExecutionStatus,
 )
 from src.core.contracts import RunStatus
@@ -191,7 +192,6 @@ async def test_work_stops_when_its_heartbeat_crashes(factory, monkeypatch) -> No
 
 async def _park_success(factory, run_id: str, **tuning: float):
     """A running run whose success the database refused: parked, db healthy again."""
-    from src.api.services.direct_execution_service import DurableWriteOutcome
     from src.core.contracts import AttemptStatus, TaskStatus
 
     flaky = _Flaky(factory)
@@ -404,3 +404,70 @@ async def test_a_recorded_cancellation_is_timed(factory) -> None:
     await service._record_requested_cancellation(status)
 
     assert observations() == before + 1
+
+
+# --- shutdown waits for a shielded cancellation write -----------------------
+
+
+async def test_close_waits_for_an_in_flight_cancellation_write(
+    factory, monkeypatch
+) -> None:
+    service = _service(factory)
+    status = await _running(service, "rev-shield")
+    await service._persist_cancellation(status)
+    status.status = "cancelled"
+    started, release, finished = asyncio.Event(), asyncio.Event(), []
+
+    async def slow_persist(*_args, **_kwargs):
+        started.set()
+        await release.wait()
+        finished.append(1)
+        return DurableWriteOutcome.RECORDED
+
+    monkeypatch.setattr(service, "_persist_transition", slow_persist)
+    writer = asyncio.create_task(service._record_requested_cancellation(status))
+    service._background_tasks.add(writer)
+    await started.wait()
+
+    closing = asyncio.create_task(service.close())
+    done, _ = await asyncio.wait([closing], timeout=1.0)
+    assert not done, "close returned while a shielded write was in flight"
+
+    release.set()
+    await closing
+    assert finished == [1]
+
+
+# --- the database clock may run ahead of this process's ---------------------
+
+
+async def _skew_database_ahead(factory, run_id: str) -> None:
+    """Rows as written by a database whose clock is ahead of this process's."""
+    for table in ("agent_runs", "agent_run_tasks", "agent_task_attempts"):
+        await _sql(
+            factory,
+            f"UPDATE {table} SET created_at = now() + interval '5 seconds', "
+            "updated_at = now() + interval '5 seconds' WHERE run_id = :r",
+            r=run_id,
+        )
+
+
+async def test_an_expired_run_is_reconciled_despite_database_clock_skew(
+    factory,
+) -> None:
+    await _running(_service(factory), "rev-skew")
+    await _skew_database_ahead(factory, "rev-skew")
+    await _expire(factory, "rev-skew")
+
+    assert await _service(factory).reconcile_expired_runs() == 1
+
+    assert (await _row(factory, "rev-skew")).status == RunStatus.FAILED.value
+
+
+async def test_a_cancellation_is_recorded_despite_database_clock_skew(factory) -> None:
+    service = _service(factory)
+    status = await _running(service, "rev-skew-cancel")
+    await _skew_database_ahead(factory, "rev-skew-cancel")
+    await service._adopt_durable_state(status)
+
+    assert await service._persist_cancellation(status) is DurableWriteOutcome.RECORDED

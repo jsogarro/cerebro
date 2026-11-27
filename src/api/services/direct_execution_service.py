@@ -593,6 +593,9 @@ class DirectExecutionService:
 
         # Store background task references to prevent GC
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        # Cancellation writes shielded from the cancellation they record, so
+        # ``close`` can wait for them instead of leaving a transaction running.
+        self._shielded_writes: set[asyncio.Future[Any]] = set()
         self._workflow_tasks: dict[str, asyncio.Task[None]] = {}
         self._fast_path_provider: OpenRouterProvider | None = None
         self.closed = False
@@ -1247,6 +1250,25 @@ class DirectExecutionService:
         )
         return str(uuid.uuid5(uuid.NAMESPACE_URL, f"direct-transition:{identity}"))
 
+    @staticmethod
+    def _transition_time(execution_status: ExecutionStatus) -> datetime:
+        """Now, but never before a row's ``updated_at``.
+
+        Those are stamped by the database's clock, which can run ahead of this
+        process's; a transition earlier than its row's last update would be
+        refused by the contract for a reason that is not the run's state.
+        """
+        stamps = [
+            c.updated_at
+            for c in (
+                execution_status._run,
+                execution_status._task,
+                execution_status._attempt,
+            )
+            if c is not None
+        ]
+        return max([datetime.now(UTC), *stamps])
+
     async def _persist_transition(
         self,
         execution_status: ExecutionStatus,
@@ -1290,7 +1312,7 @@ class DirectExecutionService:
         if not self.session_factory or execution_status._run is None:
             return DurableWriteOutcome.RECORDED
 
-        now = datetime.now(UTC)
+        now = self._transition_time(execution_status)
         try:
             run = execution_status._run.transition_to(run_target, at=now, reason=reason)
             task = execution_status._task
@@ -2273,7 +2295,7 @@ class DirectExecutionService:
         if not self.session_factory or execution_status._run is None:
             return DurableWriteOutcome.RECORDED
         try:
-            now = datetime.now(UTC)
+            now = self._transition_time(execution_status)
             reason = "Execution cancelled by request"
             run = execution_status._run.request_cancellation(at=now, reason=reason)
             task = execution_status._task
@@ -2465,6 +2487,21 @@ class DirectExecutionService:
                 return value
             return value.replace(tzinfo=UTC)
 
+        def created(row: Any) -> datetime | None:
+            # ``created_at`` is the database's clock and the other timestamps
+            # are this process's, so a database clock a few milliseconds ahead
+            # would make a valid row fail the contract's ordering checks.
+            stamps = [
+                aware(getattr(row, name))
+                for name in (
+                    "created_at",
+                    "started_at",
+                    "completed_at",
+                    "cancellation_requested_at",
+                )
+            ]
+            return min((s for s in stamps if s is not None), default=None)
+
         try:
             run = Run.model_validate(
                 {
@@ -2477,7 +2514,7 @@ class DirectExecutionService:
                     "idempotency_key": run_row.idempotency_key,
                     "requested_by": run_row.requested_by,
                     "status": run_row.status,
-                    "created_at": aware(run_row.created_at),
+                    "created_at": created(run_row),
                     "updated_at": aware(run_row.updated_at),
                     "started_at": aware(run_row.started_at),
                     "completed_at": aware(run_row.completed_at),
@@ -2500,7 +2537,7 @@ class DirectExecutionService:
                     "assigned_worker_type": task_row.assigned_worker_type,
                     "input": task_input,
                     "status": task_row.status,
-                    "created_at": aware(task_row.created_at),
+                    "created_at": created(task_row),
                     "updated_at": aware(task_row.updated_at),
                     "started_at": aware(task_row.started_at),
                     "completed_at": aware(task_row.completed_at),
@@ -2519,7 +2556,7 @@ class DirectExecutionService:
                     "idempotency_key": attempt_row.idempotency_key,
                     "executor_id": attempt_row.executor_id,
                     "status": attempt_row.status,
-                    "created_at": aware(attempt_row.created_at),
+                    "created_at": created(attempt_row),
                     "updated_at": aware(attempt_row.updated_at),
                     "started_at": aware(attempt_row.started_at),
                     "completed_at": aware(attempt_row.completed_at),
@@ -2548,7 +2585,10 @@ class DirectExecutionService:
                 )
                 for row in capability_rows
             )
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "run_rehydration_failed", run_id=run_row.run_id, error=str(exc)
+            )
             return None
 
         journaled = attempt_row.journaled_result
@@ -3263,7 +3303,7 @@ class DirectExecutionService:
             return
         if run.status is not RunStatus.CANCELLING:
             return
-        outcome = await asyncio.shield(
+        write = asyncio.ensure_future(
             self._persist_transition(
                 execution_status,
                 run_target=RunStatus.CANCELLED,
@@ -3275,6 +3315,9 @@ class DirectExecutionService:
                 in_transaction=self._settle_open_model_calls(execution_status),
             )
         )
+        self._shielded_writes.add(write)
+        write.add_done_callback(self._shielded_writes.discard)
+        outcome = await asyncio.shield(write)
         if (
             outcome is DurableWriteOutcome.RECORDED
             and run.cancellation_requested_at is not None
@@ -3591,6 +3634,7 @@ class DirectExecutionService:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._background_tasks.clear()
+        await asyncio.gather(*self._shielded_writes, return_exceptions=True)
         await self._release_leases()
 
         provider = self._fast_path_provider
