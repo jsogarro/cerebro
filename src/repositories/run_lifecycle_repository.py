@@ -272,11 +272,13 @@ class RunLifecycleRepository:
     async def renew_lease(
         self, run_id: str, *, owner: str, fencing_token: int, ttl_seconds: float
     ) -> bool:
-        """Extend a live lease; ``False`` means it was lost and the owner must stop.
+        """Extend the owner's lease; ``False`` means it was lost and the owner must stop.
 
-        An expired lease cannot be renewed even if nobody has taken it over:
-        reconciliation reads expiry as death, so the owner must read it the
-        same way.
+        An expired lease can still be renewed while nobody has taken it over:
+        a takeover raises the token in one locked transaction, so exactly one
+        of the owner's renewal and the reconciler's takeover wins. That is what
+        lets an owner that was cut off from the database for longer than the
+        lease resume as soon as it is back.
         """
         result = await self.session.execute(
             update(AgentRun)
@@ -284,7 +286,6 @@ class RunLifecycleRepository:
                 AgentRun.run_id == run_id,
                 AgentRun.owner_instance_id == owner,
                 AgentRun.fencing_token == fencing_token,
-                AgentRun.lease_expires_at > func.clock_timestamp(),
                 AgentRun.status.notin_(_TERMINAL_RUN_VALUES),
             )
             .values(
@@ -324,8 +325,11 @@ class RunLifecycleRepository:
         """Non-terminal runs whose owner's lease has expired, oldest lease first.
 
         Runs with no owner at all are not listed: nothing can say that their
-        executor is gone.
+        executor is gone. Leases use Postgres time, so on SQLite (the
+        development mode) no run is ever expired.
         """
+        if self.session.get_bind().dialect.name != "postgresql":
+            return []
         result = await self.session.execute(
             select(AgentRun)
             .where(

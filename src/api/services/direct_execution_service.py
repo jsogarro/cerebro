@@ -252,6 +252,17 @@ class RunAlreadyAdmittedError(RuntimeError):
         self.execution_id = execution_id
 
 
+class ResumeUnsupportedError(RuntimeError):
+    """A checkpoint cannot be resumed; the caller starts a new run instead."""
+
+    code = "RESUME_UNSUPPORTED"
+
+    def __init__(self, project_id: uuid.UUID) -> None:
+        super().__init__(
+            f"project {project_id} cannot be resumed from a checkpoint; start a new run"
+        )
+
+
 class DurableWriteOutcome(StrEnum):
     """What the durable layer did with a lifecycle write.
 
@@ -443,6 +454,9 @@ class ExecutionStatus:
     _fencing_token: int | None = field(default=None, repr=False)
     _lease_confirmed_until: float = field(default=0.0, repr=False)
     _lease_lost: bool = field(default=False, repr=False)
+    # Monotonic instant the workflow task ended, so its lease can outlive it
+    # while a terminal outcome the database refused is still waiting to land.
+    _workflow_finished_at: float | None = field(default=None, repr=False)
 
 
 class DirectExecutionService:
@@ -556,6 +570,7 @@ class DirectExecutionService:
         self.lease_renew_seconds = 5.0
         self.cancel_poll_seconds = 1.0
         self.expired_run_scan_seconds = 15.0
+        self.loop_restart_seconds = 5.0
         self._pending_terminal_outcomes: dict[str, _PendingTerminalOutcome] = {}
         self._terminal_reconciler: asyncio.Task[None] | None = None
 
@@ -644,6 +659,12 @@ class DirectExecutionService:
 
         try:
             async with self.session_factory() as session:
+                if execution_status._fencing_token is not None:
+                    # A checkpoint carries the run's output, so a worker that
+                    # lost its lease must not be able to publish it here.
+                    await RunLifecycleRepository(session).require_fence(
+                        run.run_id, execution_status._fencing_token
+                    )
                 repository = CheckpointRepository(session)
 
                 checkpoint_data = {
@@ -685,6 +706,13 @@ class DirectExecutionService:
                     phase=phase,
                 )
 
+        except StaleFenceError as e:
+            logger.warning(
+                "checkpoint_refused_after_lease_loss",
+                execution_id=execution_status.execution_id,
+                phase=phase,
+                error=str(e),
+            )
         except CheckpointIdentityError as e:
             logger.error(
                 "checkpoint_identity_refused",
@@ -1466,6 +1494,90 @@ class DirectExecutionService:
             )
         }
 
+    def _start_lease_heartbeat(
+        self, execution_status: ExecutionStatus, workflow_task: "asyncio.Task[None]"
+    ) -> None:
+        """Renew the run's lease for as long as its workflow (or its outcome) needs it."""
+        lease_task = asyncio.create_task(self._hold_lease(execution_status))
+        self._background_tasks.add(lease_task)
+        lease_task.add_done_callback(self._background_tasks.discard)
+        lease_task.add_done_callback(
+            lambda t: self._heartbeat_ended(execution_status, t)
+        )
+
+        def workflow_ended(_task: "asyncio.Task[None]") -> None:
+            execution_status._workflow_finished_at = time.monotonic()
+            # A terminal outcome the database refused is still owed to the
+            # durable record, and recording it needs the lease.
+            if execution_status.execution_id not in self._pending_terminal_outcomes:
+                lease_task.cancel()
+
+        workflow_task.add_done_callback(workflow_ended)
+
+    def _heartbeat_ended(
+        self, execution_status: ExecutionStatus, task: "asyncio.Task[None]"
+    ) -> None:
+        """A heartbeat that crashed is a lease nobody renews: stop the work."""
+        if task.cancelled() or task.exception() is None:
+            return
+        logger.error(
+            "run_heartbeat_crashed",
+            execution_id=execution_status.execution_id,
+            exc_info=task.exception(),
+        )
+        self._lose_lease(execution_status, reason="heartbeat crashed")
+
+    async def _renew_lease_now(self, execution_status: ExecutionStatus) -> None:
+        """Renew once before a parked terminal write, so it is not refused as stale."""
+        token = execution_status._fencing_token
+        if token is None or execution_status.run_id is None or not self.session_factory:
+            return
+        try:
+            async with self.session_factory() as session:
+                await RunLifecycleRepository(session).renew_lease(
+                    execution_status.run_id,
+                    owner=self.owner_instance_id,
+                    fencing_token=token,
+                    ttl_seconds=self.lease_ttl_seconds,
+                )
+                await session.commit()
+        except (SQLAlchemyError, OSError) as exc:
+            logger.warning(
+                "run_lease_renewal_unconfirmed",
+                run_id=execution_status.run_id,
+                error=str(exc),
+            )
+
+    async def _release_leases(self) -> None:
+        """Expire this process's leases so its runs are reconciled at the next scan.
+
+        Called once the work has stopped. A graceful shutdown leaves a run the
+        next process should fail as interrupted; waiting out the lease would
+        only delay that.
+        """
+        if not self.session_factory:
+            return
+        for execution in list(self.active_executions.values()):
+            token, run = execution._fencing_token, execution._run
+            if (
+                token is None
+                or run is None
+                or execution._lease_lost
+                or execution.restored
+                or run.status in TERMINAL_RUN_STATUSES
+            ):
+                continue
+            try:
+                async with self.session_factory() as session:
+                    await RunLifecycleRepository(session).release_lease(
+                        run.run_id, owner=self.owner_instance_id, fencing_token=token
+                    )
+                    await session.commit()
+            except (SQLAlchemyError, OSError) as exc:
+                logger.warning(
+                    "run_lease_release_failed", run_id=run.run_id, error=str(exc)
+                )
+
     async def _hold_lease(self, execution_status: ExecutionStatus) -> None:
         """Keep the run's lease alive and watch for a cancellation recorded elsewhere.
 
@@ -1480,6 +1592,12 @@ class DirectExecutionService:
         last_renewed = time.monotonic()
         while True:
             await asyncio.sleep(self.cancel_poll_seconds)
+            finished_at = execution_status._workflow_finished_at
+            if finished_at is not None and (
+                execution_status.execution_id not in self._pending_terminal_outcomes
+                or time.monotonic() - finished_at > self.durable_reconcile_max_seconds
+            ):
+                return
             sent_at = time.monotonic()
             try:
                 async with self.session_factory() as session:
@@ -1509,7 +1627,10 @@ class DirectExecutionService:
                     run_id=run_id,
                     error=str(exc),
                 )
-            if time.monotonic() >= execution_status._lease_confirmed_until:
+            if (
+                finished_at is None
+                and time.monotonic() >= execution_status._lease_confirmed_until
+            ):
                 self._lose_lease(execution_status, reason="lease unconfirmed")
                 return
 
@@ -1610,19 +1731,30 @@ class DirectExecutionService:
             for t in self._background_tasks
         ):
             return
+        self._spawn_reconciler(delay=0.0)
 
-        async def loop() -> None:
-            while True:
-                await asyncio.sleep(self.expired_run_scan_seconds)
-                try:
-                    await self.reconcile_expired_runs()
-                except (SQLAlchemyError, OSError) as exc:
-                    run_reconciliation_failures_total.inc()
-                    logger.warning("expired_run_reconciliation_failed", error=str(exc))
-
-        task = asyncio.create_task(loop(), name="expired-run-reconciler")
+    def _spawn_reconciler(self, *, delay: float) -> None:
+        task = asyncio.create_task(
+            self._reconcile_forever(delay), name="expired-run-reconciler"
+        )
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
+        task.add_done_callback(self._restart_reconciler)
+
+    async def _reconcile_forever(self, delay: float) -> None:
+        await asyncio.sleep(delay)
+        while True:
+            await asyncio.sleep(self.expired_run_scan_seconds)
+            await self.reconcile_expired_runs()
+
+    def _restart_reconciler(self, task: "asyncio.Task[None]") -> None:
+        # A bug in one pass must not end reconciliation for the life of the
+        # process, so a crashed loop is logged, counted and respawned.
+        if self.closed or task.cancelled():
+            return
+        run_reconciliation_failures_total.inc()
+        logger.error("expired_run_reconciler_crashed", exc_info=task.exception())
+        self._spawn_reconciler(delay=self.loop_restart_seconds)
 
     async def _record_attempt_failure(
         self, execution_status: ExecutionStatus, *, error: str
@@ -1748,7 +1880,12 @@ class DirectExecutionService:
             or event.event_type != transition.event_type
             or event.payload != transition.payload
         ):
-            raise ValueError("persisted lifecycle transition event does not match")
+            # Same transition identity, different content: another process
+            # recorded this transition first (two reconcilers, for one).
+            raise InvalidTransitionError(
+                "the durable record already holds this transition as "
+                "recorded by another writer"
+            )
 
         final_report = transition.final_report
         if final_report is not None:
@@ -2032,6 +2169,7 @@ class DirectExecutionService:
         """
         reconciled = 0
         for execution_id, pending in list(self._pending_terminal_outcomes.items()):
+            await self._renew_lease_now(pending.execution_status)
             outcome = await self._commit_transition(pending.transition)
             if outcome is DurableWriteOutcome.UNAVAILABLE:
                 continue
@@ -2726,10 +2864,7 @@ class DirectExecutionService:
         self._workflow_tasks[execution_id] = task
         task.add_done_callback(lambda _t: self._workflow_tasks.pop(execution_id, None))
         if execution_status._fencing_token is not None:
-            lease_task = asyncio.create_task(self._hold_lease(execution_status))
-            self._background_tasks.add(lease_task)
-            lease_task.add_done_callback(self._background_tasks.discard)
-            task.add_done_callback(lambda _t: lease_task.cancel())
+            self._start_lease_heartbeat(execution_status, task)
 
         logger.info(f"Started direct execution {execution_id} for project {project.id}")
 
@@ -3208,113 +3343,28 @@ class DirectExecutionService:
 
     async def resume_execution(
         self, project_id: uuid.UUID, *, organization_id: str | None = None
-    ) -> str | None:
+    ) -> None:
+        """Refuse to resume: checkpoints are diagnostic snapshots, not resumable state.
+
+        Nothing in this service re-dispatches work, so reviving a checkpoint
+        would only register an execution no task is running. A project the
+        caller cannot see (no session factory, no tenant, another
+        organization's, or missing) returns ``None`` exactly as before, so the
+        refusal does not reveal that a project exists.
+
+        Raises:
+            ResumeUnsupportedError: The project is the caller's. Start a new
+                run instead.
         """
-        Resume execution from the latest recoverable checkpoint.
-
-        The project's durable record decides who owns the resumed execution:
-        the project must belong to the caller's ``organization_id`` and the
-        rebuilt status carries that organization, so the tenant-scoped status
-        and results reads can see it. A missing caller tenant, an unknown
-        project, and another tenant's project all return ``None``.
-
-        Args:
-            project_id: Project UUID to resume
-            organization_id: The caller's authenticated tenant
-
-        Returns:
-            Execution ID if resumed successfully, None otherwise
-        """
-        if not self.session_factory:
-            logger.warning(
-                "Cannot resume execution without database",
-                project_id=str(project_id),
-            )
+        if not self.session_factory or organization_id is None:
             return None
-
-        if organization_id is None:
-            return None
-
         async with self.session_factory() as session:
             project = await ResearchRepository(session).get(
                 project_id, organization_id=organization_id
             )
-            if project is None or project.organization_id is None:
-                logger.info(
-                    "Resume refused: project not in caller's organization",
-                    project_id=str(project_id),
-                )
-                return None
-
-            repository = CheckpointRepository(session)
-            checkpoint = await repository.get_recovery_point(
-                project_id, organization_id=organization_id
-            )
-
-            if not checkpoint:
-                logger.info(
-                    "No recoverable checkpoint found",
-                    project_id=str(project_id),
-                )
-                return None
-
-            if not await repository.identity_matches_run(
-                checkpoint, organization_id=organization_id
-            ):
-                logger.error(
-                    "Resume refused: checkpoint identity disagrees with its run",
-                    checkpoint_id=str(checkpoint.id),
-                    run_id=checkpoint.run_id,
-                )
-                return None
-
-            # Restore checkpoint data
-            restored_data = await repository.restore_from_checkpoint(
-                checkpoint.id, organization_id=organization_id
-            )
-
-            if not restored_data:
-                logger.warning(
-                    "Failed to restore checkpoint data",
-                    checkpoint_id=str(checkpoint.id),
-                )
-                return None
-
-            # Rebuild ExecutionStatus from checkpoint
-            checkpoint_data = restored_data["checkpoint_data"]
-            execution_id: str = str(restored_data["workflow_id"])
-
-            execution_status = ExecutionStatus(
-                execution_id=execution_id,
-                project_id=str(project_id),
-                organization_id=str(project.organization_id),
-                status=checkpoint_data["status"],
-                progress_percentage=checkpoint_data["progress_percentage"],
-                current_phase=checkpoint_data["current_phase"],
-                routing_decision=checkpoint_data.get("routing_decision"),
-                sub_routing_decisions=checkpoint_data.get("sub_routing_decisions", {}),
-                supervisor_type=checkpoint_data.get("supervisor_type"),
-                agent_results=checkpoint_data.get("agent_results", {}),
-                quality_scores=checkpoint_data.get("quality_scores", {}),
-                final_output=checkpoint_data.get("final_output"),
-                workers_used=checkpoint_data.get("workers_used", 0),
-                errors=checkpoint_data.get("errors", []),
-                warnings=checkpoint_data.get("warnings", []),
-                retry_count=checkpoint_data.get("retry_count", 0),
-                run_id=checkpoint.run_id,
-            )
-
-            # Register in active executions
-            self.active_executions[execution_id] = execution_status
-
-            logger.info(
-                "Resumed execution from checkpoint",
-                execution_id=execution_id,
-                project_id=str(project_id),
-                phase=restored_data["phase"],
-            )
-
-            return execution_id
+        if project is None or project.organization_id is None:
+            return None
+        raise ResumeUnsupportedError(project_id)
 
     async def cancel_execution(self, execution_id: str) -> bool:
         """Cancel active execution.
@@ -3526,6 +3576,7 @@ class DirectExecutionService:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._background_tasks.clear()
+        await self._release_leases()
 
         provider = self._fast_path_provider
         self._fast_path_provider = None
