@@ -13,27 +13,23 @@ from fastmcp.server.dependencies import get_http_request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from structlog import get_logger
 
-from src.api.services.direct_execution_service import (
-    RunAdmissionError,
-    RunParamsConflictError,
-    research_query_sha256,
-)
 from src.api.services.evidence_service import (
     DEFAULT_EVIDENCE_LIMIT,
     InvalidEvidenceCursorError,
     RunNotFoundError,
     list_run_evidence_with_factory,
 )
-from src.api.services.execution_authority_resolver import (
-    ExecutionAuthorityError,
-    ExecutionAuthorityUnavailableError,
-)
 from src.api.services.research_kernel import (
     ApplicationResearchKernel,
+    ExecutionAuthorityError,
+    RunAdmissionError,
+    RunCapExceededError,
+    RunParamsConflictError,
     build_research_results_payload,
     execution_status_payload,
     get_kernel_execution_status,
-    start_intelligent_research,
+    mint_and_start_research,
+    research_query_sha256,
 )
 from src.auth.models import (
     PAT_SCOPE_READ,
@@ -42,8 +38,6 @@ from src.auth.models import (
     TokenPayload,
 )
 from src.middleware.tenant_context import TenantContext, require_organization_id
-from src.models.execution_authority import ExecutionAuthorityReference
-from src.repositories.run_lifecycle_repository import RunCapExceededError
 from src.security.audit_logger import AuditEventType, AuditLogger
 
 logger = get_logger()
@@ -163,21 +157,6 @@ def _caller(*, required_scope: str) -> tuple[TenantContext, _AuditIdentity]:
         )
 
     return tenant, audit_identity
-
-
-def _resolve_authority_resolver(
-    kernel: ApplicationResearchKernel,
-    authority_resolver: Any | None,
-) -> Any:
-    resolver = authority_resolver
-    if resolver is None:
-        backend = getattr(kernel.executor, "backend", None)
-        resolver = getattr(backend, "execution_authority_resolver", None)
-    if resolver is None or not callable(
-        getattr(resolver, "mint_authority_from_template", None)
-    ):
-        raise ExecutionAuthorityUnavailableError("execution authority is unavailable")
-    return resolver
 
 
 def build_mcp_server(
@@ -389,28 +368,20 @@ def build_mcp_server(
             except ValidationError as exc:
                 raise ToolError("INVALID_INPUT") from exc
 
-            resolver = _resolve_authority_resolver(kernel, authority_resolver)
-            minted = await resolver.mint_authority_from_template(
-                ExecutionAuthorityReference(
-                    authority_id=validated.template_authority_id,
-                    authority_version=validated.template_authority_version,
-                ),
-                organization_id=tenant.organization_id,
-                user_id=tenant.user_id,
-                request_id=validated.request_id,
-            )
-            audit_extra["authority_id"] = minted.authority_id
-            audit_extra["authority_version"] = minted.authority_version
+            def _record_minted(authority_id: str, authority_version: str) -> None:
+                audit_extra["authority_id"] = authority_id
+                audit_extra["authority_version"] = authority_version
 
-            start_result = await start_intelligent_research(
+            start_result, _, _ = await mint_and_start_research(
                 kernel,
                 tenant=tenant,
+                template_authority_id=validated.template_authority_id,
+                template_authority_version=validated.template_authority_version,
+                request_id=validated.request_id,
                 query=validated.query,
                 domains=validated.domains,
-                authority_reference=ExecutionAuthorityReference(
-                    authority_id=minted.authority_id,
-                    authority_version=minted.authority_version,
-                ),
+                authority_resolver=authority_resolver,
+                on_minted=_record_minted,
             )
         except ToolError as exc:
             if audit_caller is None and isinstance(exc, _CallerAuthError):

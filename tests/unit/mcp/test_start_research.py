@@ -7,6 +7,7 @@ import dataclasses
 import hashlib
 import inspect
 import json
+import tempfile
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -305,18 +306,38 @@ def _jwt_payload(*, user_id: str = USER_A, org_id: str = ORG_A) -> TokenPayload:
     )
 
 
+class _DisposableEngine:
+    """Wrap an AsyncEngine so ``dispose()`` also removes its temp directory."""
+
+    def __init__(
+        self, engine: Any, temp_dir: tempfile.TemporaryDirectory[str] | None
+    ) -> None:
+        self._engine = engine
+        self._temp_dir = temp_dir
+
+    async def dispose(self) -> None:
+        try:
+            await self._engine.dispose()
+        finally:
+            if self._temp_dir is not None:
+                self._temp_dir.cleanup()
+
+
 async def _make_sqlite_session_factory(
     tmp_path: Any = None,
 ) -> tuple[Any, async_sessionmaker[AsyncSession]]:
-    if tmp_path is not None:
-        db_url = f"sqlite+aiosqlite:///{tmp_path}/test_{uuid.uuid4().hex[:8]}.db"
+    temp_dir: tempfile.TemporaryDirectory[str] | None = None
+    if tmp_path is None:
+        temp_dir = tempfile.TemporaryDirectory(prefix="cerebro_mcp_2d_")
+        db_dir = temp_dir.name
     else:
-        db_url = "sqlite+aiosqlite:///:memory:"
-    engine = create_async_engine(db_url)
+        db_dir = str(tmp_path)
+    db_url = f"sqlite+aiosqlite:///{db_dir}/test_{uuid.uuid4().hex[:8]}.db"
+    engine = create_async_engine(db_url, connect_args={"timeout": 30})
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: [t.create(c, checkfirst=True) for t in _TABLES])
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    return engine, factory
+    return _DisposableEngine(engine, temp_dir), factory
 
 
 async def _seed_template(

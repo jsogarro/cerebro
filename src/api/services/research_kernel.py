@@ -15,8 +15,15 @@ from src.api.services.agent_execution_service import (
     get_application_agent_execution_service,
 )
 from src.api.services.direct_execution_service import (
+    RunAdmissionError,
+    RunParamsConflictError,
     get_application_direct_execution_service,
     normalize_research_domains,
+    research_query_sha256,
+)
+from src.api.services.execution_authority_resolver import (
+    ExecutionAuthorityError,
+    ExecutionAuthorityUnavailableError,
 )
 from src.core.contracts.trust import TrustClassification
 from src.core.kernel import (
@@ -45,6 +52,7 @@ from src.models.agent_api_models import (
 )
 from src.models.execution_authority import ExecutionAuthorityReference
 from src.models.research_project import ResearchProject
+from src.repositories.run_lifecycle_repository import RunCapExceededError
 
 
 class ResearchExecutionBackend(Protocol):
@@ -473,6 +481,60 @@ async def start_intelligent_research(
     )
 
 
+def _resolve_authority_resolver(
+    kernel: ApplicationResearchKernel,
+    authority_resolver: Any | None,
+) -> Any:
+    resolver = authority_resolver
+    if resolver is None:
+        backend = getattr(kernel.executor, "backend", None)
+        resolver = getattr(backend, "execution_authority_resolver", None)
+    if resolver is None or not callable(
+        getattr(resolver, "mint_authority_from_template", None)
+    ):
+        raise ExecutionAuthorityUnavailableError("execution authority is unavailable")
+    return resolver
+
+
+async def mint_and_start_research(
+    kernel: ApplicationResearchKernel,
+    *,
+    tenant: TenantContext,
+    template_authority_id: str,
+    template_authority_version: str,
+    request_id: str,
+    query: str,
+    domains: Sequence[str] | None,
+    authority_resolver: Any | None = None,
+    on_minted: Callable[[str, str], None] | None = None,
+) -> tuple[StartResult, str, str]:
+    """Deterministically mint a single-run authority from a template and start it."""
+    resolver = _resolve_authority_resolver(kernel, authority_resolver)
+    minted = await resolver.mint_authority_from_template(
+        ExecutionAuthorityReference(
+            authority_id=template_authority_id,
+            authority_version=template_authority_version,
+        ),
+        organization_id=tenant.organization_id,
+        user_id=tenant.user_id,
+        request_id=request_id,
+    )
+    if on_minted is not None:
+        on_minted(minted.authority_id, minted.authority_version)
+
+    start_result = await start_intelligent_research(
+        kernel,
+        tenant=tenant,
+        query=query,
+        domains=domains,
+        authority_reference=ExecutionAuthorityReference(
+            authority_id=minted.authority_id,
+            authority_version=minted.authority_version,
+        ),
+    )
+    return start_result, minted.authority_id, minted.authority_version
+
+
 async def get_kernel_execution_status(
     kernel: ApplicationResearchKernel,
     execution_id: str,
@@ -674,7 +736,12 @@ __all__ = [
     "AgentExecutionBackend",
     "AgentKernelOperations",
     "ApplicationResearchKernel",
+    "ExecutionAuthorityError",
+    "ExecutionAuthorityUnavailableError",
     "ResearchExecutionBackend",
+    "RunAdmissionError",
+    "RunCapExceededError",
+    "RunParamsConflictError",
     "StartResult",
     "build_research_results_payload",
     "compose_application_research_kernel",
@@ -686,6 +753,8 @@ __all__ = [
     "get_kernel_execution_status",
     "get_legacy_agent_research_kernel",
     "get_legacy_research_kernel",
+    "mint_and_start_research",
+    "research_query_sha256",
     "resume_kernel_execution",
     "start_intelligent_research",
 ]
