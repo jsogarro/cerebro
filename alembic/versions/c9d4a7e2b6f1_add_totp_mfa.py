@@ -1,7 +1,7 @@
 """Add TOTP second factor columns and single-use recovery codes.
 
 Revision ID: c9d4a7e2b6f1
-Revises: d5a1c8e2b7f3
+Revises: e7b2d4f9a1c3
 Create Date: 2026-11-27
 
 The TOTP secret is stored Fernet-encrypted. Recovery codes keep only a hash and
@@ -16,7 +16,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "c9d4a7e2b6f1"
-down_revision: str | Sequence[str] | None = "d5a1c8e2b7f3"
+down_revision: str | Sequence[str] | None = "e7b2d4f9a1c3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
