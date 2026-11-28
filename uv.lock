@@ -5153,7 +5153,7 @@ requires-dist = [
     { name = "factory-boy", marker = "extra == 'dev'", specifier = ">=3.3.0" },
     { name = "faker", marker = "extra == 'dev'", specifier = ">=33.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=2.0.0" },
+    { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=4.2,<5" },
     { name = "fpdf2", specifier = ">=2.8.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "httpx-ws", marker = "extra == 'dev'", specifier = ">=0.6.0" },

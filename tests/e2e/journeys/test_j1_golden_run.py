@@ -12,6 +12,7 @@ from tests.e2e.journeys.harness import (
     create_project,
     openapi,
     require_operation,
+    seed_run_with_evidence,
 )
 
 pytestmark = pytest.mark.e2e
@@ -102,15 +103,30 @@ async def test_dry_run_can_be_started(client, new_account):
     pytest.fail("runs landed: start a dry run and assert the run row records dry_run")
 
 
+async def test_run_evidence_lists_stored_evidence_metadata(client, db, new_account):
+    alice = await new_account("alice")
+    run_id, evidence_id = await seed_run_with_evidence(db, alice.org_id)
+
+    response = await client.get(
+        f"/api/v1/runs/{run_id}/evidence", headers=alice.headers
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["run_id"] == run_id
+    assert [item["evidence_id"] for item in body["items"]] == [evidence_id]
+    assert body["items"][0]["trust"] == "external_untrusted"
+    assert body["next_cursor"] is None
+
+
 @_missing(
     "P08",
-    "GET /api/v1/runs/{run_id}/evidence missing (P05 evidence and P13 verifier rounds follow)",
+    "GET /api/v1/runs/{run_id} missing (P05 tasks and P13 verifier rounds follow)",
 )
 async def test_run_detail_shows_progress_verifier_rounds_and_evidence(
     client, new_account
 ):
     alice = await new_account("alice")
-    await require_operation(client, alice, "GET", "/api/v1/runs/{run_id}/evidence")
+    await require_operation(client, alice, "GET", "/api/v1/runs/{run_id}")
     pytest.fail("run detail landed: assert tasks, verifier rounds and stored evidence")
 
 

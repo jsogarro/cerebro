@@ -155,7 +155,7 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 | `/app` | redirect to `/app/workflows` | none | static |
 | `/app/workflows` | `Workflows` | `GET /api/v1/workflows`; `POST /api/v1/runs` from the run form | Partly. `GET /api/v1/workflows` is mounted; `POST /api/v1/runs` is not, so the page cannot start a run. |
 | `/app/runs` | `Runs` | `GET /api/v1/runs`; `POST /api/v1/runs/{id}/cancel` | No. The page shows an unavailable notice. |
-| `/app/runs/:id` | `RunDetail` | `GET /api/v1/runs/{id}`, `/tasks`, `/events`, `/evidence`, `/artifacts`, `/evaluations` | No. Only `/events` is mounted, and it streams. |
+| `/app/runs/:id` | `RunDetail` | `GET /api/v1/runs/{id}`, `/tasks`, `/events`, `/evidence`, `/artifacts`, `/evaluations` | No. Only `/events` (streams) and `/evidence` are mounted. |
 | `/app/dashboard` | `Dashboard` | none | static; fixed values in the component |
 | `/app/research`, `/app/research/:id` | `Research` | `GET` and `POST /api/v1/research/projects`; `GET /api/v1/research/projects/{id}`; WebSocket `/ws` | Yes |
 | `/app/agents` | `Agents` | `GET /api/v1/agents`; `GET /api/v1/agents/{id}/logs` | Partly: the list is mounted, the logs route is not |

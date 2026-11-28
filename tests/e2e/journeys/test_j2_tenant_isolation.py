@@ -81,6 +81,18 @@ async def test_run_event_stream_hides_another_organizations_run(
     assert other.status_code == 404
 
 
+async def test_run_evidence_hides_another_organizations_run(client, db, new_account):
+    alice, bob = await new_account("alice"), await new_account("bob")
+    run_id, evidence_id = await seed_run_with_evidence(db, alice.org_id)
+
+    own = await client.get(f"/api/v1/runs/{run_id}/evidence", headers=alice.headers)
+    assert own.status_code == 200, own.text
+    assert [item["evidence_id"] for item in own.json()["items"]] == [evidence_id]
+
+    other = await client.get(f"/api/v1/runs/{run_id}/evidence", headers=bob.headers)
+    assert other.status_code == 404, other.text
+
+
 async def test_evidence_reads_are_scoped_to_the_callers_organization(db, new_account):
     """Evidence has no HTTP route yet (P08), so the repository is the read surface."""
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -159,11 +171,6 @@ def _missing(packet: str, what: str) -> pytest.MarkDecorator:
 _MISSING_READ_ROUTES = [
     pytest.param(
         "/api/v1/runs", marks=_missing("P08", "GET /api/v1/runs missing"), id="runs"
-    ),
-    pytest.param(
-        "/api/v1/runs/{run_id}/evidence",
-        marks=_missing("P08", "GET /api/v1/runs/{run_id}/evidence missing"),
-        id="evidence",
     ),
     pytest.param(
         "/api/v1/runs/{run_id}/artifacts",

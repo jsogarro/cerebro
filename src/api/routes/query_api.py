@@ -12,7 +12,6 @@ Cerebro's full intelligence and learning capabilities.
 """
 
 import uuid
-from datetime import datetime
 from typing import Any
 
 from fastapi import (
@@ -43,6 +42,7 @@ from ..services.research_kernel import (
     ApplicationResearchKernel,
     ResearchExecutionBackend,
     compose_application_research_kernel,
+    execution_status_payload,
     get_application_research_kernel,
     get_kernel_execution_results,
     get_kernel_execution_status,
@@ -416,37 +416,6 @@ async def intelligent_synthesis_query(
         ) from e
 
 
-def _recorded_plan_summary(exec_status: Any) -> dict[str, Any] | None:
-    """Expose the compiled ``ExecutionPlan`` for plan-backed executions.
-
-    Deliberately limited to opaque identifiers, bounded fields, and numeric
-    budgets — never ``permission_scopes``, ``tool_allowlist``, provider
-    allowlists, or edges, matching the "opaque IDs and bounded enums only"
-    telemetry convention used elsewhere for plan-backed observability.
-    """
-
-    plan = getattr(exec_status, "execution_plan", None)
-    if plan is None:
-        return None
-    decision = plan.routing_decision
-    budget = decision.budget
-    return {
-        "execution_plan_id": str(plan.execution_plan_id),
-        "plan_version": plan.plan_version,
-        "collaboration_mode": decision.collaboration_mode.value,
-        "primary_provider": str(decision.provider_model_policy.primary.provider),
-        "primary_model": str(decision.provider_model_policy.primary.model),
-        "budget": {
-            "max_cost_usd": float(budget.max_cost_usd),
-            "max_total_tokens": budget.max_total_tokens,
-            "max_tool_invocations": budget.max_tool_invocations,
-            "max_parallel_tasks": budget.max_parallel_tasks,
-            "max_attempts_per_task": budget.max_attempts_per_task,
-            "task_timeout_seconds": budget.task_timeout_seconds,
-        },
-    }
-
-
 @router.get("/execution/{execution_id}/status")
 async def get_execution_status(
     execution_id: str,
@@ -479,19 +448,7 @@ async def get_execution_status(
                 detail=f"Execution {execution_id} not found",
             )
 
-        return {
-            "execution_id": execution_id,
-            "status": exec_status.status,
-            "progress_percentage": exec_status.progress_percentage,
-            "current_phase": exec_status.current_phase,
-            "supervisor_type": exec_status.supervisor_type,
-            "workers_used": exec_status.workers_used,
-            "routing_decision": exec_status.routing_decision,
-            "execution_plan": _recorded_plan_summary(exec_status),
-            "execution_time_seconds": exec_status.execution_time_seconds,
-            "errors": exec_status.errors,
-            "timestamp": datetime.now().isoformat(),
-        }
+        return execution_status_payload(execution_id, exec_status)
 
     except HTTPException:
         raise

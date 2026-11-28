@@ -27,8 +27,9 @@ project the already-validated value onto queryable columns.
 """
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.contracts import Evidence
@@ -164,6 +165,37 @@ class EvidenceRepository:
         )
         query = scope_to_organization(
             query, AgentEvidence.organization_id, organization_id
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def list_evidence_page_for_run(
+        self,
+        run_id: str,
+        *,
+        organization_id: uuid.UUID | str,
+        after: tuple[datetime, uuid.UUID] | None = None,
+        limit: int = 100,
+    ) -> list[AgentEvidence]:
+        """Return up to ``limit + 1`` evidence rows ordered by ``(acquired_at, id)``."""
+        normalized_org = normalize_organization_id(organization_id)
+        query = select(AgentEvidence).where(
+            AgentEvidence.run_id == run_id,
+            AgentEvidence.organization_id == normalized_org,
+        )
+        if after is not None:
+            after_at, after_id = after
+            query = query.where(
+                or_(
+                    AgentEvidence.acquired_at > after_at,
+                    and_(
+                        AgentEvidence.acquired_at == after_at,
+                        AgentEvidence.id > after_id,
+                    ),
+                )
+            )
+        query = query.order_by(AgentEvidence.acquired_at, AgentEvidence.id).limit(
+            limit + 1
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
