@@ -207,9 +207,6 @@ The table lists 96 rows: 95 fields of `Settings` and `OTEL_EXPORTER_OTLP_ENDPOIN
 | `TEMPORAL_NAMESPACE` | `default` | Workers, MCP server and Temporal |
 | `WORKER_CONCURRENCY` | `10` | Workers, MCP server and Temporal |
 | `TASK_TIMEOUT_SECONDS` | `300` | Workers and Temporal |
-| `ENABLE_METRICS` | `true` | Monitoring and caching flags |
-| `TASK_TIMEOUT_SECONDS` | `300` | Workers, MCP server and Temporal |
-| `MCP_TOOLS_ENABLED` | `true` | Workers, MCP server and Temporal |
 | `ENABLE_METRICS` | `true` | Mounts `/metrics` when true |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Monitoring and caching flags |
 | `ENABLE_CACHE` | `true` | Monitoring and caching flags |
