@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
 
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
@@ -48,6 +49,8 @@ def mock_session_factory():
 
     class MockAsyncSession:
         def __init__(self):
+            # ``tenant_session`` attaches its listener to the sync session.
+            self.sync_session = Session()
             self.commit = AsyncMock()
             self.flush = AsyncMock()
 

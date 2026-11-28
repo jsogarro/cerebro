@@ -21,8 +21,8 @@ import os
 import socket
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager, nullcontext
+from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -489,8 +489,15 @@ class DirectExecutionService:
         execution_authority_resolver: ExecutionAuthorityResolver | None = None,
         execution_plan_compiler: ExecutionPlanCompiler | None = None,
         capability_issuer: PlanCapabilityIssuer | None = None,
+        maintenance_session_factory: Any | None = None,
     ):
-        """Initialize direct execution service."""
+        """Initialize direct execution service.
+
+        ``maintenance_session_factory`` connects as the maintenance role and
+        serves only the cross-tenant scans (startup recovery and expired-run
+        reconciliation); it defaults to ``session_factory`` for deployments
+        with a single role.
+        """
 
         if component_registry is not None and supervisor_registry is not None:
             raise TypeError(
@@ -525,7 +532,10 @@ class DirectExecutionService:
 
         # Initialize components (would be injected in production)
         self.gemini_service = gemini_service
-        self.session_factory = session_factory
+        self.session_factory: Any = session_factory
+        self.maintenance_session_factory: Any = (
+            maintenance_session_factory or session_factory
+        )
         self.masr_router = masr_router or MASRouter()
         self.outcome_recorder = outcome_recorder or RoutingOutcomeRecorder(
             self.masr_router
@@ -672,6 +682,18 @@ class DirectExecutionService:
         )
 
         return token_count
+
+    def _tenant_session(
+        self, organization_id: str | uuid.UUID | None
+    ) -> AbstractAsyncContextManager[Any]:
+        """A session scoped to one organization, as forced row-level security needs."""
+        return tenant_session(self.session_factory, organization_id)
+
+    @staticmethod
+    def _tenant_of(execution_status: ExecutionStatus) -> str | None:
+        """The organization that owns the run, from the durable contract first."""
+        run = execution_status._run
+        return run.tenant_id if run is not None else execution_status.organization_id
 
     async def _checkpoint(self, execution_status: ExecutionStatus, phase: str) -> None:
         """
@@ -1439,7 +1461,7 @@ class DirectExecutionService:
             return
         try:
             async with self._tenant_session(
-                execution_status.organization_id
+                self._tenant_of(execution_status)
             ) as session:
                 repo = RunLifecycleRepository(session)
                 run_row = await repo.get_run(
@@ -1599,7 +1621,7 @@ class DirectExecutionService:
             return
         try:
             async with self._tenant_session(
-                execution_status.organization_id
+                self._tenant_of(execution_status)
             ) as session:
                 await RunLifecycleRepository(session).renew_lease(
                     execution_status.run_id,
@@ -1669,7 +1691,7 @@ class DirectExecutionService:
             refused = False
             try:
                 async with self._tenant_session(
-                    execution_status.organization_id
+                    self._tenant_of(execution_status)
                 ) as session:
                     repo = RunLifecycleRepository(session)
                     if sent_at - last_renewed >= self.lease_renew_seconds:
@@ -1737,20 +1759,25 @@ class DirectExecutionService:
         if not self.session_factory:
             return 0
         try:
-            async with self.session_factory() as session:
-                repo = RunLifecycleRepository(session)
-                interrupted = []
-                parked = {
-                    p.transition.run.run_id
-                    for p in self._pending_terminal_outcomes.values()
-                }
-                for run_row in await repo.list_expired_runs():
-                    if run_row.run_id in parked:
-                        # This process is still trying to record its outcome.
-                        continue
-                    rebuilt = await self._rehydrate_execution(repo, run_row)
-                    if rebuilt is not None:
-                        interrupted.append(rebuilt)
+            parked = {
+                p.transition.run.run_id
+                for p in self._pending_terminal_outcomes.values()
+            }
+            interrupted = []
+            async with self.maintenance_session_factory() as scan:
+                expired = await RunLifecycleRepository(scan).list_expired_runs()
+            for run_row in expired:
+                if run_row.run_id in parked:
+                    # This process is still trying to record its outcome.
+                    continue
+                # The maintenance role reads only the run rows; the rest of the
+                # run is rebuilt under its own tenant.
+                async with self._tenant_session(run_row.organization_id) as session:
+                    rebuilt = await self._rehydrate_execution(
+                        RunLifecycleRepository(session), run_row
+                    )
+                if rebuilt is not None:
+                    interrupted.append(rebuilt)
         except (SQLAlchemyError, OSError) as exc:
             run_reconciliation_failures_total.inc()
             logger.warning("expired_run_scan_failed", error=str(exc))
@@ -2422,53 +2449,56 @@ class DirectExecutionService:
             return 0
         restored = 0
         try:
-            async with self.session_factory() as session:
-                lifecycle_repo = RunLifecycleRepository(session)
-                runs = await lifecycle_repo.list_non_terminal_runs(organization_id=None)
-                expired = {
-                    row.run_id for row in await lifecycle_repo.list_expired_runs()
-                }
-                for run_row in runs:
+            async with self.maintenance_session_factory() as scan:
+                scan_repo = RunLifecycleRepository(scan)
+                runs = await scan_repo.list_non_terminal_runs(organization_id=None)
+                expired = {row.run_id for row in await scan_repo.list_expired_runs()}
+            for run_row in runs:
+                # Everything past the scan is the run's own tenant's business.
+                async with self._tenant_session(run_row.organization_id) as session:
                     execution_status = await self._rehydrate_execution(
-                        lifecycle_repo, run_row
+                        RunLifecycleRepository(session), run_row
                     )
-                    if execution_status is None:
-                        continue
-                    execution_id = execution_status.execution_id
-                    if execution_id in self.active_executions:
-                        continue
-                    if run_row.run_id in expired:
-                        if await self._reconcile_interrupted(execution_status):
-                            restored += 1
-                        continue
                     # Another replica may still be running this work, and
                     # nothing here resumes it (issue #296). A leased run is
                     # live until its lease expires; only a run with no owner
                     # on record falls back to its own deadline.
-                    if (
-                        run_row.owner_instance_id is None
+                    past_deadline = (
+                        execution_status is not None
+                        and run_row.run_id not in expired
+                        and run_row.owner_instance_id is None
                         and await self._is_past_deadline(session, run_row)
-                    ):
-                        outcome = await self._persist_transition(
-                            execution_status,
-                            run_target=RunStatus.FAILED,
-                            task_target=TaskStatus.FAILED,
-                            attempt_target=AttemptStatus.FAILED,
-                            event_type="run.interrupted",
-                            payload={"reason": INTERRUPTED_BY_RESTART},
-                            reason=INTERRUPTED_BY_RESTART,
-                        )
-                        self._settle_terminal_state(
-                            execution_status,
-                            outcome=outcome,
-                            status="failed",
-                            phase="failed",
-                        )
-                    else:
-                        execution_status.restored = True
-                    self.active_executions[execution_id] = execution_status
-                    self._execution_ids_by_run_id[run_row.run_id] = execution_id
-                    restored += 1
+                    )
+                if execution_status is None:
+                    continue
+                execution_id = execution_status.execution_id
+                if execution_id in self.active_executions:
+                    continue
+                if run_row.run_id in expired:
+                    if await self._reconcile_interrupted(execution_status):
+                        restored += 1
+                    continue
+                if past_deadline:
+                    outcome = await self._persist_transition(
+                        execution_status,
+                        run_target=RunStatus.FAILED,
+                        task_target=TaskStatus.FAILED,
+                        attempt_target=AttemptStatus.FAILED,
+                        event_type="run.interrupted",
+                        payload={"reason": INTERRUPTED_BY_RESTART},
+                        reason=INTERRUPTED_BY_RESTART,
+                    )
+                    self._settle_terminal_state(
+                        execution_status,
+                        outcome=outcome,
+                        status="failed",
+                        phase="failed",
+                    )
+                else:
+                    execution_status.restored = True
+                self.active_executions[execution_id] = execution_status
+                self._execution_ids_by_run_id[run_row.run_id] = execution_id
+                restored += 1
         except (SQLAlchemyError, OSError) as exc:
             logger.warning("active_execution_restore_failed", error=str(exc))
         return restored
@@ -3774,6 +3804,7 @@ def configure_direct_execution_service(
     gemini_service: Any | None = None,
     component_registry: TypedRegistry | None = None,
     session_factory: Any | None = None,
+    maintenance_session_factory: Any | None = None,
     event_publisher: EventPublisher | None = None,
 ) -> DirectExecutionService:
     """Create an application-owned service without changing legacy globals.
@@ -3790,6 +3821,7 @@ def configure_direct_execution_service(
         masr_router=masr_router,
         component_registry=component_registry,
         session_factory=session_factory,
+        maintenance_session_factory=maintenance_session_factory,
         event_publisher=event_publisher,
     )
 

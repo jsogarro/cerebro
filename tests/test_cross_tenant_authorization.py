@@ -22,6 +22,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -32,6 +33,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import Session
 
 from src.api.auth.auth_router import provisioned_organization_id
 from src.api.routes import query_api
@@ -562,7 +564,8 @@ class _ForeignRunSessionFactory:
         return self
 
     async def __aenter__(self) -> object:
-        return object()
+        # ``tenant_session`` attaches its listener to the sync session.
+        return SimpleNamespace(sync_session=Session())
 
     async def __aexit__(self, *exc_info: object) -> bool:
         return False

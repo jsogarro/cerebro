@@ -25,9 +25,9 @@ services:
       - source_snapshots:/var/lib/cerebro/source_snapshots
     environment:
       - SOURCE_SNAPSHOT_DIR=/var/lib/cerebro/source_snapshots
-      # Runtime stays on the superuser until execution-service sessions set the
-      # tenant; the maintenance jobs already use their own role.
-      - DATABASE_URL=postgresql+asyncpg://research:research123@postgres:5432/research_db
+      # The runtime is bound by row-level security; migrations run as the owner.
+      - DATABASE_URL=postgresql+asyncpg://cerebro_app:app-dev-only@postgres:5432/research_db
+      - MIGRATION_DATABASE_URL=postgresql+asyncpg://cerebro_migrator:migrator-dev-only@postgres:5432/research_db
       - ROLES_ADMIN_DATABASE_URL=postgresql+asyncpg://research:research123@postgres:5432/research_db
       - CEREBRO_MIGRATOR_PASSWORD=migrator-dev-only
       - CEREBRO_APP_PASSWORD=app-dev-only
