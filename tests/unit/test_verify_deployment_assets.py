@@ -1,6 +1,8 @@
 import copy
 import importlib.util
+import os
 import shutil
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -13,13 +15,19 @@ _SPEC = importlib.util.spec_from_file_location(
 verify = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(verify)
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("kustomize") is None, reason="kustomize not installed"
-)
+ZERO = "sha256:" + "0" * 64
+GOOD = "sha256:" + "a" * 64
+IMAGE = "gcr.io/p/api"
 
 
 @pytest.fixture(scope="module")
 def rendered() -> list[dict[str, Any]]:
+    if shutil.which("kustomize") is None:
+        reason = "kustomize is not installed: the k8s manifests are NOT being validated"
+        if os.environ.get("CI"):
+            pytest.fail(reason)
+        warnings.warn(reason, stacklevel=1)
+        pytest.skip(reason)
     return verify.render(ROOT / "k8s")
 
 
@@ -28,7 +36,14 @@ def _kind(docs: list[dict[str, Any]], kind: str) -> dict[str, Any]:
 
 
 def test_committed_manifests_are_valid(rendered: list[dict[str, Any]]) -> None:
-    assert verify.validate(rendered) == []
+    assert verify.validate(rendered, allow_placeholder_digest=True) == []
+
+
+def test_placeholder_digest_is_refused_unless_allowed(
+    rendered: list[dict[str, Any]],
+) -> None:
+    problems = verify.validate(rendered)
+    assert any("placeholder digest" in p for p in problems), problems
 
 
 def _break(docs: list[dict[str, Any]], kind: str, mutate: Any) -> list[dict[str, Any]]:
@@ -44,6 +59,34 @@ MUTATIONS = {
             image="gcr.io/p/api:v1"
         ),
         "not pinned by digest",
+    ),
+    "empty digest": (
+        "Deployment",
+        lambda d: d["spec"]["template"]["spec"]["containers"][0].update(
+            image=f"{IMAGE}@"
+        ),
+        "not pinned by digest",
+    ),
+    "short digest": (
+        "Deployment",
+        lambda d: d["spec"]["template"]["spec"]["containers"][0].update(
+            image=f"{IMAGE}@sha256:abc"
+        ),
+        "not pinned by digest",
+    ),
+    "non-hex digest": (
+        "Deployment",
+        lambda d: d["spec"]["template"]["spec"]["containers"][0].update(
+            image=f"{IMAGE}@sha256:{'g' * 64}"
+        ),
+        "not pinned by digest",
+    ),
+    "zero digest": (
+        "Deployment",
+        lambda d: d["spec"]["template"]["spec"]["containers"][0].update(
+            image=f"{IMAGE}@{ZERO}"
+        ),
+        "placeholder digest",
     ),
     "service selector": (
         "Service",
@@ -104,5 +147,52 @@ MUTATIONS = {
 @pytest.mark.parametrize("name", MUTATIONS)
 def test_each_check_can_fail(rendered: list[dict[str, Any]], name: str) -> None:
     kind, mutate, expected = MUTATIONS[name]
-    problems = verify.validate(_break(rendered, kind, mutate))
+    problems = verify.validate(
+        _break(rendered, kind, mutate), allow_placeholder_digest=False
+    )
     assert any(expected in p for p in problems), problems
+
+
+@pytest.mark.parametrize(
+    ("path", "path_type"),
+    [
+        ("/*", "ImplementationSpecific"),
+        ("/*", None),
+        ("/", None),
+        ("/metrics/", "Exact"),
+        ("/metrics/x", "Exact"),
+        ("/metrics/x", "Prefix"),
+        ("/metrics", "ImplementationSpecific"),
+        ("/metrics/*", None),
+    ],
+)
+def test_ingress_paths_reaching_metrics_are_rejected(
+    rendered: list[dict[str, Any]], path: str, path_type: str | None
+) -> None:
+    def mutate(d: dict[str, Any]) -> None:
+        entry = d["spec"]["rules"][0]["http"]["paths"][0]
+        entry["path"] = path
+        entry.pop("pathType", None)
+        if path_type:
+            entry["pathType"] = path_type
+
+    problems = verify.validate(
+        _break(rendered, "Ingress", mutate), allow_placeholder_digest=True
+    )
+    assert any("exposes /metrics" in p for p in problems), problems
+
+
+@pytest.mark.parametrize(
+    ("path", "path_type"),
+    [("/api", "Prefix"), ("/health", "Exact"), ("/metrics-x", "Exact")],
+)
+def test_ingress_paths_not_reaching_metrics_are_accepted(
+    rendered: list[dict[str, Any]], path: str, path_type: str
+) -> None:
+    def mutate(d: dict[str, Any]) -> None:
+        d["spec"]["rules"][0]["http"]["paths"][0].update(path=path, pathType=path_type)
+
+    problems = verify.validate(
+        _break(rendered, "Ingress", mutate), allow_placeholder_digest=True
+    )
+    assert not any("exposes /metrics" in p for p in problems), problems
