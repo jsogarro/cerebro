@@ -1,8 +1,9 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { Bell, LogOut, Menu } from "lucide-react";
 import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { DialogTrigger } from "@/components/ui/dialog";
-import { setAccessToken } from "@/api/auth";
+import { signOut } from "@/api/session";
 
 type PageContext = {
     eyebrow: string;
@@ -34,6 +35,7 @@ function contextForPath(pathname: string): PageContext {
 export function Header() {
     const { pathname } = useLocation();
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
     const pageContext = contextForPath(pathname);
 
     return (
@@ -59,8 +61,9 @@ export function Header() {
                     aria-label="Sign out"
                     variant="ghost"
                     size="icon"
-                    onClick={() => {
-                        setAccessToken(null);
+                    onClick={async () => {
+                        await signOut();
+                        queryClient.clear();
                         navigate("/login", { replace: true });
                     }}
                 >
