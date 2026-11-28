@@ -10,6 +10,7 @@ import pytest
 from click.testing import CliRunner
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from src.ai_brain.router.masr import RoutingStrategy
 from src.api.routes import agent_api, query_api
@@ -559,7 +560,7 @@ def agent_authority_client():
         ),
         get_jwt_service: _OrgJWTService,
         # get_tenant_context opens a session; SQLite-free stand-in.
-        get_session: lambda: Mock(),
+        get_session: lambda: Mock(sync_session=Session()),
     }
     app.dependency_overrides.update(overrides)
 
