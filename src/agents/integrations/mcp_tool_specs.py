@@ -46,17 +46,33 @@ offending field visible.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
+from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Final
+from typing import Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
+from src.core.acquisition.fetch_tool import (
+    SOURCE_FETCH_TOOL,
+    SourceFetcher,
+    hardened_source_fetch_tool,
+)
+from src.core.acquisition.snapshots import FilesystemSnapshotStore, SnapshotStore
+from src.core.config import settings
 from src.core.contracts.capabilities import SensitivityClass
 from src.core.tools import ToolCallContext, ToolSpec
 from src.core.tools.outbound import (
     ACADEMIC_SEARCH_DATABASE_HOSTS,
     ACADEMIC_SEARCH_OUTBOUND_HOSTS,
     CITATION_OUTBOUND_HOSTS,
+    SOURCE_FETCH_OUTBOUND_HOSTS,
 )
 from src.mcp.academic_filters import AcademicSearchFilters
 from src.security.content_sanitizer import ContentSanitizer
@@ -65,6 +81,9 @@ TOOL_ACADEMIC_SEARCH: Final[str] = "mcp.academic_search"
 TOOL_FORMAT_CITATIONS: Final[str] = "mcp.format_citations"
 TOOL_ANALYZE_STATISTICS: Final[str] = "mcp.analyze_statistics"
 TOOL_BUILD_KNOWLEDGE_GRAPH: Final[str] = "mcp.build_knowledge_graph"
+TOOL_SOURCE_FETCH: Final[str] = SOURCE_FETCH_TOOL
+TOOL_DATETIME_INFO: Final[str] = "datetime_info"
+TOOL_UNIT_CONVERSION: Final[str] = "unit_conversion"
 
 TOOL_VERSION: Final[str] = "1.0.0"
 
@@ -80,7 +99,8 @@ explicitly allowlist every target host.
 """
 
 MCP_LOCAL_SENSITIVITY: Final[SensitivityClass] = SensitivityClass.READ_ONLY
-"""Pure local compute tools (``StatisticsTool``, ``KnowledgeGraphTool``).
+"""Pure local compute tools (``StatisticsTool``, ``KnowledgeGraphTool``,
+``DatetimeTool``, ``UnitConversionTool``).
 
 These operations execute in-process with no outbound network access.
 """
@@ -91,6 +111,9 @@ MCP_TOOL_SENSITIVITIES: Final[Mapping[str, SensitivityClass]] = MappingProxyType
         TOOL_FORMAT_CITATIONS: MCP_OUTBOUND_SENSITIVITY,
         TOOL_ANALYZE_STATISTICS: MCP_LOCAL_SENSITIVITY,
         TOOL_BUILD_KNOWLEDGE_GRAPH: MCP_LOCAL_SENSITIVITY,
+        TOOL_SOURCE_FETCH: MCP_OUTBOUND_SENSITIVITY,
+        TOOL_DATETIME_INFO: MCP_LOCAL_SENSITIVITY,
+        TOOL_UNIT_CONVERSION: MCP_LOCAL_SENSITIVITY,
     }
 )
 
@@ -100,6 +123,9 @@ MCP_TOOL_OUTBOUND_HOSTS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType
         TOOL_FORMAT_CITATIONS: CITATION_OUTBOUND_HOSTS,
         TOOL_ANALYZE_STATISTICS: (),
         TOOL_BUILD_KNOWLEDGE_GRAPH: (),
+        TOOL_SOURCE_FETCH: SOURCE_FETCH_OUTBOUND_HOSTS,
+        TOOL_DATETIME_INFO: (),
+        TOOL_UNIT_CONVERSION: (),
     }
 )
 
@@ -258,6 +284,49 @@ class BuildKnowledgeGraphOutput(_PermissiveOutput):
     relationships: list[JsonValue] = Field(default_factory=list)
 
 
+class DatetimeInfoInput(_ClosedInput):
+    operation: Literal["current", "day_of_week", "add_days", "diff_days"]
+    date_iso: str | None = None
+    days: int | None = None
+    other_date_iso: str | None = None
+
+    @field_validator("operation", mode="before")
+    @classmethod
+    def _normalize_operation(cls, value: Any) -> Any:
+        return value.lower() if isinstance(value, str) else value
+
+
+class DatetimeInfoOutput(BaseModel):
+    operation: str
+    current_datetime_utc: str | None = None
+    date: str | None = None
+    time: str | None = None
+    day_of_week: str | None = None
+    timestamp: float | None = None
+    day_number: int | None = None
+    original_date: str | None = None
+    days_added: int | None = None
+    result_date: str | None = None
+    result_datetime_utc: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    difference_days: int | None = None
+    difference_seconds: float | None = None
+
+
+class UnitConversionInput(_ClosedInput):
+    value: float
+    from_unit: str = Field(min_length=1)
+    to_unit: str = Field(min_length=1)
+
+
+class UnitConversionOutput(BaseModel):
+    value: float
+    from_unit: str
+    to_unit: str
+    result: float
+
+
 class MCPToolError(RuntimeError):
     """The MCP layer answered, and its answer was a failure.
 
@@ -317,8 +386,10 @@ def build_specs(
     client: ClientProvider,
     sanitizer: ContentSanitizer,
     timeout_seconds: float = DEFAULT_MCP_TIMEOUT_SECONDS,
+    snapshot_store: SnapshotStore | None = None,
+    source_fetcher: SourceFetcher | None = None,
 ) -> tuple[ToolSpec, ...]:
-    """Return the four specifications, bound to one tool provider and sanitizer."""
+    """Return all mediated boundary specifications."""
 
     async def academic_search(
         params: BaseModel, context: ToolCallContext
@@ -457,6 +528,46 @@ def build_specs(
             "relationships": sanitize(sanitizer, result.get("relationships", [])),
         }
 
+    async def datetime_info(
+        params: BaseModel, _context: ToolCallContext
+    ) -> dict[str, JsonValue]:
+        assert isinstance(params, DatetimeInfoInput)
+        from src.agents.tools.datetime_tool import DatetimeParams, DatetimeTool
+
+        tool = DatetimeTool()
+        raw = await tool._execute_impl(
+            DatetimeParams(
+                operation=params.operation,
+                date_iso=params.date_iso,
+                days=params.days,
+                other_date_iso=params.other_date_iso,
+            )
+        )
+        return {"operation": params.operation, **raw}
+
+    async def unit_conversion(
+        params: BaseModel, _context: ToolCallContext
+    ) -> dict[str, JsonValue]:
+        assert isinstance(params, UnitConversionInput)
+        from src.agents.tools.unit_conversion_tool import (
+            UnitConversionParams,
+            UnitConversionTool,
+        )
+
+        tool = UnitConversionTool()
+        raw = await tool._execute_impl(
+            UnitConversionParams(
+                value=params.value,
+                from_unit=params.from_unit,
+                to_unit=params.to_unit,
+            )
+        )
+        return dict(raw)
+
+    active_store = snapshot_store or FilesystemSnapshotStore(
+        root=Path(settings.SOURCE_SNAPSHOT_DIR)
+    )
+
     return (
         ToolSpec(
             name=TOOL_ACADEMIC_SEARCH,
@@ -499,6 +610,34 @@ def build_specs(
             handler=build_knowledge_graph,
             outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_BUILD_KNOWLEDGE_GRAPH],
         ),
+        hardened_source_fetch_tool(
+            store=active_store,
+            timeout_seconds=timeout_seconds,
+            fetcher=source_fetcher,
+            declared_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_SOURCE_FETCH],
+            name=TOOL_SOURCE_FETCH,
+            version=TOOL_VERSION,
+        ),
+        ToolSpec(
+            name=TOOL_DATETIME_INFO,
+            version=TOOL_VERSION,
+            sensitivity=MCP_TOOL_SENSITIVITIES[TOOL_DATETIME_INFO],
+            input_model=DatetimeInfoInput,
+            output_model=DatetimeInfoOutput,
+            timeout_seconds=timeout_seconds,
+            handler=datetime_info,
+            outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_DATETIME_INFO],
+        ),
+        ToolSpec(
+            name=TOOL_UNIT_CONVERSION,
+            version=TOOL_VERSION,
+            sensitivity=MCP_TOOL_SENSITIVITIES[TOOL_UNIT_CONVERSION],
+            input_model=UnitConversionInput,
+            output_model=UnitConversionOutput,
+            timeout_seconds=timeout_seconds,
+            handler=unit_conversion,
+            outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_UNIT_CONVERSION],
+        ),
     )
 
 
@@ -511,7 +650,10 @@ __all__ = [
     "TOOL_ACADEMIC_SEARCH",
     "TOOL_ANALYZE_STATISTICS",
     "TOOL_BUILD_KNOWLEDGE_GRAPH",
+    "TOOL_DATETIME_INFO",
     "TOOL_FORMAT_CITATIONS",
+    "TOOL_SOURCE_FETCH",
+    "TOOL_UNIT_CONVERSION",
     "TOOL_VERSION",
     "AcademicSearchInput",
     "AcademicSearchOutput",
@@ -520,10 +662,14 @@ __all__ = [
     "BuildKnowledgeGraphInput",
     "BuildKnowledgeGraphOutput",
     "ClientProvider",
+    "DatetimeInfoInput",
+    "DatetimeInfoOutput",
     "FormatCitationsInput",
     "FormatCitationsOutput",
     "MCPToolError",
     "ResearchToolSet",
+    "UnitConversionInput",
+    "UnitConversionOutput",
     "build_specs",
     "sanitize",
 ]
