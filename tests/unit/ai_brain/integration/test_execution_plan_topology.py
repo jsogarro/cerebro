@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 import pytest
 
 from src.agents.content_agents import DraftingAgent, EditingAgent
-from src.agents.llm_worker_base import LLMWorkerAgentBase, _GenerationRoute
 from src.agents.delegation_contract import DelegationContract
+from src.agents.llm_worker_base import LLMWorkerAgentBase, _GenerationRoute
 from src.agents.models import AgentResult, AgentTask
 from src.agents.synthesis_agent import SynthesisAgent
 from src.ai_brain.integration.execution_plan_topology import (
