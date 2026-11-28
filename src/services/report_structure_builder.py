@@ -348,6 +348,31 @@ class ReportStructureBuilder:
         self, report: Report, input_data: dict[str, Any]
     ) -> None:
         """Process and format citations from input data."""
+        if input_data.get("citation_binding") == "run_bound":
+            # Only what the binder minted from the run's evidence is printed;
+            # loose citations in the source are not part of a run-bound report.
+            for bound in input_data.get("bound_citations", []):
+                year = bound.get("year")
+                report.add_citation(
+                    Citation(
+                        id=bound["citation_id"],
+                        authors=bound["authors"],
+                        title=bound["source_uri"],
+                        year=int(year) if year and year.isdigit() else None,
+                        journal=None,
+                        volume=None,
+                        issue=None,
+                        pages=None,
+                        doi=bound.get("doi"),
+                        url=bound["source_uri"],
+                        publisher=None,
+                        location=None,
+                        isbn=None,
+                        rendered=f"{bound['in_text']} {bound['source_uri']}",
+                    )
+                )
+            return
+
         aggregated_results = input_data.get("aggregated_results", {})
         citations_data = aggregated_results.get("citations", [])
 
@@ -367,6 +392,7 @@ class ReportStructureBuilder:
                     publisher=citation_data.get("publisher"),
                     location=citation_data.get("location"),
                     isbn=citation_data.get("isbn"),
+                    rendered=None,
                 )
                 report.add_citation(citation)
 
@@ -430,7 +456,15 @@ class ReportStructureBuilder:
             project_id=input_data.get("project_id"),
             user_id=None,
             total_sources=len(aggregated_results.get("sources", [])),
-            total_citations=len(aggregated_results.get("citations", [])),
+            total_citations=(
+                len(input_data.get("bound_citations", []))
+                if input_data.get("citation_binding") == "run_bound"
+                else len(aggregated_results.get("citations", []))
+            ),
+            citation_binding=input_data.get("citation_binding"),
+            citation_run_id=input_data.get("citation_run_id"),
+            bound_citations=input_data.get("bound_citations", []),
+            citation_gaps=input_data.get("citation_gaps", []),
             agents_used=metadata_input.get("agents_used", []),
             quality_score=input_data.get("quality_report", {}).get("quality_score"),
             confidence_score=aggregated_results.get("confidence_score"),

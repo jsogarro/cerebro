@@ -133,12 +133,13 @@ test.describe('API client contract', () => {
 
     test('refuses to create a project without a token', async ({ page }) => {
         await mockApi(page);
-        await page.addInitScript(() => window.localStorage.removeItem('cerebro.access_token'));
         let posted = false;
         page.on('request', (req) => {
             if (req.method() === 'POST') posted = true;
         });
         await page.goto('/app/research');
+        // The route guard keeps a signed-out visitor out, so the token is lost after the page loads.
+        await page.evaluate(() => window.localStorage.removeItem('cerebro.access_token'));
         await page.getByRole('button', { name: 'New Research' }).click();
         await page.getByLabel('Title').fill('No token');
         await page.getByRole('button', { name: 'Start Research' }).click();

@@ -118,6 +118,9 @@ export function Landing() {
               <li>
                 <a href="#cli">API reference</a>
               </li>
+              <li>
+                <a href="/login">Sign in</a>
+              </li>
             </ul>
             <ThemeToggle />
           </div>

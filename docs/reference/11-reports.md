@@ -53,6 +53,7 @@ Details:
 | `domains` | `[]` | research domains |
 | `project_id` | none | must belong to the caller and organization |
 | `user_id` | none | must equal the token subject when given |
+| `run_id` | none | a run of the caller's organization whose stored evidence the report's citations bind to; any other run answers 404 |
 | `report_type` | `comprehensive` | `comprehensive`, `executive_summary`, `academic`, `literature_review`, `methodology`, `synthesis` |
 | `citation_style` | `APA` | `APA`, `MLA`, `Chicago`, `IEEE`, `Harvard` |
 | `formats` | `html`, `markdown` | `markdown`, `html`, `pdf`, `latex`, `docx`, `json` |
@@ -65,11 +66,15 @@ The first entry of `formats` becomes the configuration's `format`. `include_meth
 
 ## Data source
 
-`ReportSourceProjection` (`src/services/report_source_projection.py`) names what a report is built from: a `source_kind` (`project_results` or `user_supplied`) and an `evaluation` availability (`not_attempted` or `unavailable`). Both are copied into the report metadata, so they appear in the JSON, HTML and downloads. No claim-support evaluation pass exists yet, so every report states `not_attempted`.
+`ReportSourceProjection` (`src/services/report_source_projection.py`) names what a report is built from: a `source_kind` (`project_results` or `user_supplied`) and an `evaluation` availability (`not_attempted` or `unavailable`). Both are copied into the report metadata, so they appear in the JSON, HTML and downloads. Evaluation availability is `not_attempted` for a project report and `unavailable` for supplied content, whether or not a claim-support pass exists: the report does not read evaluation rows, so it never states a quality pass.
 
 With a `project_id`, the route checks the project through `ReportSourceRepository.load_project_source`, then the background task opens its own session and loads it again under the authenticated user and organization passed from the route, never from `workflow_data`. The projection is read only for a project that belongs to the caller, is not deleted and has status `completed` with at least one `research_results` row. Result rows map to report input by `result_type`: `finding` (grouped by `content.category`), `source`, `citation`, `methodology`, `comparison`, and `synthesis` or `summary` (insights and recommendations). The title, query and domains come from the project row; the caller's `workflow_data` is ignored when `project_id` is present. The report confidence is the mean of the result confidences, and the quality score is the project's stored `quality_score`. Either is `null` when the project has none.
 
 Without a `project_id`, the route merges the caller's `workflow_data` with `title`, `query` and `domains` from the request, and the report is labelled `user_supplied` with evaluation `unavailable`. `_validate_workflow_data` requires `title` and `query`. Scores the caller supplies (`quality_report`, `aggregated_results.confidence_score`) are dropped, so `quality_score` and `confidence_score` are `null` and the Markdown, HTML, DOCX and LaTeX outputs print `Not evaluated` and a content-source line (`User-supplied content — not evaluated`). The source kind is stored in the report row's `configuration` and returned as `source_kind` in `ReportResponse`. Section content comes from the keys of `aggregated_results`: `sources`, `findings`, `insights`, `citations`, `recommendations`, `methodologies`, `comparisons`, `conflict_resolutions`, `limitations`, `metrics` and `confidence_score`.
+
+## Run-bound citations
+
+With a `run_id`, the background task calls `bind_run_citations` for the run and the report prints only the citations the binder minted: loose `citations` in the source are not rendered. `ReportResponse` carries `citation_binding` (`run_bound`, or `unbound` without a run), `citations` and `citation_gaps`. Each citation has `citation_id`, `claim_id`, `evidence_id`, `evidence_sha256` (the stored snapshot digest), `locator`, `source_uri`, `status` (`minted` or `minted_partial`), `support`, `in_text` and `missing_fields`. A claim with no minted citation appears in `citation_gaps` with its reason (for example `claim_unsupported`, `no_claim_support` or `metadata_missing`). Both lists are stored in the report row's `configuration`. A run with no verifiable final report fails the report. A request with a `run_id` and a `project_id`, or with supplied `aggregated_results` findings, insights, citations or recommendations, answers 422 `run_bound_report_takes_no_supplied_content`. The binding keys (`citation_binding`, `citation_run_id`, `bound_citations`, `citation_gaps`) are dropped from any caller or project input; only the run binding sets them.
 
 ## Generation pipeline
 

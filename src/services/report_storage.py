@@ -202,6 +202,10 @@ class ReportStorageService:
             **report.configuration.model_dump(mode="json"),
             "source_kind": report.metadata.source_kind,
             "evaluation_availability": report.metadata.evaluation_availability,
+            "citation_binding": report.metadata.citation_binding or "unbound",
+            "citation_run_id": report.metadata.citation_run_id,
+            "citations": [c.model_dump() for c in report.metadata.bound_citations],
+            "citation_gaps": [g.model_dump() for g in report.metadata.citation_gaps],
         }
 
     def _report_metadata(self, report: Report, storage_path: str) -> dict[str, Any]:

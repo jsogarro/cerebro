@@ -38,6 +38,7 @@ from src.middleware.auth_middleware import get_current_token
 from src.models.db.base import Base
 from src.models.db.research_project import ResearchProject
 from src.models.db.research_result import ResearchResult  # noqa: F401
+from src.models.db.session import SessionDep
 from src.models.db.user import User
 from src.models.db.workflow_checkpoint import WorkflowCheckpoint  # noqa: F401
 
@@ -247,7 +248,7 @@ async def authenticated_client(
 
     async def override_get_tenant_context(
         token_payload: TokenPayload = Depends(get_current_token),
-        session: AsyncSession = Depends(get_session),
+        session: AsyncSession = SessionDep,
     ) -> TenantContext:
         # Return tenant context without executing Postgres SET LOCAL command
         # The test database doesn't have RLS policies configured

@@ -26,6 +26,13 @@ test.describe('dark-mode accessibility on the redesigned screens', () => {
     await expectAxeClean(page);
   });
 
+  test('login has no dark-mode WCAG A/AA axe violations', async ({ page }) => {
+    await page.goto('/login');
+    await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+    await enterDark(page);
+    await expectAxeClean(page);
+  });
+
   test('workflow launch has no dark-mode WCAG A/AA axe violations', async ({ page }) => {
     await installWorkflowsContractApi(page);
     await page.goto('/app/workflows');

@@ -83,6 +83,16 @@ class CircuitBreaker:
     def state(self) -> BreakerState:
         return self._state
 
+    def effective_state(self, now: datetime) -> BreakerState:
+        """The state a call at ``now`` would find, without consuming the trial slot."""
+        if (
+            self._state is BreakerState.OPEN
+            and self._opened_at is not None
+            and now - self._opened_at >= self._cooldown
+        ):
+            return BreakerState.HALF_OPEN
+        return self._state
+
     def allows(self, now: datetime) -> bool:
         """Return whether a call may be attempted at ``now``.
 

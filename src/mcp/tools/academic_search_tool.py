@@ -18,7 +18,6 @@ from src.core.tools.outbound import (
     ARXIV_HOST,
     PUBMED_HOST,
     SEMANTIC_SCHOLAR_HOST,
-    OutboundHostNotAllowedError,
     checked_get,
     require_allowed_outbound_host,
 )
@@ -45,17 +44,6 @@ class AcademicSearchTool:
 
     DATABASE_HOSTS: Final[Mapping[str, str]] = ACADEMIC_SEARCH_DATABASE_HOSTS
     OUTBOUND_HOSTS: Final[tuple[str, ...]] = ACADEMIC_SEARCH_OUTBOUND_HOSTS
-
-    @classmethod
-    def target_hosts_for_databases(cls, databases: Sequence[str]) -> tuple[str, ...]:
-        """Return the sorted pinned outbound hosts for the requested databases."""
-        if not databases:
-            return cls.OUTBOUND_HOSTS
-        return tuple(
-            sorted(
-                {cls.DATABASE_HOSTS[db] for db in databases if db in cls.DATABASE_HOSTS}
-            )
-        )
 
     def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or {}
@@ -444,13 +432,4 @@ class AcademicSearchTool:
         # should be handled explicitly in production code
 
 
-__all__ = [
-    "ACADEMIC_SEARCH_DATABASE_HOSTS",
-    "ACADEMIC_SEARCH_OUTBOUND_HOSTS",
-    "ARXIV_HOST",
-    "PUBMED_HOST",
-    "SEMANTIC_SCHOLAR_HOST",
-    "AcademicSearchTool",
-    "OutboundHostNotAllowedError",
-    "require_allowed_outbound_host",
-]
+__all__ = ["AcademicSearchTool", "require_allowed_outbound_host"]

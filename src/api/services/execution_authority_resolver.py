@@ -383,6 +383,15 @@ class PersistedExecutionAuthorityResolver:
         """Populate the in-process cache without touching persistence."""
         self._bindings[(binding.authority_id, binding.authority_version)] = binding
 
+    def _deserialize_row(self, row: Any) -> ExecutionAuthorityBinding:
+        return deserialize_execution_authority_binding(
+            row.configuration,
+            authority_id=row.authority_id,
+            authority_version=row.authority_version,
+            clock=self._clock,
+            plan_id_factory=self._plan_id_factory,
+        )
+
     async def load_authority(
         self,
         reference: ExecutionAuthorityReference,
@@ -430,13 +439,7 @@ class PersistedExecutionAuthorityResolver:
                 row = snapshots[0] if snapshots else None
         if row is None:
             return None
-        binding = deserialize_execution_authority_binding(
-            row.configuration,
-            authority_id=row.authority_id,
-            authority_version=row.authority_version,
-            clock=self._clock,
-            plan_id_factory=self._plan_id_factory,
-        )
+        binding = self._deserialize_row(row)
         if not is_minted_authority_version(binding.authority_version):
             self.cache_binding(binding)
         return binding
@@ -492,13 +495,7 @@ class PersistedExecutionAuthorityResolver:
                 raise ExecutionAuthorityUnavailableError(
                     "execution authority is unavailable"
                 )
-            template_binding = deserialize_execution_authority_binding(
-                template_row.configuration,
-                authority_id=template_row.authority_id,
-                authority_version=template_row.authority_version,
-                clock=self._clock,
-                plan_id_factory=self._plan_id_factory,
-            )
+            template_binding = self._deserialize_row(template_row)
             enforce_authority_tenant(template_binding, normalized_org_str)
             minted = mint_run_binding(
                 template_binding,
@@ -528,13 +525,7 @@ class PersistedExecutionAuthorityResolver:
                 raise ExecutionAuthorityUnavailableError(
                     "execution authority is unavailable"
                 )
-            reloaded = deserialize_execution_authority_binding(
-                existing_row.configuration,
-                authority_id=existing_row.authority_id,
-                authority_version=existing_row.authority_version,
-                clock=self._clock,
-                plan_id_factory=self._plan_id_factory,
-            )
+            reloaded = self._deserialize_row(existing_row)
             enforce_authority_tenant(reloaded, normalized_org_str)
             if reloaded.deadline <= mint_now:
                 existing_run = await RunLifecycleRepository(reload_session).get_run(
@@ -610,17 +601,6 @@ class PersistedExecutionAuthorityResolver:
             limit=limit,
             exclude_authority_version_prefix=MINTED_AUTHORITY_VERSION_PREFIX,
         )
-        loaded = 0
         for snapshot in snapshots:
-            if is_minted_authority_version(snapshot.authority_version):
-                continue
-            binding = deserialize_execution_authority_binding(
-                snapshot.configuration,
-                authority_id=snapshot.authority_id,
-                authority_version=snapshot.authority_version,
-                clock=self._clock,
-                plan_id_factory=self._plan_id_factory,
-            )
-            self.cache_binding(binding)
-            loaded += 1
-        return loaded
+            self.cache_binding(self._deserialize_row(snapshot))
+        return len(snapshots)

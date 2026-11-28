@@ -3,6 +3,8 @@ import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { AppShell } from '@/components/layout/AppShell';
 import { Landing } from '@/pages/Landing';
 import { RouteError } from '@/components/common/RouteError';
+import { RequireAuth } from '@/components/common/RequireAuth';
+import { Login } from '@/pages/Login';
 
 // Lazy load feature pages
 const Dashboard = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.Dashboard })));
@@ -24,23 +26,33 @@ export const router = createBrowserRouter([
         errorElement: <RouteError />,
     },
     {
+        path: '/login',
+        element: <Login />,
+        errorElement: <RouteError />,
+    },
+    {
         path: '/app',
-        element: <AppShell />,
+        element: <RequireAuth />,
         errorElement: <RouteError />,
         children: [
-            { index: true, element: <Navigate to="/app/workflows" replace /> },
-            { path: 'workflows', element: <Workflows /> },
-            { path: 'runs', element: <Runs /> },
-            { path: 'runs/:id', element: <RunDetail /> },
-            { path: 'dashboard', element: <Dashboard /> },
-            { path: 'research', element: <Research /> },
-            { path: 'research/:id', element: <Research /> },
-            { path: 'agents', element: <Agents /> },
-            { path: 'memory', element: <Memory /> },
-            { path: 'qa', element: <QA /> },
-            { path: 'costs', element: <Costs /> },
-            { path: 'benchmarks', element: <Benchmarks /> },
-            { path: 'settings', element: <Settings /> },
+            {
+                element: <AppShell />,
+                children: [
+                    { index: true, element: <Navigate to="/app/workflows" replace /> },
+                    { path: 'workflows', element: <Workflows /> },
+                    { path: 'runs', element: <Runs /> },
+                    { path: 'runs/:id', element: <RunDetail /> },
+                    { path: 'dashboard', element: <Dashboard /> },
+                    { path: 'research', element: <Research /> },
+                    { path: 'research/:id', element: <Research /> },
+                    { path: 'agents', element: <Agents /> },
+                    { path: 'memory', element: <Memory /> },
+                    { path: 'qa', element: <QA /> },
+                    { path: 'costs', element: <Costs /> },
+                    { path: 'benchmarks', element: <Benchmarks /> },
+                    { path: 'settings', element: <Settings /> },
+                ],
+            },
         ],
     },
 ]);
