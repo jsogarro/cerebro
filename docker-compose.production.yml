@@ -43,6 +43,7 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS}
       - JWT_PRIVATE_KEY_PATH=/run/secrets/jwt_private.pem
       - JWT_PUBLIC_KEY_PATH=/run/secrets/jwt_public.pem
+      - MCP_SERVER_ENABLED=${MCP_SERVER_ENABLED:-true}
       
       # MASR Configuration
       - MASR_ENABLE_ROUTING=true

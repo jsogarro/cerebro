@@ -15,4 +15,5 @@ data:
   ENABLE_CACHE: "true"
   ENABLE_RATE_LIMITING: "true"
   MAX_REQUESTS_PER_MINUTE: "100"
+  MCP_SERVER_ENABLED: "true"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"

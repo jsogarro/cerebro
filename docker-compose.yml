@@ -44,6 +44,7 @@ services:
       - MASR_ENABLE_ADAPTIVE=${MASR_ENABLE_ADAPTIVE:-true}
       - ADAPTIVE_ROUTING_ENABLED=${ADAPTIVE_ROUTING_ENABLED:-false}
       - MEMORY_INFORMED_ROUTING_ENABLED=${MEMORY_INFORMED_ROUTING_ENABLED:-false}
+      - MCP_SERVER_ENABLED=${MCP_SERVER_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy

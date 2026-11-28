@@ -100,6 +100,23 @@ async def _close_lifespan_resource(
         )
 
 
+def _mount_mcp_app(app: FastAPI, mcp_server: object) -> tuple[object, Route]:
+    """Mount a stateless Streamable HTTP FastMCP sub-app at ``/mcp``."""
+    mcp_app = mcp_server.http_app(  # type: ignore[attr-defined]
+        path="/mcp",
+        stateless_http=True,
+        json_response=True,
+    )
+    mcp_route = Route(
+        "/mcp",
+        endpoint=mcp_app,
+        methods=["GET", "POST", "DELETE"],
+        include_in_schema=False,
+    )
+    app.router.routes.append(mcp_route)
+    return mcp_app, mcp_route
+
+
 def _remove_app_state_if_owned(app: FastAPI, name: str, owned: object) -> None:
     """Remove state only when it still references this lifespan's instance."""
 
@@ -527,19 +544,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 audit_logger=audit_logger,
                 session_factory=durable_session_factory,
             )
-            mcp_app = mcp_server.http_app(
-                path="/mcp",
-                stateless_http=True,
-                json_response=True,
-            )
-            await resources.enter_async_context(mcp_app.lifespan(app))
-            mcp_route = Route(
-                "/mcp",
-                endpoint=mcp_app,
-                methods=["GET", "POST", "DELETE"],
-                include_in_schema=False,
-            )
-            app.router.routes.append(mcp_route)
+            mcp_app, mcp_route = _mount_mcp_app(app, mcp_server)
+            await resources.enter_async_context(mcp_app.lifespan(app))  # type: ignore[attr-defined]
             resources.callback(app.router.routes.remove, mcp_route)
             logger.info("MCP server mounted at /mcp")
 
