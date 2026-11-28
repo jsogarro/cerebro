@@ -62,6 +62,7 @@ from src.core.config import settings
 from src.core.observability import configure_logging
 from src.core.process_hardening import make_non_dumpable
 from src.middleware.auth_middleware import AuthMiddleware
+from src.middleware.mcp_origin import McpOriginMiddleware
 from src.security.audit_logger import AuditLogger
 from src.security.audit_middleware import (
     AuditTrailMiddleware,
@@ -555,6 +556,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 kernel=research_kernel,
                 audit_logger=audit_logger,
                 session_factory=durable_session_factory,
+                authority_resolver=direct_execution_service.execution_authority_resolver,
             )
             mcp_app, mcp_route = _mount_mcp_app(app, mcp_server)
             await resources.enter_async_context(mcp_app.lifespan(app))  # type: ignore[attr-defined]
@@ -630,9 +632,8 @@ app.middleware("http")(
     )
 )
 
-# CORS must be the outermost application middleware. It terminates genuine
-# browser preflights before authentication, while AuthMiddleware remains the
-# exact public-route boundary for every other request, including OPTIONS.
+# CORS sits inside McpOriginMiddleware for /mcp and remains outermost for all
+# other routes, terminating genuine browser preflights before authentication.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -640,6 +641,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# DNS-rebinding guard for /mcp runs outermost so disallowed Origin headers
+# (including OPTIONS preflights) receive 403 before CORS or authentication.
+app.add_middleware(McpOriginMiddleware)
 
 # Mount Prometheus metrics endpoint. AuthMiddleware gates it on the metrics
 # credential, never on an ordinary tenant token.

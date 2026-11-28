@@ -171,13 +171,17 @@ The four tool classes in `src/mcp/tools/` are `AcademicSearchTool`, `CitationToo
 
 ## MCP server
 
-When `MCP_SERVER_ENABLED=true` (default `false`), `src/api/main.py` mounts a stateless Streamable HTTP FastMCP server (`src/mcp/server.py::build_mcp_server`) at `/mcp`. Requests inherit `AuthMiddleware`, `RateLimitMiddleware`, `AuditTrailMiddleware`, CORS, and security headers, and every tool call resolves caller identity from `request.state.token_payload` (failing closed outside HTTP or when `organization_id` is absent) and writes an audit event with action `mcp.tool:<name>`.
+When `MCP_SERVER_ENABLED=true` (default `false`), `src/api/main.py` mounts a stateless Streamable HTTP FastMCP server (`src/mcp/server.py::build_mcp_server`) at `/mcp`. `McpOriginMiddleware` rejects requests carrying a foreign `Origin` header with `403` (allowing absent `Origin`, loopback origins, and configured `CORS_ORIGINS`), and requests inherit `AuthMiddleware`, `RateLimitMiddleware`, `AuditTrailMiddleware`, CORS, and security headers. Every tool call resolves caller identity from `request.state.token_payload` (failing closed outside HTTP, when `organization_id` is absent, or when a PAT lacks the tool's required scope) and writes an audit event with action `mcp.tool:<name>`.
 
-Read-only tools:
+Read-only tools (PAT scope `mcp:read`):
 
 - `get_research_status(execution_id)` — returns the same status payload as `GET /api/v1/query/execution/{execution_id}/status` (including `run_id`).
 - `get_research_results(execution_id)` — returns `run_id`, results with externally sourced items labelled `external_untrusted`, and per-claim verdict summaries from `agent_claim_supports` (or an explicit `unverified` marker when none exist).
 - `get_research_evidence(run_id, cursor, limit)` — calls the same `list_run_evidence` service as `GET /api/v1/runs/{run_id}/evidence` (metadata only: source URI, locator, SHA-256, trust label; keyset pagination on `(acquired_at, id)`, default 100, cap 500; foreign or unknown run returns not found).
+
+Execution tool (PAT scope `mcp:start`):
+
+- `start_research(template_authority_id, template_authority_version, request_id, query, domains)` — validates a closed input schema with no `context` field, deterministically mints a single-run execution authority from an operator-registered org template via `PersistedExecutionAuthorityResolver.mint_authority_from_template`, and starts or replays the run through the shared `start_intelligent_research` path. Returns `{execution_id, run_id, status, replayed}`, enforces replay parameter conflict detection (`RUN_PARAMS_CONFLICT`), writes a `DATA_MODIFIED` audit event with PAT identity and `query_sha256` (never raw query text), and declares annotations `readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True`.
 
 ## Source map
 

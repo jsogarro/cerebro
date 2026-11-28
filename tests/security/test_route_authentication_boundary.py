@@ -26,6 +26,7 @@ from src.middleware.auth_middleware import (
     AuthMiddleware,
     get_jwt_service,
 )
+from src.middleware.mcp_origin import McpOriginMiddleware
 from src.models.db.session import get_session
 
 EXPECTED_PUBLIC_ROUTES = {
@@ -143,7 +144,7 @@ def test_cors_is_outermost_so_auth_handles_every_non_preflight_request() -> None
 
     middleware_classes = [middleware.cls for middleware in app.user_middleware]
 
-    assert middleware_classes[0] is CORSMiddleware
+    assert middleware_classes[:2] == [McpOriginMiddleware, CORSMiddleware]
     assert middleware_classes.index(CORSMiddleware) < middleware_classes.index(
         AuthMiddleware
     )

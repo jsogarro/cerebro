@@ -21,13 +21,13 @@ import os
 import socket
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager, nullcontext
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -255,6 +255,32 @@ class RunAlreadyAdmittedError(RuntimeError):
             f"execution {execution_id!r}"
         )
         self.execution_id = execution_id
+
+
+class RunParamsConflictError(ValueError):
+    """A replayed admission carried a different query or domains list."""
+
+    code = "RUN_PARAMS_CONFLICT"
+
+
+@dataclass(frozen=True, slots=True)
+class _InFlightAdmission:
+    """In-flight admission claim paired with its canonicalized request parameters."""
+
+    future: asyncio.Future[str]
+    query_sha256: str
+    domains: list[str]
+
+
+def normalize_research_domains(domains: Sequence[str] | None) -> list[str]:
+    """Canonicalize research domain hints across REST, MCP, and replay."""
+    cleaned = sorted({d.strip().lower() for d in (domains or ()) if d.strip()})
+    return cleaned or ["general"]
+
+
+def research_query_sha256(query: str) -> str:
+    """Return the UTF-8 SHA-256 hex digest of a stripped research query."""
+    return hashlib.sha256(query.strip().encode("utf-8")).hexdigest()
 
 
 class ResumeUnsupportedError(RuntimeError):
@@ -594,7 +620,7 @@ class DirectExecutionService:
         # the entry exists from before the first await until the execution
         # id is known. Cross-process duplicates are caught instead by
         # ``agent_runs``' uniqueness on (tenant_id, idempotency_key).
-        self._admissions_in_flight: dict[str, asyncio.Future[str]] = {}
+        self._admissions_in_flight: dict[str, _InFlightAdmission] = {}
 
         # Store background task references to prevent GC
         self._background_tasks: set[asyncio.Task[Any]] = set()
@@ -806,6 +832,14 @@ class DirectExecutionService:
         (``src/api/routes/research.py``) key off it after a restart.
         """
         objective = (project.query.text or "").strip()[:2000] or "research execution"
+        query_sha256 = research_query_sha256(project.query.text)
+        normalized_domains = normalize_research_domains(project.query.domains)
+        task_input: dict[str, Any] = {
+            "project_id": str(project.id),
+            "execution_id": execution_id,
+            "query_sha256": query_sha256,
+            "domains": normalized_domains,
+        }
         task = Task(
             task_id=str(uuid.uuid4()),
             run_id=run.run_id,
@@ -813,11 +847,7 @@ class DirectExecutionService:
             task_type="execution_plan",
             objective=objective,
             idempotency_key=f"{run.idempotency_key}:task",
-            input={
-                "project_id": str(project.id),
-                "execution_id": execution_id,
-                "domains": list(project.query.domains or []),
-            },
+            input=task_input,
             created_at=now,
             updated_at=now,
         )
@@ -2545,6 +2575,19 @@ class DirectExecutionService:
             ]
             return min((s for s in stamps if s is not None), default=None)
 
+        def updated(row: Any) -> datetime | None:
+            stamps = [
+                aware(getattr(row, name))
+                for name in (
+                    "created_at",
+                    "updated_at",
+                    "started_at",
+                    "completed_at",
+                    "cancellation_requested_at",
+                )
+            ]
+            return max((s for s in stamps if s is not None), default=None)
+
         try:
             run = Run.model_validate(
                 {
@@ -2558,7 +2601,7 @@ class DirectExecutionService:
                     "requested_by": run_row.requested_by,
                     "status": run_row.status,
                     "created_at": created(run_row),
-                    "updated_at": aware(run_row.updated_at),
+                    "updated_at": updated(run_row),
                     "started_at": aware(run_row.started_at),
                     "completed_at": aware(run_row.completed_at),
                     "status_reason": run_row.status_reason,
@@ -2581,7 +2624,7 @@ class DirectExecutionService:
                     "input": task_input,
                     "status": task_row.status,
                     "created_at": created(task_row),
-                    "updated_at": aware(task_row.updated_at),
+                    "updated_at": updated(task_row),
                     "started_at": aware(task_row.started_at),
                     "completed_at": aware(task_row.completed_at),
                     "status_reason": task_row.status_reason,
@@ -2600,7 +2643,7 @@ class DirectExecutionService:
                     "executor_id": attempt_row.executor_id,
                     "status": attempt_row.status,
                     "created_at": created(attempt_row),
-                    "updated_at": aware(attempt_row.updated_at),
+                    "updated_at": updated(attempt_row),
                     "started_at": aware(attempt_row.started_at),
                     "completed_at": aware(attempt_row.completed_at),
                     "status_reason": attempt_row.status_reason,
@@ -2751,8 +2794,14 @@ class DirectExecutionService:
                 authority_reference, organization_id=organization_id
             )
         run_id = binding.run.run_id
+        expected_query_sha256 = research_query_sha256(project.query.text)
+        expected_domains = normalize_research_domains(project.query.domains)
 
-        locally_known_execution_id = self._locally_known_execution_id(run_id)
+        locally_known_execution_id = self._locally_known_execution_id(
+            run_id,
+            expected_query_sha256=expected_query_sha256,
+            expected_domains=expected_domains,
+        )
         if locally_known_execution_id is not None:
             # Shielded: this future may be another caller's admission claim,
             # and a client that disconnects while waiting on it must not
@@ -2765,12 +2814,22 @@ class DirectExecutionService:
         # above and admit the same run a second time.
         reservation: asyncio.Future[str] = asyncio.get_running_loop().create_future()
         reservation.add_done_callback(_discard_unretrieved_admission_error)
-        self._admissions_in_flight[run_id] = reservation
+        self._admissions_in_flight[run_id] = _InFlightAdmission(
+            future=reservation,
+            query_sha256=expected_query_sha256,
+            domains=expected_domains,
+        )
         try:
             execution_id = await self._durably_recorded_execution_id(
                 run_id, organization_id=binding.run.tenant_id
             )
-            if execution_id is None:
+            if execution_id is not None:
+                self._check_replay_params(
+                    self.active_executions.get(execution_id),
+                    expected_query_sha256=expected_query_sha256,
+                    expected_domains=expected_domains,
+                )
+            else:
                 execution_id = await self._admit_new_execution(
                     project,
                     binding,
@@ -2791,7 +2850,48 @@ class DirectExecutionService:
             reservation.set_result(execution_id)
         return execution_id
 
-    def _locally_known_execution_id(self, run_id: str) -> "asyncio.Future[str] | None":
+    @staticmethod
+    def _check_replay_params(
+        execution_status: ExecutionStatus | None,
+        *,
+        expected_query_sha256: str,
+        expected_domains: list[str],
+    ) -> None:
+        """Fail closed when a replay carries different query or domains."""
+        task = execution_status._task if execution_status is not None else None
+        if task is None or not isinstance(task.input, Mapping):
+            raise RunParamsConflictError(
+                "replayed run parameters could not be verified"
+            )
+        stored_query_sha256 = task.input.get("query_sha256")
+        raw_domains = task.input.get("domains")
+        if raw_domains is None:
+            stored_domains = normalize_research_domains(None)
+        elif isinstance(raw_domains, list | tuple) and all(
+            isinstance(item, str) for item in raw_domains
+        ):
+            stored_domains = normalize_research_domains(
+                cast(Sequence[str], raw_domains)
+            )
+        else:
+            raise RunParamsConflictError(
+                "replayed run parameters could not be verified"
+            )
+        if (
+            stored_query_sha256 != expected_query_sha256
+            or stored_domains != expected_domains
+        ):
+            raise RunParamsConflictError(
+                "replayed run parameters differ from admitted run"
+            )
+
+    def _locally_known_execution_id(
+        self,
+        run_id: str,
+        *,
+        expected_query_sha256: str,
+        expected_domains: list[str],
+    ) -> "asyncio.Future[str] | None":
         """Return an awaitable for the execution this process already has.
 
         A run is admitted once: ``agent_runs`` is unique on
@@ -2810,12 +2910,24 @@ class DirectExecutionService:
         """
         in_flight = self._admissions_in_flight.get(run_id)
         if in_flight is not None:
+            if (
+                in_flight.query_sha256 != expected_query_sha256
+                or in_flight.domains != expected_domains
+            ):
+                raise RunParamsConflictError(
+                    "concurrent replay parameters differ from in-flight admission"
+                )
             logger.info("concurrent_admission_coalesced", run_id=run_id)
-            return in_flight
+            return in_flight.future
 
         replayed_execution_id = self._replayed_execution_id(run_id)
         if replayed_execution_id is None:
             return None
+        self._check_replay_params(
+            self.active_executions[replayed_execution_id],
+            expected_query_sha256=expected_query_sha256,
+            expected_domains=expected_domains,
+        )
         logger.info(
             "replayed_admission_coalesced",
             run_id=run_id,
@@ -2940,10 +3052,12 @@ class DirectExecutionService:
             # Another replica's write already won this run durably. Nothing
             # was started for it here — no task row, no attempt row, no
             # background workflow task — so there is nothing to unwind;
-            # coalesce onto the winner exactly like a replayed admission
-            # does (``_durably_recorded_execution_id`` already registered it
-            # in ``active_executions``/``_execution_ids_by_run_id`` before
-            # raising).
+            # verify the winning run's parameters match before coalescing.
+            self._check_replay_params(
+                self.active_executions.get(exc.execution_id),
+                expected_query_sha256=research_query_sha256(project.query.text),
+                expected_domains=normalize_research_domains(project.query.domains),
+            )
             return exc.execution_id
 
         self.active_executions[execution_id] = execution_status

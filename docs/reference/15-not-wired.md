@@ -120,7 +120,7 @@ The web workbench pages for runs and run detail, and the run form on the workflo
 
 ## MCP server
 
-> **Wired.** `src/mcp/server.py::build_mcp_server` exposes read-only tools (`get_research_status`, `get_research_results`, `get_research_evidence`) over stateless Streamable HTTP, mounted at `/mcp` inside `src/api/main.py` and enabled in Kubernetes (`k8s/configmap.yaml`) and Docker Compose (`MCP_SERVER_ENABLED=true`). Requests pass through the API's authentication (including `/mcp`-scoped personal access tokens), rate-limiting, and audit middleware. See [tool boundary and evidence](09-tool-boundary-and-evidence.md#mcp-server).
+> **Wired.** `src/mcp/server.py::build_mcp_server` exposes read-only tools (`get_research_status`, `get_research_results`, `get_research_evidence`, requiring PAT scope `mcp:read`) and `start_research` (requiring PAT scope `mcp:start`, minting deterministic single-run execution authorities from operator-registered templates and admitting runs via the shared `start_intelligent_research` path with replay conflict detection) over stateless Streamable HTTP, mounted at `/mcp` inside `src/api/main.py` and enabled in Kubernetes (`k8s/configmap.yaml`) and Docker Compose (`MCP_SERVER_ENABLED=true`). Requests pass through `McpOriginMiddleware` (rejecting disallowed `Origin` headers with `403`), authentication (including `/mcp`-scoped personal access tokens), rate-limiting, and audit middleware. See [tool boundary and evidence](09-tool-boundary-and-evidence.md#mcp-server).
 
 ## Model-call journal owner
 

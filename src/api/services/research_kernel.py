@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -15,7 +15,15 @@ from src.api.services.agent_execution_service import (
     get_application_agent_execution_service,
 )
 from src.api.services.direct_execution_service import (
+    RunAdmissionError,
+    RunParamsConflictError,
     get_application_direct_execution_service,
+    normalize_research_domains,
+    research_query_sha256,
+)
+from src.api.services.execution_authority_resolver import (
+    ExecutionAuthorityError,
+    ExecutionAuthorityUnavailableError,
 )
 from src.core.contracts.trust import TrustClassification
 from src.core.kernel import (
@@ -29,6 +37,7 @@ from src.core.kernel.component_keys import (
     DIRECT_AGENT_WORKFLOW_KEY,
     ROUTED_RESEARCH_WORKFLOW_KEY,
 )
+from src.middleware.tenant_context import TenantContext
 from src.models.agent_api_models import (
     AgentExecutionRequest,
     AgentExecutionResponse,
@@ -43,6 +52,7 @@ from src.models.agent_api_models import (
 )
 from src.models.execution_authority import ExecutionAuthorityReference
 from src.models.research_project import ResearchProject
+from src.repositories.run_lifecycle_repository import RunCapExceededError
 
 
 class ResearchExecutionBackend(Protocol):
@@ -401,6 +411,130 @@ def get_kernel_agent_operations(
     return adapter
 
 
+@dataclass(frozen=True, slots=True)
+class StartResult:
+    """Outcome of admitting or replaying a research execution."""
+
+    execution_id: str
+    run_id: str | None
+    project_id: str
+    status: str
+    replayed: bool
+    execution_status: Any = None
+
+
+async def start_intelligent_research(
+    kernel: ApplicationResearchKernel,
+    *,
+    tenant: TenantContext,
+    query: str,
+    domains: Sequence[str] | None,
+    authority_reference: ExecutionAuthorityReference | None,
+    context: dict[str, Any] | None = None,
+) -> StartResult:
+    """Admit or replay a research execution via the canonical kernel.
+
+    Shared by REST (``POST /api/v1/query/research``) and MCP
+    (``start_research``). Because a fresh ``ResearchProject`` UUID is minted
+    per call, a replayed execution carries the originally admitted project id,
+    yielding ``replayed = status.project_id != str(project.id)``.
+    """
+    from src.models.research_project import ResearchDepth, ResearchQuery, ResearchScope
+
+    project = ResearchProject(
+        title=f"API Query: {query[:50]}...",
+        query=ResearchQuery(
+            text=query,
+            domains=normalize_research_domains(domains),
+            depth_level=ResearchDepth.COMPREHENSIVE.value,
+        ),
+        user_id=tenant.user_id,
+        scope=ResearchScope(),
+    )
+
+    execution_id = await kernel.execute(
+        project,
+        context=dict(context) if context is not None else {},
+        authority_reference=authority_reference,
+        organization_id=tenant.organization_id,
+    )
+
+    execution_status = await get_kernel_execution_status(
+        kernel,
+        execution_id,
+        organization_id=tenant.organization_id,
+    )
+
+    status_project_id = getattr(execution_status, "project_id", None)
+    replayed = bool(status_project_id) and status_project_id != str(project.id)
+    effective_project_id = (
+        str(status_project_id) if status_project_id else str(project.id)
+    )
+
+    return StartResult(
+        execution_id=execution_id,
+        run_id=getattr(execution_status, "run_id", None),
+        project_id=effective_project_id,
+        status=getattr(execution_status, "status", None) or "pending",
+        replayed=replayed,
+        execution_status=execution_status,
+    )
+
+
+def _resolve_authority_resolver(
+    kernel: ApplicationResearchKernel,
+    authority_resolver: Any | None,
+) -> Any:
+    resolver = authority_resolver
+    if resolver is None:
+        backend = getattr(kernel.executor, "backend", None)
+        resolver = getattr(backend, "execution_authority_resolver", None)
+    if resolver is None or not callable(
+        getattr(resolver, "mint_authority_from_template", None)
+    ):
+        raise ExecutionAuthorityUnavailableError("execution authority is unavailable")
+    return resolver
+
+
+async def mint_and_start_research(
+    kernel: ApplicationResearchKernel,
+    *,
+    tenant: TenantContext,
+    template_authority_id: str,
+    template_authority_version: str,
+    request_id: str,
+    query: str,
+    domains: Sequence[str] | None,
+    authority_resolver: Any | None = None,
+    on_minted: Callable[[str, str], None] | None = None,
+) -> tuple[StartResult, str, str]:
+    """Deterministically mint a single-run authority from a template and start it."""
+    resolver = _resolve_authority_resolver(kernel, authority_resolver)
+    minted = await resolver.mint_authority_from_template(
+        ExecutionAuthorityReference(
+            authority_id=template_authority_id,
+            authority_version=template_authority_version,
+        ),
+        organization_id=tenant.organization_id,
+        user_id=tenant.user_id,
+        request_id=request_id,
+    )
+    if on_minted is not None:
+        on_minted(minted.authority_id, minted.authority_version)
+
+    start_result = await start_intelligent_research(
+        kernel,
+        tenant=tenant,
+        query=query,
+        domains=domains,
+        authority_reference=ExecutionAuthorityReference(
+            authority_id=minted.authority_id,
+            authority_version=minted.authority_version,
+        ),
+    )
+    return start_result, minted.authority_id, minted.authority_version
+
+
 async def get_kernel_execution_status(
     kernel: ApplicationResearchKernel,
     execution_id: str,
@@ -602,7 +736,13 @@ __all__ = [
     "AgentExecutionBackend",
     "AgentKernelOperations",
     "ApplicationResearchKernel",
+    "ExecutionAuthorityError",
+    "ExecutionAuthorityUnavailableError",
     "ResearchExecutionBackend",
+    "RunAdmissionError",
+    "RunCapExceededError",
+    "RunParamsConflictError",
+    "StartResult",
     "build_research_results_payload",
     "compose_application_research_kernel",
     "execution_status_payload",
@@ -613,5 +753,8 @@ __all__ = [
     "get_kernel_execution_status",
     "get_legacy_agent_research_kernel",
     "get_legacy_research_kernel",
+    "mint_and_start_research",
+    "research_query_sha256",
     "resume_kernel_execution",
+    "start_intelligent_research",
 ]
