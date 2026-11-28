@@ -31,6 +31,7 @@ from pypdf import PdfReader
 from pypdf import __version__ as _installed_pypdf_version
 from pypdf.errors import PyPdfError
 
+from src.core.acquisition.resolution import locate
 from src.core.acquisition.snapshots import SnapshotStore
 from src.core.contracts import (
     Artifact,
@@ -222,14 +223,31 @@ def build_extracted_text_artifact(
     created_at: datetime,
     task_id: str | None = None,
     attempt_id: str | None = None,
+    content_kind: str = "full_text",
+    source_uri: str | None = None,
+    locator: str | None = None,
 ) -> Artifact:
     """Store the text immutably and describe it as an ``extracted_text`` artifact."""
 
-    storage_uri = store.put(extraction.text.encode("utf-8"))
+    encoded = extraction.text.encode("utf-8")
+    storage_uri = store.put(encoded)
     pages: list[JsonValue] = [
         {"page": span.page, "start": span.start, "end": span.end}
         for span in extraction.pages
     ]
+    resolved_locator = locator or locate("bytes", 0, len(encoded))
+    metadata: dict[str, JsonValue] = {
+        "content_kind": content_kind,
+        "locator": resolved_locator,
+        "extractor_id": EXTRACTOR_ID,
+        "extractor_version": PINNED_PYPDF_VERSION,
+        "source_content_sha256": extraction.source_sha256,
+        "unidata_version": unicodedata.unidata_version,
+        "normalizer_version": NORMALIZER_VERSION,
+        "pages": pages,
+    }
+    if source_uri is not None:
+        metadata["source_uri"] = source_uri
     return Artifact(
         artifact_id=artifact_id,
         run_id=run_id,
@@ -244,12 +262,5 @@ def build_extracted_text_artifact(
         producer=_COMPONENT_ID,
         producer_kind=ProducerKind.SYSTEM,
         created_at=created_at,
-        metadata={
-            "extractor_id": EXTRACTOR_ID,
-            "extractor_version": PINNED_PYPDF_VERSION,
-            "source_content_sha256": extraction.source_sha256,
-            "unidata_version": unicodedata.unidata_version,
-            "normalizer_version": NORMALIZER_VERSION,
-            "pages": pages,
-        },
+        metadata=metadata,
     )

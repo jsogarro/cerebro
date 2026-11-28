@@ -15,8 +15,12 @@ import httpx
 
 PUBMED_HOST: Final[str] = "eutils.ncbi.nlm.nih.gov"
 ARXIV_HOST: Final[str] = "export.arxiv.org"
+ARXIV_PDF_HOST: Final[str] = "arxiv.org"
+PMC_HOST: Final[str] = "pmc.ncbi.nlm.nih.gov"
 SEMANTIC_SCHOLAR_HOST: Final[str] = "api.semanticscholar.org"
 CROSSREF_HOST: Final[str] = "api.crossref.org"
+DOI_HOST: Final[str] = "doi.org"
+OPENALEX_HOST: Final[str] = "api.openalex.org"
 
 ACADEMIC_SEARCH_DATABASE_HOSTS: Final[Mapping[str, str]] = MappingProxyType(
     {
@@ -29,11 +33,26 @@ ACADEMIC_SEARCH_OUTBOUND_HOSTS: Final[tuple[str, ...]] = tuple(
     sorted(ACADEMIC_SEARCH_DATABASE_HOSTS.values())
 )
 CITATION_OUTBOUND_HOSTS: Final[tuple[str, ...]] = (CROSSREF_HOST,)
+SOURCE_FETCH_OUTBOUND_HOSTS: Final[tuple[str, ...]] = tuple(
+    sorted(
+        {
+            ARXIV_PDF_HOST,
+            ARXIV_HOST,
+            PUBMED_HOST,
+            PMC_HOST,
+            SEMANTIC_SCHOLAR_HOST,
+            CROSSREF_HOST,
+            DOI_HOST,
+            OPENALEX_HOST,
+        }
+    )
+)
 
 OUTBOUND_TOOL_HOSTS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
     {
         "mcp.academic_search": ACADEMIC_SEARCH_OUTBOUND_HOSTS,
         "mcp.format_citations": CITATION_OUTBOUND_HOSTS,
+        "source.fetch": SOURCE_FETCH_OUTBOUND_HOSTS,
     }
 )
 """Pinned outbound host sets for tools classified as ``EXTERNAL_READ``."""
@@ -124,11 +143,16 @@ __all__ = [
     "ACADEMIC_SEARCH_DATABASE_HOSTS",
     "ACADEMIC_SEARCH_OUTBOUND_HOSTS",
     "ARXIV_HOST",
+    "ARXIV_PDF_HOST",
     "CITATION_OUTBOUND_HOSTS",
     "CROSSREF_HOST",
+    "DOI_HOST",
+    "OPENALEX_HOST",
     "OUTBOUND_TOOL_HOSTS",
+    "PMC_HOST",
     "PUBMED_HOST",
     "SEMANTIC_SCHOLAR_HOST",
+    "SOURCE_FETCH_OUTBOUND_HOSTS",
     "OutboundHostNotAllowedError",
     "checked_get",
     "require_allowed_outbound_host",

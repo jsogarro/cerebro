@@ -88,6 +88,7 @@ class ToolCallContext:
     tool_invocation_id: str
     resolve_secret: Callable[[SecretRef], str]
     allowed_hosts: tuple[str, ...] = ()
+    grant_allowed_hosts: tuple[str, ...] = ()
 
 
 ToolHandler = Callable[[Any, ToolCallContext], Awaitable[Mapping[str, Any]]]

@@ -51,7 +51,10 @@ from src.agents.integrations.mcp_tool_specs import (
     TOOL_ACADEMIC_SEARCH,
     TOOL_ANALYZE_STATISTICS,
     TOOL_BUILD_KNOWLEDGE_GRAPH,
+    TOOL_DATETIME_INFO,
     TOOL_FORMAT_CITATIONS,
+    TOOL_SOURCE_FETCH,
+    TOOL_UNIT_CONVERSION,
     ResearchToolSet,
     build_specs,
 )
@@ -63,6 +66,9 @@ from src.agents.tools.mediation import (
     plain,
     self_issued_grant,
 )
+from src.core.acquisition.fetch_tool import SourceFetcher
+from src.core.acquisition.snapshots import SnapshotStore
+from src.core.acquisition.sources import SourceType
 from src.core.budget import BudgetLedger
 from src.core.contracts.capabilities import CapabilityGrant
 from src.core.contracts.provenance import ToolInvocation
@@ -130,6 +136,8 @@ class MCPIntegration:
         grants: Sequence[CapabilityGrant] | None = None,
         evidence_recorder: EvidenceRecorder | None = None,
         budget: BudgetLedger | None = None,
+        snapshot_store: SnapshotStore | None = None,
+        source_fetcher: SourceFetcher | None = None,
     ):
         """Initialize MCP integration.
 
@@ -174,6 +182,8 @@ class MCPIntegration:
             timeout_seconds=float(
                 self.config.get("tool_timeout_seconds", DEFAULT_MCP_TIMEOUT_SECONDS)
             ),
+            snapshot_store=snapshot_store,
+            source_fetcher=source_fetcher,
         ):
             self._boundary.register(spec)
 
@@ -393,6 +403,100 @@ class MCPIntegration:
             empty={"graph": {}, "entities": [], "relationships": []},
         )
 
+    async def fetch_source(
+        self,
+        source_uri: str,
+        source_type: SourceType | str = SourceType.ACADEMIC_PAPER,
+        *,
+        identity: ToolCallIdentity | None = None,
+        input_trust: TrustClassification = DEFAULT_MCP_INPUT_TRUST,
+    ) -> dict[str, Any]:
+        """Fetch an allowlisted external source through the SSRF-hardened boundary."""
+
+        resolved_type = (
+            source_type.value if isinstance(source_type, SourceType) else source_type
+        )
+        outcome, call_identity = await self._invoke(
+            TOOL_SOURCE_FETCH,
+            {"source_uri": source_uri, "source_type": resolved_type},
+            identity=identity,
+            input_trust=input_trust,
+        )
+        if outcome.succeeded:
+            return self._succeeded(outcome, call_identity)
+        if outcome.status is ToolOutcomeStatus.IN_PROGRESS:
+            return self._in_progress(outcome, call_identity, empty={})
+        return self._degraded(
+            outcome,
+            call_identity,
+            fallback=dict,
+            empty={},
+        )
+
+    async def get_datetime_info(
+        self,
+        operation: str,
+        *,
+        date_iso: str | None = None,
+        days: int | None = None,
+        other_date_iso: str | None = None,
+        identity: ToolCallIdentity | None = None,
+        input_trust: TrustClassification = DEFAULT_MCP_INPUT_TRUST,
+    ) -> dict[str, Any]:
+        """Run UTC datetime queries and arithmetic through the tool boundary."""
+
+        outcome, call_identity = await self._invoke(
+            TOOL_DATETIME_INFO,
+            {
+                "operation": operation,
+                "date_iso": date_iso,
+                "days": days,
+                "other_date_iso": other_date_iso,
+            },
+            identity=identity,
+            input_trust=input_trust,
+        )
+        if outcome.succeeded:
+            return self._succeeded(outcome, call_identity)
+        if outcome.status is ToolOutcomeStatus.IN_PROGRESS:
+            return self._in_progress(
+                outcome, call_identity, empty={"operation": operation}
+            )
+        return self._degraded(
+            outcome,
+            call_identity,
+            fallback=lambda: {"operation": operation},
+            empty={"operation": operation},
+        )
+
+    async def convert_units(
+        self,
+        value: float,
+        from_unit: str,
+        to_unit: str,
+        *,
+        identity: ToolCallIdentity | None = None,
+        input_trust: TrustClassification = DEFAULT_MCP_INPUT_TRUST,
+    ) -> dict[str, Any]:
+        """Convert between physical or data units through the tool boundary."""
+
+        outcome, call_identity = await self._invoke(
+            TOOL_UNIT_CONVERSION,
+            {"value": value, "from_unit": from_unit, "to_unit": to_unit},
+            identity=identity,
+            input_trust=input_trust,
+        )
+        if outcome.succeeded:
+            return self._succeeded(outcome, call_identity)
+        if outcome.status is ToolOutcomeStatus.IN_PROGRESS:
+            return self._in_progress(outcome, call_identity, empty={})
+        return self._degraded(
+            outcome,
+            call_identity,
+            fallback=dict,
+            empty={},
+        )
+
     async def get_tool_status(self) -> dict[str, Any]:
         """Report what the integration can currently reach."""
 
@@ -431,6 +535,9 @@ class MCPIntegration:
                 TOOL_FORMAT_CITATIONS,
                 TOOL_ANALYZE_STATISTICS,
                 TOOL_BUILD_KNOWLEDGE_GRAPH,
+                TOOL_SOURCE_FETCH,
+                TOOL_DATETIME_INFO,
+                TOOL_UNIT_CONVERSION,
             ],
         }
 
