@@ -15,12 +15,12 @@ so a child row can never disagree with the run that owns it.
 
 import uuid
 from collections.abc import Mapping, Sequence
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any, TypeVar
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.contracts import Attempt, Run, Task
@@ -48,6 +48,20 @@ from src.repositories.tenant_scope import (
 OrganizationId = uuid.UUID | str | None
 
 _TERMINAL_RUN_VALUES = [status.value for status in TERMINAL_RUN_STATUSES]
+_ACTIVE_RUN_VALUES = tuple(
+    status.value for status in RunStatus if status not in TERMINAL_RUN_STATUSES
+)
+
+RUN_CONCURRENCY_CAP_EXCEEDED = "run_concurrency_cap_exceeded"
+RUN_DAILY_CAP_EXCEEDED = "run_daily_cap_exceeded"
+
+
+class RunCapExceededError(RuntimeError):
+    """An organization's concurrent or daily run admission cap was exceeded."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class StaleFenceError(RuntimeError):
@@ -131,6 +145,53 @@ class RunLifecycleRepository:
         await self.session.flush()
         await self.session.refresh(row)
         return row
+
+    async def enforce_admission_caps(
+        self,
+        organization_id: OrganizationId,
+        *,
+        max_concurrent_per_org: int,
+        max_daily_per_org: int,
+        now: datetime | None = None,
+    ) -> None:
+        """Refuse admission when the org exceeds its concurrent or 24h run cap.
+
+        Must run after ``create_run`` has flushed the caller's row so a same-key
+        duplicate hits the unique constraint instead of being refused as over
+        cap; comparisons therefore use ``>``. On PostgreSQL a transaction-scoped
+        advisory lock serializes distinct admissions for the same organization.
+        """
+        normalized_organization_id = normalize_organization_id(organization_id)
+        effective_now = now if now is not None else datetime.now(UTC)
+        window_start = effective_now - timedelta(hours=24)
+
+        if self.session.get_bind().dialect.name == "postgresql":
+            await self.session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                {"key": f"run-admission:{normalized_organization_id}"},
+            )
+
+        active_count, daily_count = (
+            await self.session.execute(
+                select(
+                    func.count().filter(AgentRun.status.in_(_ACTIVE_RUN_VALUES)),
+                    func.count().filter(AgentRun.created_at >= window_start),
+                ).where(AgentRun.organization_id == normalized_organization_id)
+            )
+        ).one()
+
+        if active_count > max_concurrent_per_org:
+            raise RunCapExceededError(
+                RUN_CONCURRENCY_CAP_EXCEEDED,
+                f"organization {normalized_organization_id} exceeded concurrent "
+                f"run cap ({max_concurrent_per_org})",
+            )
+        if daily_count > max_daily_per_org:
+            raise RunCapExceededError(
+                RUN_DAILY_CAP_EXCEEDED,
+                f"organization {normalized_organization_id} exceeded daily "
+                f"run cap ({max_daily_per_org})",
+            )
 
     async def record_run_transition(
         self,
@@ -713,7 +774,10 @@ class ResearchRunJournalOwner:
 
 
 __all__ = [
+    "RUN_CONCURRENCY_CAP_EXCEEDED",
+    "RUN_DAILY_CAP_EXCEEDED",
     "ResearchRunJournalOwner",
+    "RunCapExceededError",
     "RunLifecycleRepository",
     "StaleFenceError",
 ]

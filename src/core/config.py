@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     TASK_TIMEOUT_SECONDS: int = 300
     MAX_PARALLEL_WORKERS: int = 5
 
+    # Per-organization run admission caps
+    RUN_MAX_CONCURRENT_PER_ORG: int = 5
+    RUN_MAX_DAILY_PER_ORG: int = 100
+
     # MCP Configuration
     MCP_SERVER_ENABLED: bool = False
     MCP_TOOL_PATH_ENABLED: bool = True

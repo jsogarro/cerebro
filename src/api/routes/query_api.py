@@ -35,6 +35,7 @@ from ...core.pii_redactor import redact_pii
 from ...middleware.tenant_context import TenantContext, get_tenant_context
 from ...models.execution_authority import ExecutionAuthorityReference
 from ...models.research_project import ResearchDepth, ResearchQuery
+from ...repositories.run_lifecycle_repository import RunCapExceededError
 from ..services.direct_execution_service import ResumeUnsupportedError
 from ..services.execution_authority_resolver import ExecutionAuthorityError
 from ..services.masr_routing_service import MASRRoutingService
@@ -295,6 +296,11 @@ async def intelligent_research_query(
     except ExecutionAuthorityError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": exc.code},
+        ) from exc
+    except RunCapExceededError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={"code": exc.code},
         ) from exc
     except Exception as e:

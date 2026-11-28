@@ -44,6 +44,7 @@ from src.core.budget import (
     BudgetExceededError,
     BudgetLedger,
 )
+from src.core.config import settings
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 from src.core.observability import (
     run_cancellation_delay_seconds,
@@ -51,6 +52,7 @@ from src.core.observability import (
     run_reconciliation_failures_total,
 )
 from src.core.telemetry import count_tokens, telemetry_enabled
+from src.middleware.tenant_context import set_postgres_tenant_context
 from src.models.db.run_event import EVENT_ENVELOPE_VERSION
 from src.repositories.artifact_repository import ArtifactRepository
 from src.repositories.capability_repository import CapabilityRepository
@@ -70,6 +72,7 @@ from src.repositories.run_config_snapshot_repository import (
 from src.repositories.run_event_repository import RunEventRepository
 from src.repositories.run_lifecycle_repository import (
     ResearchRunJournalOwner,
+    RunCapExceededError,
     RunLifecycleRepository,
     StaleFenceError,
 )
@@ -337,6 +340,13 @@ class _PendingTerminalOutcome:
     # Monotonic instant after which this outcome is given up on, so each one
     # has its own retry window however late it was parked.
     expires_at: float
+
+
+async def _scope_postgres_session(session: Any, organization_id: str | None) -> None:
+    """Bind transaction-local RLS tenant context when running on PostgreSQL."""
+    if organization_id is None or not hasattr(session, "get_bind"):
+        return
+    await set_postgres_tenant_context(session, organization_id)
 
 
 def _discard_unretrieved_admission_error(future: "asyncio.Future[str]") -> None:
@@ -665,6 +675,7 @@ class DirectExecutionService:
 
         try:
             async with self.session_factory() as session:
+                await _scope_postgres_session(session, run.tenant_id)
                 if execution_status._fencing_token is not None:
                     # A checkpoint carries the run's output, so a worker that
                     # lost its lease must not be able to publish it here.
@@ -877,9 +888,16 @@ class DirectExecutionService:
 
             async with self.session_factory() as session:
                 try:
+                    await _scope_postgres_session(session, binding.run.tenant_id)
                     repo = RunLifecycleRepository(session)
                     await repo.create_run(
                         binding.run, organization_id=binding.run.tenant_id
+                    )
+                    await repo.enforce_admission_caps(
+                        binding.run.tenant_id,
+                        max_concurrent_per_org=settings.RUN_MAX_CONCURRENT_PER_ORG,
+                        max_daily_per_org=settings.RUN_MAX_DAILY_PER_ORG,
+                        now=now,
                     )
                     await repo.record_run_transition(
                         queued_run, organization_id=binding.run.tenant_id
@@ -979,6 +997,8 @@ class DirectExecutionService:
             raise RunAdmissionError(
                 f"run {binding.run.run_id!r} could not be admitted durably"
             ) from exc
+        except RunCapExceededError:
+            raise
         except Exception as exc:
             logger.warning(
                 "run_admission_persistence_failed",
@@ -1560,6 +1580,7 @@ class DirectExecutionService:
             return
         try:
             async with self.session_factory() as session:
+                await _scope_postgres_session(session, execution_status.organization_id)
                 await RunLifecycleRepository(session).renew_lease(
                     execution_status.run_id,
                     owner=self.owner_instance_id,
@@ -1595,6 +1616,7 @@ class DirectExecutionService:
                 continue
             try:
                 async with self.session_factory() as session:
+                    await _scope_postgres_session(session, run.tenant_id)
                     await RunLifecycleRepository(session).release_lease(
                         run.run_id, owner=self.owner_instance_id, fencing_token=token
                     )
@@ -1628,6 +1650,9 @@ class DirectExecutionService:
             refused = False
             try:
                 async with self.session_factory() as session:
+                    await _scope_postgres_session(
+                        session, execution_status.organization_id
+                    )
                     repo = RunLifecycleRepository(session)
                     if sent_at - last_renewed >= self.lease_renew_seconds:
                         refused = not await repo.renew_lease(
@@ -2004,6 +2029,7 @@ class DirectExecutionService:
             try:
                 async with self.session_factory() as session:
                     try:
+                        await _scope_postgres_session(session, run.tenant_id)
                         if await self._terminal_transition_already_committed(
                             session, transition
                         ):
@@ -2793,6 +2819,7 @@ class DirectExecutionService:
             return None
         try:
             async with self.session_factory() as session:
+                await _scope_postgres_session(session, organization_id)
                 lifecycle_repo = RunLifecycleRepository(session)
                 run_row = await lifecycle_repo.get_run(run_id)
                 if run_row is None:
