@@ -52,7 +52,7 @@ export async function installRunDetailContractApi(
       return;
     }
 
-    const match = path.match(/^\/runs\/([^/]+)(?:\/(tasks|events|evidence|artifacts|evaluations))?$/);
+    const match = path.match(/^\/runs\/([^/]+)(?:\/(tasks|event-history|evidence|artifacts|evaluations))?$/);
     if (!match) {
       await json(route, { detail: `Unexpected detail fixture request: ${path}` }, 500);
       return;
@@ -116,7 +116,7 @@ export async function installRunDetailContractApi(
       });
       return;
     }
-    if (resource === 'events') {
+    if (resource === 'event-history') {
       await json(route, {
         items:
           effectiveScenario === 'partial'

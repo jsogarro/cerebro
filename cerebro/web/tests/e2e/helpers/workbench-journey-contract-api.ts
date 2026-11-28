@@ -78,7 +78,7 @@ export async function installWorkbenchJourneyContractApi(page: Page) {
     }
 
     const resourceMatch = path.match(
-      new RegExp(`^/runs/${runId}/(tasks|events|evidence|artifacts|evaluations)$`),
+      new RegExp(`^/runs/${runId}/(tasks|event-history|evidence|artifacts|evaluations)$`),
     );
     if (request.method() === 'GET' && resourceMatch) {
       const resource = resourceMatch[1];
@@ -91,7 +91,7 @@ export async function installWorkbenchJourneyContractApi(page: Page) {
       const items =
         resource === 'tasks'
           ? runDetailContractFixtures.tasks.map(withRunId)
-          : resource === 'events'
+          : resource === 'event-history'
             ? runDetailContractFixtures.events.map(withRunId)
             : resource === 'evidence'
               ? runDetailContractFixtures.evidence.map(withRunId)

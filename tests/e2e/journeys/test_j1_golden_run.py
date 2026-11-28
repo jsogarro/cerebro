@@ -118,16 +118,32 @@ async def test_run_evidence_lists_stored_evidence_metadata(client, db, new_accou
     assert body["next_cursor"] is None
 
 
-@_missing(
-    "P08",
-    "GET /api/v1/runs/{run_id} missing (P05 tasks and P13 verifier rounds follow)",
-)
-async def test_run_detail_shows_progress_verifier_rounds_and_evidence(
-    client, new_account
+async def test_run_detail_routes_serve_tasks_and_stored_evidence(
+    client, db, new_account
 ):
     alice = await new_account("alice")
-    await require_operation(client, alice, "GET", "/api/v1/runs/{run_id}")
-    pytest.fail("run detail landed: assert tasks, verifier rounds and stored evidence")
+    run_id, evidence_id = await seed_run_with_evidence(db, alice.org_id)
+
+    run = await client.get(f"/api/v1/runs/{run_id}", headers=alice.headers)
+    assert run.status_code == 200, run.text
+    tasks = await client.get(f"/api/v1/runs/{run_id}/tasks", headers=alice.headers)
+    assert [t["status"] for t in tasks.json()["items"]] == ["succeeded"]
+    evidence = await client.get(
+        f"/api/v1/runs/{run_id}/evidence", headers=alice.headers
+    )
+    assert [e["evidence_id"] for e in evidence.json()["items"]] == [evidence_id]
+
+
+@_missing("P13", "verifier rounds are not recorded, so run detail cannot show them")
+async def test_run_detail_shows_verifier_rounds(client, db, new_account):
+    alice = await new_account("alice")
+    run_id, _ = await seed_run_with_evidence(db, alice.org_id)
+    tasks = (
+        await client.get(f"/api/v1/runs/{run_id}/tasks", headers=alice.headers)
+    ).json()["items"]
+    assert any(task["task_type"] == "verifier_round" for task in tasks), [
+        task["task_type"] for task in tasks
+    ]
 
 
 @_missing("P06", "no ClaimSupport schema is served, so claim verdicts cannot be read")

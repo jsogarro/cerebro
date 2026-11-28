@@ -830,7 +830,7 @@ async function fetchRunCollection<T>(
 export const fetchRunTasks = (runId: string, signal?: AbortSignal) =>
   fetchRunCollection(runId, 'tasks', adaptTaskCollection, signal);
 export const fetchRunEvents = (runId: string, signal?: AbortSignal) =>
-  fetchRunCollection(runId, 'events', adaptEventCollection, signal);
+  fetchRunCollection(runId, 'event-history', adaptEventCollection, signal);
 export const fetchRunEvidence = (runId: string, signal?: AbortSignal) =>
   fetchRunCollection(runId, 'evidence', adaptEvidenceCollection, signal);
 export const fetchRunArtifacts = (runId: string, signal?: AbortSignal) =>
