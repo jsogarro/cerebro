@@ -25,6 +25,7 @@ from src.api.services.direct_execution_service import DirectExecutionService
 from src.api.services.execution_authority_resolver import (
     PersistedExecutionAuthorityResolver,
 )
+from src.core.capabilities.issuer import OUTBOUND_TOOL_HOSTS
 from src.core.config import Settings
 from src.core.contracts import (
     ExecutionBudget,
@@ -178,19 +179,19 @@ def build_trial_authority(
     The deadline starts now, and a tool-granted run is admitted only while
     ``now + grant TTL`` still fits it, i.e. within the 60 s margin.
     """
-    from src.core.capabilities.issuer import OUTBOUND_TOOL_HOSTS
-
     if domain not in DOMAIN_WORKERS:
         raise LiveEnvironmentError(f"unknown evaluation domain {domain!r}")
-    if allowed_outbound_hosts is None:
-        resolved_hosts: list[str] = []
-        for tool_name in tool_grants:
-            for host in OUTBOUND_TOOL_HOSTS.get(tool_name, ()):
-                if host not in resolved_hosts:
-                    resolved_hosts.append(host)
-        effective_outbound_hosts = tuple(resolved_hosts)
-    else:
-        effective_outbound_hosts = allowed_outbound_hosts
+    effective_outbound_hosts = (
+        tuple(
+            dict.fromkeys(
+                host
+                for tool_name in tool_grants
+                for host in OUTBOUND_TOOL_HOSTS.get(tool_name, ())
+            )
+        )
+        if allowed_outbound_hosts is None
+        else allowed_outbound_hosts
+    )
     now = datetime.now(UTC)
     worker_types = DOMAIN_WORKERS[domain]
     budget = ExecutionBudget(

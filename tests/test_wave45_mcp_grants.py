@@ -89,6 +89,7 @@ async def test_plan_worker_forwards_persisted_grants(
         output_schema={},
         permission_scopes=(),
         tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
+        allowed_outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_ACADEMIC_SEARCH],
     )
     task = AgentTask(
         "task-1",
@@ -156,6 +157,7 @@ async def test_plan_worker_hands_the_run_budget_to_the_mcp_path(
         output_schema={},
         permission_scopes=(),
         tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
+        allowed_outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_ACADEMIC_SEARCH],
     )
     task = AgentTask(
         "task-1",
@@ -228,6 +230,7 @@ async def test_plan_worker_filters_task_grants_by_worker_allowlist(
         output_schema={},
         permission_scopes=(),
         tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
+        allowed_outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_ACADEMIC_SEARCH],
     )
 
     await bridge._execute_plan_worker(worker_without_tool, task)

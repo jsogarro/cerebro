@@ -159,6 +159,7 @@ async def test_a_plan_worker_receives_a_live_mcp_integration(
         output_schema={},
         permission_scopes=(),
         tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
+        allowed_outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_ACADEMIC_SEARCH],
     )
     task = AgentTask(
         id="worker-task",

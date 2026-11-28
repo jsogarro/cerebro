@@ -1,10 +1,9 @@
 """Issue immutable capability grants from admitted execution authority."""
 
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from datetime import datetime, timedelta
-from types import MappingProxyType
-from typing import Final, Protocol
+from typing import Protocol
 
 from src.core.contracts.capabilities import CapabilityGrant, SensitivityClass
 from src.core.contracts.execution_plan import (
@@ -13,8 +12,7 @@ from src.core.contracts.execution_plan import (
     WorkerAssignment,
 )
 from src.core.contracts.provenance import TrustClassification
-from src.mcp.tools.academic_search_tool import ACADEMIC_SEARCH_OUTBOUND_HOSTS
-from src.mcp.tools.citation_tool import CITATION_OUTBOUND_HOSTS
+from src.core.tools.outbound import OUTBOUND_TOOL_HOSTS
 
 CAPABILITY_GRANTS_CONTEXT_KEY = "capability_grants"
 """Agent-task context key reserved for the admitted grant contracts."""
@@ -24,14 +22,6 @@ CAPABILITY_SCOPE_PREFIX = "plan-issued:"
 
 DEFAULT_TOOL_VERSION = "1.0.0"
 """The version pinned for tools whose plan declaration has no version field."""
-
-OUTBOUND_TOOL_HOSTS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
-    {
-        "mcp.academic_search": ACADEMIC_SEARCH_OUTBOUND_HOSTS,
-        "mcp.format_citations": CITATION_OUTBOUND_HOSTS,
-    }
-)
-"""Pinned outbound host sets for tools classified as ``EXTERNAL_READ``."""
 
 
 class _AdmittedAuthority(Protocol):

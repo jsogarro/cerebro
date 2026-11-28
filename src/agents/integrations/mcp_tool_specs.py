@@ -53,12 +53,12 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from src.core.contracts.capabilities import SensitivityClass
 from src.core.tools import ToolCallContext, ToolSpec
-from src.mcp.academic_filters import AcademicSearchFilters
-from src.mcp.tools.academic_search_tool import (
+from src.core.tools.outbound import (
+    ACADEMIC_SEARCH_DATABASE_HOSTS,
     ACADEMIC_SEARCH_OUTBOUND_HOSTS,
-    AcademicSearchTool,
+    CITATION_OUTBOUND_HOSTS,
 )
-from src.mcp.tools.citation_tool import CITATION_OUTBOUND_HOSTS
+from src.mcp.academic_filters import AcademicSearchFilters
 from src.security.content_sanitizer import ContentSanitizer
 
 TOOL_ACADEMIC_SEARCH: Final[str] = "mcp.academic_search"
@@ -299,7 +299,17 @@ def _require_success(result: Any, *, operation: str) -> dict[str, Any]:
 
 def _academic_search_target_hosts(params: BaseModel) -> tuple[str, ...]:
     assert isinstance(params, AcademicSearchInput)
-    return AcademicSearchTool.target_hosts_for_databases(params.databases)
+    if not params.databases:
+        return ACADEMIC_SEARCH_OUTBOUND_HOSTS
+    return tuple(
+        sorted(
+            {
+                ACADEMIC_SEARCH_DATABASE_HOSTS[db]
+                for db in params.databases
+                if db in ACADEMIC_SEARCH_DATABASE_HOSTS
+            }
+        )
+    )
 
 
 def build_specs(
@@ -451,41 +461,43 @@ def build_specs(
         ToolSpec(
             name=TOOL_ACADEMIC_SEARCH,
             version=TOOL_VERSION,
-            sensitivity=MCP_OUTBOUND_SENSITIVITY,
+            sensitivity=MCP_TOOL_SENSITIVITIES[TOOL_ACADEMIC_SEARCH],
             input_model=AcademicSearchInput,
             output_model=AcademicSearchOutput,
             timeout_seconds=timeout_seconds,
             handler=academic_search,
-            outbound_hosts=ACADEMIC_SEARCH_OUTBOUND_HOSTS,
+            outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_ACADEMIC_SEARCH],
             resolve_target_hosts=_academic_search_target_hosts,
         ),
         ToolSpec(
             name=TOOL_FORMAT_CITATIONS,
             version=TOOL_VERSION,
-            sensitivity=MCP_OUTBOUND_SENSITIVITY,
+            sensitivity=MCP_TOOL_SENSITIVITIES[TOOL_FORMAT_CITATIONS],
             input_model=FormatCitationsInput,
             output_model=FormatCitationsOutput,
             timeout_seconds=timeout_seconds,
             handler=format_citations,
-            outbound_hosts=CITATION_OUTBOUND_HOSTS,
+            outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_FORMAT_CITATIONS],
         ),
         ToolSpec(
             name=TOOL_ANALYZE_STATISTICS,
             version=TOOL_VERSION,
-            sensitivity=MCP_LOCAL_SENSITIVITY,
+            sensitivity=MCP_TOOL_SENSITIVITIES[TOOL_ANALYZE_STATISTICS],
             input_model=AnalyzeStatisticsInput,
             output_model=AnalyzeStatisticsOutput,
             timeout_seconds=timeout_seconds,
             handler=analyze_statistics,
+            outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_ANALYZE_STATISTICS],
         ),
         ToolSpec(
             name=TOOL_BUILD_KNOWLEDGE_GRAPH,
             version=TOOL_VERSION,
-            sensitivity=MCP_LOCAL_SENSITIVITY,
+            sensitivity=MCP_TOOL_SENSITIVITIES[TOOL_BUILD_KNOWLEDGE_GRAPH],
             input_model=BuildKnowledgeGraphInput,
             output_model=BuildKnowledgeGraphOutput,
             timeout_seconds=timeout_seconds,
             handler=build_knowledge_graph,
+            outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_BUILD_KNOWLEDGE_GRAPH],
         ),
     )
 

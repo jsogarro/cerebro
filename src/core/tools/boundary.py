@@ -730,7 +730,7 @@ class ToolBoundary:
                 validated_input=prepared.validated_input,
                 declared_output_trust=output_trust,
                 decision=decision,
-                allowed_hosts=grant.allowed_hosts,
+                allowed_hosts=target_hosts,
                 cancellation=cancellation,
                 lease_monitor=lease_monitor,
             )

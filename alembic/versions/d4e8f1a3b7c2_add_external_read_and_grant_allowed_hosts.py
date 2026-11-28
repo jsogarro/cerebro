@@ -7,6 +7,10 @@ Create Date: 2026-11-28
 Stores per-grant allowed outbound hosts on ``agent_capability_grants`` and
 extends ``ck_agent_capability_grant_sensitivity`` with ``external_read`` so
 outbound research tools enforce per-authority host allowlists across restarts.
+
+Downgrade precondition (fail-closed): recreating the narrower CHECK constraint
+fails if any row still carries ``sensitivity = 'external_read'``. Quiesce runs
+and remove or migrate any ``external_read`` grant rows before downgrading.
 """
 
 from collections.abc import Sequence

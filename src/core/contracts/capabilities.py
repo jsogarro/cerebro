@@ -46,24 +46,28 @@ from .base import ContentSha256, ContractId, ContractModel, Version, require_uni
 from .provenance import TrustClassification
 from .trust import at_least_as_trusted
 
-_HOST_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_HOST_LABEL_RE = re.compile(r"\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 
 
 def normalize_outbound_host(host: str) -> str:
     """Validate and lowercase a single pinned DNS hostname.
 
-    Rejects schemes, paths, ports, wildcards, whitespace, and malformed labels
-    so host allowlists cannot be widened by pattern syntax or URL confusion.
+    Rejects schemes, paths, ports, wildcards, whitespace, newlines, IPv4
+    literals, single-label hostnames (such as ``localhost``), and malformed
+    labels so host allowlists cannot be widened by pattern syntax or URL
+    confusion.
     """
     if not isinstance(host, str) or not host or host != host.strip():
         raise ValueError(f"invalid outbound host {host!r}")
     normalized = host.lower()
-    if len(normalized) > 253 or any(
-        ch in normalized for ch in (":", "/", "?", "#", "@", "*", " ")
-    ):
+    if len(normalized) > 253:
         raise ValueError(f"invalid outbound host {host!r}")
     labels = normalized.split(".")
-    if any(not _HOST_LABEL_RE.match(label) for label in labels):
+    if (
+        len(labels) < 2
+        or labels[-1].isdigit()
+        or any(not _HOST_LABEL_RE.match(label) for label in labels)
+    ):
         raise ValueError(f"invalid outbound host {host!r}")
     return normalized
 
@@ -72,6 +76,8 @@ def normalize_outbound_hosts(
     hosts: Sequence[str], *, field_name: str
 ) -> tuple[str, ...]:
     """Validate, lowercase, and check uniqueness for a sequence of hostnames."""
+    if isinstance(hosts, str):
+        raise ValueError(f"{field_name} must be a sequence of hostnames, not a string")
     normalized = tuple(normalize_outbound_host(host) for host in hosts)
     require_unique(normalized, field_name=field_name)
     return normalized
@@ -155,23 +161,25 @@ class CapabilityRequest(ContractModel):
 
         ``requested_at`` is excluded so that a retry of the same request keeps
         its approval; every field that could change the decision is included,
-        so a *different* request never inherits one.
+        so a *different* request never inherits one. ``target_hosts`` is
+        appended only when non-empty so existing non-outbound fingerprints
+        remain byte-for-byte compatible.
         """
 
-        material = "\x1f".join(
-            (
-                self.run_id,
-                self.task_id,
-                self.attempt_id,
-                self.tool_name,
-                self.tool_version,
-                self.capability_scope,
-                self.sensitivity.value,
-                self.input_trust.value,
-                self.input_sha256,
-                ",".join(sorted(self.target_hosts)),
-            )
-        )
+        parts = [
+            self.run_id,
+            self.task_id,
+            self.attempt_id,
+            self.tool_name,
+            self.tool_version,
+            self.capability_scope,
+            self.sensitivity.value,
+            self.input_trust.value,
+            self.input_sha256,
+        ]
+        if self.target_hosts:
+            parts.append(",".join(sorted(self.target_hosts)))
+        material = "\x1f".join(parts)
         return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -201,6 +209,8 @@ class CapabilityGrant(ContractModel):
         require_unique(self.tool_versions, field_name="tool_versions")
         if self.expires_at <= self.issued_at:
             raise ValueError("expires_at must be after issued_at")
+        if self.sensitivity is SensitivityClass.READ_ONLY and self.allowed_hosts:
+            raise ValueError("a read_only grant cannot declare allowed_hosts")
         if self.sensitivity in APPROVAL_REQUIRED_SENSITIVITIES and (
             not self.requires_approval
         ):

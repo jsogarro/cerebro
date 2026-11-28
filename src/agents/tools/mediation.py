@@ -97,9 +97,11 @@ SELF_ISSUED_SCOPE_PREFIX: Final[str] = "self-issued:"
 
 A naming convention with no enforcement behind it would be exactly the kind of
 thing this wave's non-goal rules out as a security boundary. It is not one:
-:func:`self_issued_grant` is the only producer, it refuses anything above
-``READ_ONLY``, and the prefix exists so an auditor can *find* these calls, not
-so anything downstream can trust them.
+:func:`self_issued_grant` is the only producer, it refuses every sensitivity in
+``APPROVAL_REQUIRED_SENSITIVITIES`` (``EXTERNAL_WRITE``, ``EXFILTRATION``) and
+permits only ``READ_ONLY`` and pinned ``EXTERNAL_READ`` policies for
+non-durable callers. The prefix exists so an auditor can *find* these calls,
+not so anything downstream can trust them.
 """
 
 UNBOUND_RUN_PREFIX: Final[str] = "unbound-"

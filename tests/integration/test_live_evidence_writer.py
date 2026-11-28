@@ -146,6 +146,7 @@ async def _run_worker(
         output_schema={},
         permission_scopes=(),
         tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
+        allowed_outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_ACADEMIC_SEARCH],
     )
     task = AgentTask(
         "task-1",

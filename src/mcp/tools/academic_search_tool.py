@@ -5,58 +5,26 @@ Provides search capabilities across multiple academic databases.
 """
 
 import re
-from collections.abc import Collection, Mapping, Sequence
-from types import MappingProxyType
+from collections.abc import Mapping, Sequence
 from typing import Any, Final
-from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
 import httpx
 from structlog import get_logger
 
+from src.core.tools.outbound import (
+    ACADEMIC_SEARCH_DATABASE_HOSTS,
+    ACADEMIC_SEARCH_OUTBOUND_HOSTS,
+    ARXIV_HOST,
+    PUBMED_HOST,
+    SEMANTIC_SCHOLAR_HOST,
+    OutboundHostNotAllowedError,
+    checked_get,
+    require_allowed_outbound_host,
+)
 from src.mcp.academic_filters import AcademicSearchFilters
 
 logger = get_logger()
-
-PUBMED_HOST: Final[str] = "eutils.ncbi.nlm.nih.gov"
-ARXIV_HOST: Final[str] = "export.arxiv.org"
-SEMANTIC_SCHOLAR_HOST: Final[str] = "api.semanticscholar.org"
-
-ACADEMIC_SEARCH_DATABASE_HOSTS: Final[Mapping[str, str]] = MappingProxyType(
-    {
-        "pubmed": PUBMED_HOST,
-        "arxiv": ARXIV_HOST,
-        "semantic_scholar": SEMANTIC_SCHOLAR_HOST,
-    }
-)
-ACADEMIC_SEARCH_OUTBOUND_HOSTS: Final[tuple[str, ...]] = tuple(
-    sorted(ACADEMIC_SEARCH_DATABASE_HOSTS.values())
-)
-
-
-class OutboundHostNotAllowedError(PermissionError):
-    """Raised when an outbound HTTP call targets an undeclared or unapproved host."""
-
-
-def require_allowed_outbound_host(
-    url: str,
-    *,
-    declared_hosts: Collection[str],
-    allowed_hosts: Collection[str] | None,
-) -> None:
-    """Refuse any request whose host is not both declared by the tool and allowed."""
-    hostname = (urlparse(url).hostname or "").lower()
-    declared = {host.lower() for host in declared_hosts}
-    if not hostname or hostname not in declared:
-        raise OutboundHostNotAllowedError(
-            f"outbound host {hostname!r} is not in the tool's declared host set"
-        )
-    if allowed_hosts is not None:
-        approved = {host.lower() for host in allowed_hosts}
-        if hostname not in approved:
-            raise OutboundHostNotAllowedError(
-                f"outbound host {hostname!r} is not in the authority's allowed hosts"
-            )
 
 
 def _year(value: Any) -> int | None:
@@ -83,16 +51,15 @@ class AcademicSearchTool:
         """Return the sorted pinned outbound hosts for the requested databases."""
         if not databases:
             return cls.OUTBOUND_HOSTS
-        hosts: list[str] = []
-        for db in databases:
-            host = cls.DATABASE_HOSTS.get(db)
-            if host is not None and host not in hosts:
-                hosts.append(host)
-        return tuple(sorted(hosts))
+        return tuple(
+            sorted(
+                {cls.DATABASE_HOSTS[db] for db in databases if db in cls.DATABASE_HOSTS}
+            )
+        )
 
     def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or {}
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.client = httpx.AsyncClient(timeout=30.0, follow_redirects=False)
 
         self.pubmed_base = f"https://{PUBMED_HOST}/entrez/eutils"
         self.arxiv_base = f"https://{ARXIV_HOST}/api/query"
@@ -107,8 +74,7 @@ class AcademicSearchTool:
         if not query:
             return {"success": False, "error": "Query is required"}
 
-        valid_databases = list(self.DATABASE_HOSTS)
-        invalid_dbs = [db for db in databases if db not in valid_databases]
+        invalid_dbs = [db for db in databases if db not in self.DATABASE_HOSTS]
         if invalid_dbs:
             return {"success": False, "error": f"Invalid databases: {invalid_dbs}"}
 
@@ -174,29 +140,19 @@ class AcademicSearchTool:
         *,
         allowed_hosts: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Search PubMed database.
+        """Search PubMed database.
 
         Args:
             query: Search query
             max_results: Maximum results
             filters: Validated search filters
+            allowed_hosts: Authority-approved outbound hosts, or ``None`` for direct calls
 
         Returns:
             List of results
         """
         search_url = f"{self.pubmed_base}/esearch.fcgi"
         summary_url = f"{self.pubmed_base}/esummary.fcgi"
-        require_allowed_outbound_host(
-            search_url,
-            declared_hosts=self.OUTBOUND_HOSTS,
-            allowed_hosts=allowed_hosts,
-        )
-        require_allowed_outbound_host(
-            summary_url,
-            declared_hosts=self.OUTBOUND_HOSTS,
-            allowed_hosts=allowed_hosts,
-        )
         try:
             search_query = query
             if filters.bounded:
@@ -213,7 +169,13 @@ class AcademicSearchTool:
                 "retmax": max_results,
             }
 
-            response = await self.client.get(search_url, params=search_params)
+            response = await checked_get(
+                self.client,
+                search_url,
+                declared_hosts=(PUBMED_HOST,),
+                allowed_hosts=allowed_hosts,
+                params=search_params,
+            )
             if response.status_code != 200:
                 logger.error(f"PubMed search failed: {response.status_code}")
                 return []
@@ -231,7 +193,13 @@ class AcademicSearchTool:
                 "retmode": "json",
             }
 
-            response = await self.client.get(summary_url, params=summary_params)
+            response = await checked_get(
+                self.client,
+                summary_url,
+                declared_hosts=(PUBMED_HOST,),
+                allowed_hosts=allowed_hosts,
+                params=summary_params,
+            )
             if response.status_code != 200:
                 return []
 
@@ -282,22 +250,17 @@ class AcademicSearchTool:
         *,
         allowed_hosts: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Search arXiv database.
+        """Search arXiv database.
 
         Args:
             query: Search query
             max_results: Maximum results
             filters: Validated search filters
+            allowed_hosts: Authority-approved outbound hosts, or ``None`` for direct calls
 
         Returns:
             List of results
         """
-        require_allowed_outbound_host(
-            self.arxiv_base,
-            declared_hosts=self.OUTBOUND_HOSTS,
-            allowed_hosts=allowed_hosts,
-        )
         try:
             search_query = f"all:{query}"
 
@@ -317,7 +280,13 @@ class AcademicSearchTool:
                 "sortOrder": "descending",
             }
 
-            response = await self.client.get(self.arxiv_base, params=params)
+            response = await checked_get(
+                self.client,
+                self.arxiv_base,
+                declared_hosts=(ARXIV_HOST,),
+                allowed_hosts=allowed_hosts,
+                params=params,
+            )
             if response.status_code != 200:
                 logger.error(f"arXiv search failed: {response.status_code}")
                 return []
@@ -399,23 +368,18 @@ class AcademicSearchTool:
         *,
         allowed_hosts: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Search Semantic Scholar database.
+        """Search Semantic Scholar database.
 
         Args:
             query: Search query
             max_results: Maximum results
             filters: Validated search filters
+            allowed_hosts: Authority-approved outbound hosts, or ``None`` for direct calls
 
         Returns:
             List of results
         """
         search_url = f"{self.semantic_scholar_base}/paper/search"
-        require_allowed_outbound_host(
-            search_url,
-            declared_hosts=self.OUTBOUND_HOSTS,
-            allowed_hosts=allowed_hosts,
-        )
         try:
             # Search papers
             params: dict[str, str | int] = {
@@ -433,7 +397,13 @@ class AcademicSearchTool:
                 if filters.year_start == filters.year_end:
                     params["year"] = str(filters.year_start)
 
-            response = await self.client.get(search_url, params=params)
+            response = await checked_get(
+                self.client,
+                search_url,
+                declared_hosts=(SEMANTIC_SCHOLAR_HOST,),
+                allowed_hosts=allowed_hosts,
+                params=params,
+            )
             if response.status_code != 200:
                 logger.error(f"Semantic Scholar search failed: {response.status_code}")
                 return []
@@ -472,3 +442,15 @@ class AcademicSearchTool:
         """Cleanup HTTP client."""
         # Note: We can't use async in __del__, so client cleanup
         # should be handled explicitly in production code
+
+
+__all__ = [
+    "ACADEMIC_SEARCH_DATABASE_HOSTS",
+    "ACADEMIC_SEARCH_OUTBOUND_HOSTS",
+    "ARXIV_HOST",
+    "PUBMED_HOST",
+    "SEMANTIC_SCHOLAR_HOST",
+    "AcademicSearchTool",
+    "OutboundHostNotAllowedError",
+    "require_allowed_outbound_host",
+]

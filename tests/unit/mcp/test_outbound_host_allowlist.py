@@ -821,3 +821,495 @@ class TestMigrationAndOrmParityForExternalReadAndAllowedHosts:
                 assert grant_row.sensitivity == "external_read"
         finally:
             engine.dispose()
+
+
+class TestReviewHardeningFixes:
+    @pytest.mark.asyncio
+    async def test_plan_worker_does_not_receive_sibling_workers_outbound_host_grant(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from unittest.mock import Mock
+
+        import src.ai_brain.integration.masr_supervisor_bridge as bridge_module
+        from src.agents.models import AgentResult, AgentTask
+        from src.ai_brain.integration.masr_supervisor_bridge import (
+            MASRSupervisorBridge,
+        )
+        from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY
+        from src.core.contracts import RoutingEdge
+
+        captured: list[httpx.Request] = []
+        tool = AcademicSearchTool()
+        tool.client = httpx.AsyncClient(transport=_mock_transport(captured))
+
+        worker_a = WorkerAssignment(
+            worker_id="worker-a",
+            worker_type="literature_review",
+            objective="May search arXiv",
+            output_schema={},
+            permission_scopes=("research:read",),
+            tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
+            allowed_outbound_hosts=("export.arxiv.org",),
+        )
+        worker_b = WorkerAssignment(
+            worker_id="worker-b",
+            worker_type="comparative_analysis",
+            objective="Must not inherit Worker A outbound hosts",
+            output_schema={},
+            permission_scopes=("research:read",),
+            tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
+            allowed_outbound_hosts=(),
+        )
+        binding = ExecutionAuthorityBinding.create_for_test(
+            authority_id="auth-2w",
+            authority_version="1",
+            run_id="run-host-1",
+            workflow_definition_id="wf-1",
+            routing_policy_id="rp-1",
+            strategy="parallel",
+            collaboration_mode="parallel",
+            domains=("research",),
+            supervisor_id=None,
+            supervisor_type=None,
+            workers=(worker_a, worker_b),
+            edges=(
+                RoutingEdge(
+                    source_node_id="worker-a",
+                    target_node_id="worker-b",
+                    relation="feeds",
+                ),
+            ),
+            provider_model_policy=ProviderModelPolicy(
+                primary=ProviderModelRoute(provider="openrouter", model="openai/gpt-5"),
+                fallback_mode=FallbackMode.FAIL_CLOSED,
+                fallbacks=(),
+                provider_allowlist=("openrouter",),
+                model_allowlist=("openai/gpt-5",),
+            ),
+            budget=ExecutionBudget(
+                max_cost_usd=Decimal("1.00"),
+                max_total_tokens=10_000,
+                max_tool_invocations=10,
+                max_parallel_tasks=2,
+                max_attempts_per_task=1,
+                task_timeout_seconds=120,
+            ),
+            stop_conditions=("complete",),
+            evaluator_requirements=(),
+            deadline=NOW + timedelta(minutes=10),
+            compiled_at=NOW,
+        )
+        grants = PlanCapabilityIssuer.issue(
+            binding,
+            run_id="run-host-1",
+            task_id="task-host-1",
+            issued_at=datetime.now(UTC) - timedelta(seconds=5),
+        )
+
+        seen_results: list[dict[str, Any]] = []
+
+        class WorkerB:
+            def __init__(self, **kwargs: Any) -> None:
+                self.integration = kwargs["config"]["mcp_integration"]
+
+            async def execute(self, task: AgentTask) -> AgentResult:
+                res = await self.integration.search_academic_sources(
+                    query=CANARY, databases=["arxiv"]
+                )
+                seen_results.append(res)
+                return AgentResult(task.id, "success", res, 1.0, 0.0)
+
+        monkeypatch.setattr(
+            bridge_module,
+            "MCPIntegration",
+            lambda **kwargs: MCPIntegration(
+                mcp_client=ResearchToolSet(academic_search=tool), **kwargs
+            ),
+        )
+        monkeypatch.setattr(bridge_module, "settings", Mock(MCP_TOOL_PATH_ENABLED=True))
+
+        bridge = object.__new__(MASRSupervisorBridge)
+        bridge.component_registry = Mock()
+        bridge.component_registry.resolve.return_value = WorkerB
+        bridge.gemini_service = None
+        bridge.session_factory = None
+        bridge.audit_store = InMemoryToolAuditStore()
+
+        task = AgentTask(
+            "task-host-1",
+            "worker",
+            {},
+            {
+                "run_id": "run-host-1",
+                "task_id": "task-host-1",
+                "attempt_id": "attempt-host-1",
+                "organization_id": "00000000-0000-0000-0000-000000000001",
+                CAPABILITY_GRANTS_CONTEXT_KEY: grants,
+            },
+        )
+        await bridge._execute_plan_worker(worker_b, task)
+
+        assert seen_results[-1]["success"] is False
+        assert seen_results[-1]["tool_outcome"] == "denied"
+        assert captured == []
+
+    def test_normalize_outbound_host_rejects_newline_ipv4_localhost_and_bare_str(
+        self,
+    ) -> None:
+        from src.core.contracts.capabilities import (
+            normalize_outbound_host,
+            normalize_outbound_hosts,
+        )
+
+        for bad in (
+            "foo\n.bar",
+            "export.arxiv.org\n",
+            "169.254.169.254",
+            "127.0.0.1",
+            "localhost",
+            "intranet",
+        ):
+            with pytest.raises(ValueError):
+                normalize_outbound_host(bad)
+
+        with pytest.raises(ValueError):
+            normalize_outbound_hosts("export.arxiv.org", field_name="allowed_hosts")
+
+    def test_require_allowed_outbound_host_rejects_http_port_userinfo_and_bare_str(
+        self,
+    ) -> None:
+        from src.mcp.tools.academic_search_tool import require_allowed_outbound_host
+
+        for bad_url in (
+            "http://api.crossref.org/works/10.1/x",
+            "https://api.crossref.org:8443/works/10.1/x",
+            "https://evil.com@api.crossref.org/works/10.1/x",
+        ):
+            with pytest.raises(PermissionError):
+                require_allowed_outbound_host(
+                    bad_url,
+                    declared_hosts=("api.crossref.org",),
+                    allowed_hosts=("api.crossref.org",),
+                )
+
+        with pytest.raises(TypeError):
+            require_allowed_outbound_host(
+                "https://api.crossref.org/works/10.1/x",
+                declared_hosts="api.crossref.org",  # type: ignore[arg-type]
+                allowed_hosts=("api.crossref.org",),
+            )
+        with pytest.raises(TypeError):
+            require_allowed_outbound_host(
+                "https://api.crossref.org/works/10.1/x",
+                declared_hosts=("api.crossref.org",),
+                allowed_hosts="api.crossref.org",  # type: ignore[arg-type]
+            )
+
+    @pytest.mark.asyncio
+    async def test_tools_do_not_follow_redirects_even_when_client_has_follow_redirects_true(
+        self,
+    ) -> None:
+        assert AcademicSearchTool().client.follow_redirects is False
+        assert CitationTool().client.follow_redirects is False
+
+        captured: list[httpx.Request] = []
+
+        def redirect_handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request)
+            if request.url.host in {"export.arxiv.org", "api.crossref.org"}:
+                return httpx.Response(
+                    302,
+                    headers={"Location": "https://evil.attacker.example/collect"},
+                )
+            return httpx.Response(200, text="leaked")
+
+        academic = AcademicSearchTool()
+        academic.client = httpx.AsyncClient(
+            transport=httpx.MockTransport(redirect_handler),
+            follow_redirects=True,
+        )
+        await academic.execute(
+            query=CANARY,
+            databases=["arxiv"],
+            allowed_hosts=("export.arxiv.org",),
+        )
+        assert [r.url.host for r in captured] == ["export.arxiv.org"]
+
+        captured.clear()
+        citation = CitationTool()
+        citation.client = httpx.AsyncClient(
+            transport=httpx.MockTransport(redirect_handler),
+            follow_redirects=True,
+        )
+        res = await citation.execute(
+            doi="10.1234/redirect",
+            allowed_hosts=("api.crossref.org",),
+        )
+        assert res["success"] is False
+        assert [r.url.host for r in captured] == ["api.crossref.org"]
+
+    @pytest.mark.asyncio
+    async def test_provider_cannot_contact_sibling_providers_declared_host(
+        self,
+    ) -> None:
+        captured: list[httpx.Request] = []
+        tool = AcademicSearchTool()
+        tool.client = httpx.AsyncClient(transport=_mock_transport(captured))
+        tool.pubmed_base = "https://export.arxiv.org/entrez/eutils"
+
+        with pytest.raises(PermissionError):
+            await tool.execute(
+                query=CANARY,
+                databases=["pubmed"],
+                allowed_hosts=AcademicSearchTool.OUTBOUND_HOSTS,
+            )
+        assert captured == []
+
+    def test_capability_request_fingerprint_is_backward_compatible_when_target_hosts_empty(
+        self,
+    ) -> None:
+        import hashlib
+
+        req = CapabilityRequest(
+            run_id="r1",
+            task_id="t1",
+            attempt_id="a1",
+            tool_name="arithmetic",
+            tool_version="1.0.0",
+            capability_scope="scope",
+            sensitivity=SensitivityClass.READ_ONLY,
+            input_trust=TrustClassification.USER_SUPPLIED,
+            input_sha256="a" * 64,
+            requested_at=NOW,
+            target_hosts=(),
+        )
+        legacy_material = "\x1f".join(
+            (
+                "r1",
+                "t1",
+                "a1",
+                "arithmetic",
+                "1.0.0",
+                "scope",
+                "read_only",
+                "user_supplied",
+                "a" * 64,
+            )
+        )
+        expected_legacy = hashlib.sha256(legacy_material.encode("utf-8")).hexdigest()
+        assert req.fingerprint() == expected_legacy
+
+        with_host = CapabilityRequest(
+            run_id="r1",
+            task_id="t1",
+            attempt_id="a1",
+            tool_name="arithmetic",
+            tool_version="1.0.0",
+            capability_scope="scope",
+            sensitivity=SensitivityClass.READ_ONLY,
+            input_trust=TrustClassification.USER_SUPPLIED,
+            input_sha256="a" * 64,
+            requested_at=NOW,
+            target_hosts=("export.arxiv.org",),
+        )
+        assert with_host.fingerprint() != expected_legacy
+
+    @pytest.mark.asyncio
+    async def test_tool_call_context_allowed_hosts_narrowed_to_called_target_hosts(
+        self,
+    ) -> None:
+        from src.agents.integrations.mcp_tool_specs import (
+            AcademicSearchInput,
+            AcademicSearchOutput,
+            _academic_search_target_hosts,
+        )
+        from src.agents.tools.mediation import build_tool_boundary
+
+        seen_allowed: list[tuple[str, ...]] = []
+
+        async def spy_handler(params: Any, ctx: Any) -> dict[str, Any]:
+            seen_allowed.append(ctx.allowed_hosts)
+            return {
+                "sources": [],
+                "total_found": 0,
+                "filters_applied": {},
+                "excluded": {},
+                "databases_searched": list(params.databases),
+                "search_strategy": "spy",
+            }
+
+        boundary = build_tool_boundary()
+        boundary.register(
+            ToolSpec(
+                name=TOOL_ACADEMIC_SEARCH,
+                version=TOOL_VERSION,
+                sensitivity=SensitivityClass.EXTERNAL_READ,
+                input_model=AcademicSearchInput,
+                output_model=AcademicSearchOutput,
+                timeout_seconds=10.0,
+                handler=spy_handler,
+                outbound_hosts=AcademicSearchTool.OUTBOUND_HOSTS,
+                resolve_target_hosts=_academic_search_target_hosts,
+            )
+        )
+        grant = CapabilityGrant(
+            grant_id="g-all",
+            run_id="run-host-1",
+            task_id="task-host-1",
+            capability_scope="plan-issued:mcp.academic_search",
+            tool_name=TOOL_ACADEMIC_SEARCH,
+            tool_versions=(TOOL_VERSION,),
+            sensitivity=SensitivityClass.EXTERNAL_READ,
+            max_input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
+            requires_approval=False,
+            allowed_hosts=AcademicSearchTool.OUTBOUND_HOSTS,
+            issued_at=datetime.now(UTC) - timedelta(minutes=1),
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        )
+
+        outcome = await boundary.invoke(
+            tool_name=TOOL_ACADEMIC_SEARCH,
+            run_id="run-host-1",
+            task_id="task-host-1",
+            attempt_id="attempt-1",
+            organization_id="00000000-0000-0000-0000-000000000001",
+            capability_scope=grant.capability_scope,
+            arguments={"query": "gnn", "databases": ["arxiv"]},
+            input_trust=TrustClassification.USER_SUPPLIED,
+            grants=(grant,),
+        )
+        assert outcome.succeeded
+        assert seen_allowed == [("export.arxiv.org",)]
+
+    def test_read_only_grant_cannot_declare_allowed_hosts(self) -> None:
+        with pytest.raises(ValidationError, match="allowed_hosts"):
+            CapabilityGrant(
+                grant_id="g-ro-hosts",
+                run_id="r1",
+                task_id="t1",
+                capability_scope="scope",
+                tool_name="arithmetic",
+                tool_versions=("1.0.0",),
+                sensitivity=SensitivityClass.READ_ONLY,
+                max_input_trust=TrustClassification.USER_SUPPLIED,
+                requires_approval=False,
+                allowed_hosts=("export.arxiv.org",),
+                issued_at=NOW - timedelta(minutes=1),
+                expires_at=NOW + timedelta(minutes=5),
+            )
+
+    @pytest.mark.asyncio
+    async def test_citation_tool_ignores_none_doi_and_url_encodes_doi(self) -> None:
+        captured: list[httpx.Request] = []
+        tool = CitationTool()
+        tool.client = httpx.AsyncClient(transport=_mock_transport(captured))
+
+        formatted = await tool.execute(
+            doi=None,
+            sources=[{"title": "Local Paper", "authors": ["Ada"], "year": 2024}],
+        )
+        assert formatted["success"] is True
+        assert captured == []
+
+        resolved = await tool.execute(
+            doi="10.1234/foo bar?inject=1#frag",
+            allowed_hosts=("api.crossref.org",),
+        )
+        assert resolved["success"] is True
+        assert len(captured) == 1
+        assert captured[0].url.query == b""
+        assert captured[0].url.fragment == ""
+        assert "%3Finject%3D1%23frag" in str(captured[0].url)
+
+    @pytest.mark.asyncio
+    async def test_rehydrate_preserves_external_read_grant_allowed_hosts(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, Mock, patch
+
+        from src.api.services.direct_execution_service import DirectExecutionService
+
+        org = "00000000-0000-0000-0000-0000000000ef"
+        ts = datetime(2026, 11, 28, 12, tzinfo=UTC).replace(tzinfo=None)
+
+        def _row(**values: object) -> Any:
+            defaults = {
+                "created_at": ts,
+                "updated_at": ts,
+                "started_at": None,
+                "completed_at": None,
+                "status_reason": None,
+                "cancellation_requested_at": None,
+                "cancellation_reason": None,
+            }
+            return SimpleNamespace(**(defaults | values))
+
+        run = _row(
+            run_id="run-ext",
+            tenant_id=org,
+            organization_id=org,
+            workflow_definition_id="wf",
+            workflow_definition_version="1",
+            routing_policy_id="rp",
+            routing_policy_version="1",
+            idempotency_key="idem",
+            requested_by="user",
+            status="running",
+            started_at=ts,
+        )
+        task = _row(
+            run_id="run-ext",
+            task_id="task-ext",
+            task_key="k-ext",
+            task_type="execution_plan",
+            objective="objective",
+            idempotency_key="task-idem",
+            dependency_ids=[],
+            assigned_worker_type=None,
+            input={"project_id": "proj"},
+            status="running",
+            started_at=ts,
+        )
+        attempt = _row(
+            run_id="run-ext",
+            task_id="task-ext",
+            attempt_id="attempt-ext",
+            ordinal=1,
+            idempotency_key="attempt-idem",
+            executor_id=None,
+            status="running",
+            started_at=ts,
+            journaled_result=None,
+        )
+        grant_row = _row(
+            grant_id="grant-ext",
+            run_id="run-ext",
+            task_id="task-ext",
+            capability_scope="plan-issued:mcp.academic_search",
+            tool_name=TOOL_ACADEMIC_SEARCH,
+            tool_versions=["1.0.0"],
+            sensitivity="external_read",
+            max_input_trust="external_untrusted",
+            requires_approval=False,
+            allowed_hosts=["export.arxiv.org"],
+            issued_at=ts,
+            expires_at=ts + timedelta(hours=1),
+        )
+        repo = Mock(
+            session=Mock(),
+            get_tasks_for_run=AsyncMock(return_value=[task]),
+            get_attempts_for_task=AsyncMock(return_value=[attempt]),
+        )
+        cap_repo = Mock(list_grants_for_task=AsyncMock(return_value=[grant_row]))
+        service = DirectExecutionService(session_factory=Mock())
+
+        with patch(
+            "src.api.services.direct_execution_service.CapabilityRepository",
+            return_value=cap_repo,
+        ):
+            status = await service._rehydrate_execution(repo, run)
+
+        assert status is not None
+        assert len(status.capability_grants) == 1
+        (restored,) = status.capability_grants
+        assert restored.sensitivity is SensitivityClass.EXTERNAL_READ
+        assert restored.allowed_hosts == ("export.arxiv.org",)

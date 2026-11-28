@@ -6,16 +6,18 @@ Provides citation formatting and DOI resolution capabilities.
 
 from collections.abc import Sequence
 from typing import Any, Final
+from urllib.parse import quote
 
 import httpx
 from structlog import get_logger
 
-from src.mcp.tools.academic_search_tool import require_allowed_outbound_host
+from src.core.tools.outbound import (
+    CITATION_OUTBOUND_HOSTS,
+    CROSSREF_HOST,
+    checked_get,
+)
 
 logger = get_logger()
-
-CROSSREF_HOST: Final[str] = "api.crossref.org"
-CITATION_OUTBOUND_HOSTS: Final[tuple[str, ...]] = (CROSSREF_HOST,)
 
 
 class CitationTool:
@@ -25,14 +27,15 @@ class CitationTool:
 
     def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or {}
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.client = httpx.AsyncClient(timeout=30.0, follow_redirects=False)
         self.crossref_base = f"https://{CROSSREF_HOST}/works"
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         allowed_hosts: Sequence[str] | None = kwargs.get("allowed_hosts")
-        if "doi" in kwargs:
+        doi = kwargs.get("doi")
+        if doi:
             return await self._resolve_doi(
-                kwargs["doi"],
+                str(doi),
                 kwargs.get("style", "APA"),
                 allowed_hosts=allowed_hosts,
             )
@@ -180,15 +183,21 @@ class CitationTool:
         *,
         allowed_hosts: Sequence[str] | None = None,
     ) -> dict[str, Any]:
-        """Resolve DOI and format citation."""
-        url = f"{self.crossref_base}/{doi}"
-        require_allowed_outbound_host(
-            url,
-            declared_hosts=self.OUTBOUND_HOSTS,
-            allowed_hosts=allowed_hosts,
-        )
+        """Resolve DOI against Crossref and format citation.
+
+        Args:
+            doi: Digital Object Identifier to look up
+            style: Citation style (APA, MLA, Chicago)
+            allowed_hosts: Authority-approved outbound hosts, or ``None`` for direct calls
+        """
+        url = f"{self.crossref_base}/{quote(doi, safe='/')}"
         try:
-            response = await self.client.get(url)
+            response = await checked_get(
+                self.client,
+                url,
+                declared_hosts=(CROSSREF_HOST,),
+                allowed_hosts=allowed_hosts,
+            )
 
             if response.status_code != 200:
                 return {"success": False, "error": f"DOI not found: {doi}"}
