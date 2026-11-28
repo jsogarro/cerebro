@@ -6,6 +6,7 @@ engine. What is asserted is what survives a real process death: the durable row,
 one uncertain charge at most, and no second send.
 """
 
+import os
 import signal
 import subprocess
 import sys
@@ -36,7 +37,13 @@ def _crash_at(url: str, owner_id: str, barrier: str, log: Path) -> None:
     child = subprocess.Popen(
         [sys.executable, str(CHILD), url, str(ORG_A), owner_id, barrier, str(log)],
         cwd=REPO_ROOT,
-        env={"PYTHONPATH": str(REPO_ROOT), "PATH": "/usr/bin:/bin"},
+        env={
+            "PYTHONPATH": str(REPO_ROOT),
+            "PATH": "/usr/bin:/bin",
+            # The repository imports the session module, which loads Settings.
+            "ENVIRONMENT": os.environ["ENVIRONMENT"],
+            "SECRET_KEY": os.environ["SECRET_KEY"],
+        },
         stdout=subprocess.PIPE,
         text=True,
     )

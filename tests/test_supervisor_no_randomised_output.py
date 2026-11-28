@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.orm import Session
 
 from src.api.services.supervisor_coordination_service import (
     SupervisorCoordinationService,
@@ -120,7 +121,7 @@ def test_experiment_route_returns_501_not_500() -> None:
     from tests.test_supervisor_execution_no_fabrication import _JWT
 
     async def _session() -> AsyncIterator[Mock]:
-        yield Mock()
+        yield Mock(sync_session=Session())
 
     missing = object()
     previous = getattr(app.state, "supervisor_coordination_service", missing)

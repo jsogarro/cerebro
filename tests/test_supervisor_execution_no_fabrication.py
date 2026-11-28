@@ -14,6 +14,7 @@ from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from src.api.services.supervisor_coordination_service import (
     SupervisorCoordinationService,
@@ -61,7 +62,7 @@ def _post(outcome: Any) -> Iterator[Any]:
     app.state.supervisor_coordination_service = service
 
     async def _session() -> AsyncIterator[Mock]:
-        yield Mock()
+        yield Mock(sync_session=Session())
 
     app.dependency_overrides[get_jwt_service] = lambda: _JWT()
     app.dependency_overrides[get_session] = _session
