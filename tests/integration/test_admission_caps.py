@@ -17,11 +17,9 @@ import pytest_asyncio
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
-    AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import sessionmaker
 from testcontainers.postgres import PostgresContainer
 
 from src.api.services.direct_execution_service import DirectExecutionService
@@ -56,11 +54,10 @@ PASSWORDS = {
 
 class _CountingBridge:
     def __init__(self) -> None:
-        self.admit_calls = 0
         self.execute_calls = 0
 
     def admit_execution_plan(self, _plan: Any) -> None:
-        self.admit_calls += 1
+        return None
 
     async def execute_execution_plan(self, *_args: Any, **_kwargs: Any) -> Any:
         self.execute_calls += 1
@@ -89,6 +86,58 @@ def _service(
         session_factory=session_factory,
         execution_authority_resolver=resolver,
     )
+
+
+def _install_cap_race_barrier(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hold two concurrent admissions after ``create_run`` so they enter
+    ``enforce_admission_caps`` simultaneously, then yield briefly before commit.
+
+    With ``pg_advisory_xact_lock`` the second caller blocks inside Postgres
+    until the first commits and then observes count=2; without the lock both
+    observe count=1 and succeed.
+    """
+    entered_cap = 0
+    both_entered = asyncio.Event()
+    original_enforce = RunLifecycleRepository.enforce_admission_caps
+    original_transition = RunLifecycleRepository.record_run_transition
+
+    async def _barrier_enforce(
+        self: RunLifecycleRepository, *args: Any, **kwargs: Any
+    ) -> None:
+        nonlocal entered_cap
+        entered_cap += 1
+        if entered_cap == 2:
+            both_entered.set()
+        await asyncio.wait_for(both_entered.wait(), timeout=5.0)
+        await original_enforce(self, *args, **kwargs)
+
+    async def _delayed_transition(
+        self: RunLifecycleRepository, *args: Any, **kwargs: Any
+    ) -> Any:
+        result = await original_transition(self, *args, **kwargs)
+        await asyncio.sleep(0.05)
+        return result
+
+    monkeypatch.setattr(
+        RunLifecycleRepository, "enforce_admission_caps", _barrier_enforce
+    )
+    monkeypatch.setattr(
+        RunLifecycleRepository, "record_run_transition", _delayed_transition
+    )
+
+
+def _assert_single_winner_and_cap_error(results: list[Any]) -> None:
+    winners = [r for r in results if isinstance(r, str)]
+    errors = [r for r in results if isinstance(r, RunCapExceededError)]
+    unexpected = [
+        r
+        for r in results
+        if isinstance(r, BaseException) and not isinstance(r, RunCapExceededError)
+    ]
+    assert unexpected == []
+    assert len(winners) == 1
+    assert len(errors) == 1
+    assert errors[0].code == "run_concurrency_cap_exceeded"
 
 
 async def _await_terminal(
@@ -123,47 +172,12 @@ async def test_concurrent_distinct_admissions_at_cap_admit_only_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two distinct admissions racing at cap=1 leave 1 durable run, 1 cap error,
-    and 1 workflow execution.
-
-    A 2-party barrier holds both transactions right after ``create_run`` so they
-    enter ``enforce_admission_caps`` simultaneously, and a short yield before
-    commit ensures both would see count=1 and succeed if the advisory lock were
-    removed.
-    """
+    and 1 workflow execution."""
     monkeypatch.setattr(settings, "RUN_MAX_CONCURRENT_PER_ORG", 1)
     monkeypatch.setattr(settings, "RUN_MAX_DAILY_PER_ORG", 100)
 
-    session_factory = sessionmaker(
-        test_engine, class_=AsyncSession, expire_on_commit=False
-    )
-    entered_cap = 0
-    both_entered = asyncio.Event()
-    original_enforce = RunLifecycleRepository.enforce_admission_caps
-    original_transition = RunLifecycleRepository.record_run_transition
-
-    async def _barrier_enforce(
-        self: RunLifecycleRepository, *args: Any, **kwargs: Any
-    ) -> None:
-        nonlocal entered_cap
-        entered_cap += 1
-        if entered_cap == 2:
-            both_entered.set()
-        await asyncio.wait_for(both_entered.wait(), timeout=5.0)
-        await original_enforce(self, *args, **kwargs)
-
-    async def _delayed_transition(
-        self: RunLifecycleRepository, *args: Any, **kwargs: Any
-    ) -> Any:
-        result = await original_transition(self, *args, **kwargs)
-        await asyncio.sleep(0.05)
-        return result
-
-    monkeypatch.setattr(
-        RunLifecycleRepository, "enforce_admission_caps", _barrier_enforce
-    )
-    monkeypatch.setattr(
-        RunLifecycleRepository, "record_run_transition", _delayed_transition
-    )
+    session_factory = async_sessionmaker(test_engine, expire_on_commit=False)
+    _install_cap_race_barrier(monkeypatch)
 
     binding_a = make_binding("cap-race-a", authority_id="cap-race-auth-a")
     binding_b = make_binding("cap-race-b", authority_id="cap-race-auth-b")
@@ -192,18 +206,7 @@ async def test_concurrent_distinct_admissions_at_cap_admit_only_one(
             ),
             return_exceptions=True,
         )
-
-        winners = [r for r in results if isinstance(r, str)]
-        errors = [r for r in results if isinstance(r, RunCapExceededError)]
-        unexpected = [
-            r
-            for r in results
-            if isinstance(r, BaseException) and not isinstance(r, RunCapExceededError)
-        ]
-        assert unexpected == []
-        assert len(winners) == 1
-        assert len(errors) == 1
-        assert errors[0].code == "run_concurrency_cap_exceeded"
+        _assert_single_winner_and_cap_error(results)
 
         async with session_factory() as session:
             run_ids = list((await session.scalars(select(AgentRun.run_id))).all())
@@ -225,9 +228,7 @@ async def test_concurrent_same_run_at_cap_coalesces_without_cap_error(
     monkeypatch.setattr(settings, "RUN_MAX_CONCURRENT_PER_ORG", 1)
     monkeypatch.setattr(settings, "RUN_MAX_DAILY_PER_ORG", 100)
 
-    session_factory = sessionmaker(
-        test_engine, class_=AsyncSession, expire_on_commit=False
-    )
+    session_factory = async_sessionmaker(test_engine, expire_on_commit=False)
     run_id = "same-run-at-cap"
     binding = make_binding(run_id, authority_id="same-run-cap-auth")
     resolver = MappingExecutionAuthorityResolver({("same-run-cap-auth", "1"): binding})
@@ -361,7 +362,6 @@ async def test_concurrent_admissions_under_production_app_role_enforce_caps_with
         ).one()
         assert role_row == ("cerebro_app", False, False)
 
-    # First admit a run in org_b so we also verify RLS isolates orgs properly.
     binding_other = make_binding("rls-org-b", authority_id="rls-auth-b", org_id=org_b)
     binding_a1 = make_binding("rls-org-a-1", authority_id="rls-auth-a1", org_id=org_a)
     binding_a2 = make_binding("rls-org-a-2", authority_id="rls-auth-a2", org_id=org_a)
@@ -376,84 +376,105 @@ async def test_concurrent_admissions_under_production_app_role_enforce_caps_with
     bridge = _CountingBridge()
     service = _service(session_factory, resolver, bridge)
 
-    await service.start_research_execution(
-        make_project("Org B"),
-        authority_reference=ExecutionAuthorityReference(
-            authority_id="rls-auth-b", authority_version="1"
-        ),
-        organization_id=org_b,
-    )
-
-    entered_cap = 0
-    both_entered = asyncio.Event()
-    original_enforce = RunLifecycleRepository.enforce_admission_caps
-    original_transition = RunLifecycleRepository.record_run_transition
-
-    async def _barrier_enforce(
-        self: RunLifecycleRepository, *args: Any, **kwargs: Any
-    ) -> None:
-        nonlocal entered_cap
-        entered_cap += 1
-        if entered_cap == 2:
-            both_entered.set()
-        await asyncio.wait_for(both_entered.wait(), timeout=5.0)
-        await original_enforce(self, *args, **kwargs)
-
-    async def _delayed_transition(
-        self: RunLifecycleRepository, *args: Any, **kwargs: Any
-    ) -> Any:
-        result = await original_transition(self, *args, **kwargs)
-        await asyncio.sleep(0.05)
-        return result
-
-    monkeypatch.setattr(
-        RunLifecycleRepository, "enforce_admission_caps", _barrier_enforce
-    )
-    monkeypatch.setattr(
-        RunLifecycleRepository, "record_run_transition", _delayed_transition
-    )
-
-    results = await asyncio.gather(
-        service.start_research_execution(
-            make_project("Org A 1"),
+    try:
+        # Admit a run in org_b first to verify RLS isolates orgs properly.
+        await service.start_research_execution(
+            make_project("Org B"),
             authority_reference=ExecutionAuthorityReference(
-                authority_id="rls-auth-a1", authority_version="1"
+                authority_id="rls-auth-b", authority_version="1"
             ),
-            organization_id=org_a,
-        ),
-        service.start_research_execution(
-            make_project("Org A 2"),
-            authority_reference=ExecutionAuthorityReference(
-                authority_id="rls-auth-a2", authority_version="1"
-            ),
-            organization_id=org_a,
-        ),
-        return_exceptions=True,
-    )
-
-    winners = [r for r in results if isinstance(r, str)]
-    errors = [r for r in results if isinstance(r, RunCapExceededError)]
-    unexpected = [
-        r
-        for r in results
-        if isinstance(r, BaseException) and not isinstance(r, RunCapExceededError)
-    ]
-    assert unexpected == []
-    assert len(winners) == 1
-    assert len(errors) == 1
-    assert errors[0].code == "run_concurrency_cap_exceeded"
-
-    async with session_factory() as session:
-        await session.execute(
-            text("SELECT set_config('app.current_org_id', :org, true)"),
-            {"org": org_a},
+            organization_id=org_b,
         )
-        org_a_runs = list((await session.scalars(select(AgentRun.run_id))).all())
-    assert len(org_a_runs) == 1
 
-    await _await_terminal(session_factory, org_a_runs[0], org_id=org_a, set_tenant=True)
-    await _await_terminal(session_factory, "rls-org-b", org_id=org_b, set_tenant=True)
-    # 1 execution for org_b + 1 execution for org_a (second org_a admission refused)
-    assert bridge.execute_calls == 2
+        _install_cap_race_barrier(monkeypatch)
 
-    await service.close()
+        results = await asyncio.gather(
+            service.start_research_execution(
+                make_project("Org A 1"),
+                authority_reference=ExecutionAuthorityReference(
+                    authority_id="rls-auth-a1", authority_version="1"
+                ),
+                organization_id=org_a,
+            ),
+            service.start_research_execution(
+                make_project("Org A 2"),
+                authority_reference=ExecutionAuthorityReference(
+                    authority_id="rls-auth-a2", authority_version="1"
+                ),
+                organization_id=org_a,
+            ),
+            return_exceptions=True,
+        )
+        _assert_single_winner_and_cap_error(results)
+
+        async with session_factory() as session:
+            await session.execute(
+                text("SELECT set_config('app.current_org_id', :org, true)"),
+                {"org": org_a},
+            )
+            org_a_runs = list((await session.scalars(select(AgentRun.run_id))).all())
+        assert len(org_a_runs) == 1
+
+        await _await_terminal(
+            session_factory, org_a_runs[0], org_id=org_a, set_tenant=True
+        )
+        await _await_terminal(
+            session_factory, "rls-org-b", org_id=org_b, set_tenant=True
+        )
+        # 1 execution for org_b + 1 execution for org_a (second org_a refused)
+        assert bridge.execute_calls == 2
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_tenant_session_retains_rls_scope_across_commit_under_app_role(
+    app_role_engine: AsyncEngine,
+) -> None:
+    """A second transaction on the same ``_tenant_session`` (e.g. ``_hold_lease``
+    polling ``cancellation_requested`` after committing ``renew_lease``) must
+    keep ``app.current_org_id`` set under ``cerebro_app``."""
+    org = str(uuid.uuid4())
+    session_factory = async_sessionmaker(app_role_engine, expire_on_commit=False)
+    binding = make_binding("rls-multi-tx-run", authority_id="rls-multi-tx", org_id=org)
+    resolver = MappingExecutionAuthorityResolver({("rls-multi-tx", "1"): binding})
+    service = _service(session_factory, resolver, _CountingBridge())
+
+    try:
+        async with service._tenant_session(org) as session:
+            repo = RunLifecycleRepository(session)
+            await repo.create_run(binding.run, organization_id=org)
+            token = await repo.acquire_lease(
+                binding.run.run_id,
+                owner="test-owner",
+                ttl_seconds=30.0,
+                organization_id=org,
+            )
+            assert token is not None
+            await session.commit()
+
+            # Second transaction on the SAME session: simulate _hold_lease
+            # renewing the lease and committing, while a cancellation is recorded.
+            assert await repo.renew_lease(
+                binding.run.run_id,
+                owner="test-owner",
+                fencing_token=token,
+                ttl_seconds=30.0,
+            )
+            await session.execute(
+                text(
+                    "UPDATE agent_runs SET cancellation_requested_at = now() "
+                    "WHERE run_id = :run_id"
+                ),
+                {"run_id": binding.run.run_id},
+            )
+            await session.commit()
+
+            # Third transaction on the SAME session must still see the org's row
+            # (without RLS scope, cancellation_requested would silently return False).
+            row = await repo.get_run(binding.run.run_id, organization_id=org)
+            assert row is not None
+            assert row.run_id == binding.run.run_id
+            assert await repo.cancellation_requested(binding.run.run_id) is True
+    finally:
+        await service.close()

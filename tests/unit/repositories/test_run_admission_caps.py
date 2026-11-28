@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
@@ -11,6 +12,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -154,6 +156,53 @@ def test_settings_defaults_for_org_admission_caps() -> None:
     assert not hasattr(fresh, "RUN_MAX_CONCURRENT_PER_USER")
 
 
+@pytest.mark.parametrize("bad_value", [0, -1])
+@pytest.mark.parametrize(
+    "field_name", ["RUN_MAX_CONCURRENT_PER_ORG", "RUN_MAX_DAILY_PER_ORG"]
+)
+def test_settings_rejects_nonpositive_org_admission_caps(
+    field_name: str, bad_value: int
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings(SECRET_KEY="x" * 32, **{field_name: bad_value})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("max_concurrent", "max_daily"),
+    [(0, 10), (-1, 10), (10, 0), (10, -1)],
+)
+async def test_enforce_admission_caps_rejects_nonpositive_bounds(
+    sqlite_factory: async_sessionmaker[AsyncSession],
+    max_concurrent: int,
+    max_daily: int,
+) -> None:
+    async with sqlite_factory() as session:
+        repo = RunLifecycleRepository(session)
+        with pytest.raises(ValueError, match="must be >= 1"):
+            await repo.enforce_admission_caps(
+                ORG_A,
+                max_concurrent_per_org=max_concurrent,
+                max_daily_per_org=max_daily,
+                now=NOW,
+            )
+
+
+@pytest.mark.asyncio
+async def test_enforce_admission_caps_rejects_naive_now(
+    sqlite_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with sqlite_factory() as session:
+        repo = RunLifecycleRepository(session)
+        with pytest.raises(ValueError, match="timezone-aware"):
+            await repo.enforce_admission_caps(
+                ORG_A,
+                max_concurrent_per_org=5,
+                max_daily_per_org=100,
+                now=datetime(2026, 8, 4, 12, 0, 0),
+            )
+
+
 @pytest.mark.asyncio
 async def test_admission_refused_at_org_concurrent_cap(
     sqlite_factory: async_sessionmaker[AsyncSession],
@@ -174,16 +223,23 @@ async def test_admission_refused_at_org_concurrent_cap(
         authority_id="auth-refused", authority_version="1"
     )
 
-    with pytest.raises(RunCapExceededError) as exc_info:
-        await service.start_research_execution(
-            make_project(), authority_reference=reference, organization_id=str(ORG_A)
-        )
+    try:
+        with pytest.raises(RunCapExceededError) as exc_info:
+            await service.start_research_execution(
+                make_project(),
+                authority_reference=reference,
+                organization_id=str(ORG_A),
+            )
 
-    assert exc_info.value.code == "run_concurrency_cap_exceeded"
-    async with sqlite_factory() as session:
-        rows = (await session.scalars(select(AgentRun.run_id))).all()
-    assert rows == ["existing-active"]
-    await service.close()
+        assert exc_info.value.code == "run_concurrency_cap_exceeded"
+        assert service.active_executions == {}
+        assert service._execution_ids_by_run_id == {}
+        assert service._admissions_in_flight == {}
+        async with sqlite_factory() as session:
+            rows = (await session.scalars(select(AgentRun.run_id))).all()
+        assert rows == ["existing-active"]
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
@@ -335,7 +391,7 @@ class _JWT:
 
 
 @pytest.fixture
-def route_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
+def route_client() -> Iterator[Any]:
     from src.api.main import app
 
     app.dependency_overrides[get_jwt_service] = _JWT
@@ -372,8 +428,6 @@ def test_query_route_returns_429_on_cap_exceeded(
     expected_code: str,
     tmp_path: Any,
 ) -> None:
-    import asyncio
-
     db_path = tmp_path / "route_caps.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
 
@@ -391,16 +445,19 @@ def test_query_route_returns_429_on_cap_exceeded(
             )
             await session.commit()
 
-    asyncio.run(_setup())
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    monkeypatch.setattr(settings, "RUN_MAX_CONCURRENT_PER_ORG", max_concurrent)
-    monkeypatch.setattr(settings, "RUN_MAX_DAILY_PER_ORG", max_daily)
-
-    binding = make_binding("route-run", authority_id="auth-route", org_id=str(ORG_A))
-    service = _make_service(factory, {("auth-route", "1"): binding})
-    client = route_client(service)
-
+    service: DirectExecutionService | None = None
     try:
+        asyncio.run(_setup())
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        monkeypatch.setattr(settings, "RUN_MAX_CONCURRENT_PER_ORG", max_concurrent)
+        monkeypatch.setattr(settings, "RUN_MAX_DAILY_PER_ORG", max_daily)
+
+        binding = make_binding(
+            "route-run", authority_id="auth-route", org_id=str(ORG_A)
+        )
+        service = _make_service(factory, {("auth-route", "1"): binding})
+        client = route_client(service)
+
         response = client.post(
             "/api/v1/query/research",
             json={
@@ -414,5 +471,8 @@ def test_query_route_returns_429_on_cap_exceeded(
         assert response.status_code == 429, response.text
         assert response.json()["error"]["code"] == expected_code
     finally:
-        asyncio.run(service.close())
-        asyncio.run(engine.dispose())
+        try:
+            if service is not None:
+                asyncio.run(service.close())
+        finally:
+            asyncio.run(engine.dispose())

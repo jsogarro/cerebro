@@ -69,8 +69,8 @@ class Settings(BaseSettings):
     MAX_PARALLEL_WORKERS: int = 5
 
     # Per-organization run admission caps
-    RUN_MAX_CONCURRENT_PER_ORG: int = 5
-    RUN_MAX_DAILY_PER_ORG: int = 100
+    RUN_MAX_CONCURRENT_PER_ORG: int = Field(default=5, ge=1)
+    RUN_MAX_DAILY_PER_ORG: int = Field(default=100, ge=1)
 
     # MCP Configuration
     MCP_SERVER_ENABLED: bool = False
