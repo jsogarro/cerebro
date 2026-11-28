@@ -432,4 +432,6 @@ async def test_main_lifespan_registers_the_evaluation_handler_only_when_enabled(
     with TestClient(FastAPI(lifespan=main.lifespan)):
         pass
 
-    assert list(captured) == (["evaluation"] if enabled else [])
+    assert sorted(captured) == (
+        ["adaptive_outcome", "evaluation"] if enabled else ["adaptive_outcome"]
+    )

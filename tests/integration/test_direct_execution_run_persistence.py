@@ -340,12 +340,17 @@ async def test_fixture_mode_run_persists_to_succeeded_with_journaled_result(
             .scalars()
             .all()
         )
-        assert len(outbox_rows) == 3
-        assert all(row.destination == "redis" for row in outbox_rows)
+        redis_rows = [row for row in outbox_rows if row.destination == "redis"]
+        adaptive_rows = [
+            row for row in outbox_rows if row.destination == "adaptive_outcome"
+        ]
+        assert len(redis_rows) == 3
+        assert len(adaptive_rows) == 1
+        assert adaptive_rows[0].event_id == events[-1].event_id
         assert all(row.status == "pending" for row in outbox_rows)
         # Every outbox row references an event that was committed in the same
         # transaction — none of them can be an orphan.
-        assert {row.event_id for row in outbox_rows} == {
+        assert {row.event_id for row in redis_rows} == {
             event.event_id for event in events
         }
 

@@ -377,9 +377,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Active executions restored from persistence", count=restored)
             direct_execution_service.start_expired_run_reconciliation()
 
-            from src.api.services.outbox_relay import OutboxRelay
+            from src.ai_brain.router.outcome_recorder import (
+                ADAPTIVE_OUTCOME_DESTINATION,
+                RoutingOutcomeRecorder,
+            )
+            from src.api.services.adaptive_outcome_outbox_handler import (
+                AdaptiveOutcomeOutboxHandler,
+            )
+            from src.api.services.outbox_relay import OutboxHandler, OutboxRelay
 
-            outbox_handlers = {}
+            outbox_handlers: dict[str, OutboxHandler] = {
+                ADAPTIVE_OUTCOME_DESTINATION: AdaptiveOutcomeOutboxHandler(
+                    session_factory=durable_session_factory,
+                    outcome_recorder=RoutingOutcomeRecorder(masr_runtime.router),
+                )
+            }
             if settings.EVALUATION_DISPATCH_ENABLED:
                 from src.api.services.evaluation_outbox_handler import (
                     EvaluationOutboxHandler,

@@ -20,6 +20,10 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.ai_brain.router.outcome_recorder import (
+    ADAPTIVE_OUTCOME_DESTINATION,
+    TERMINAL_RUN_EVENTS,
+)
 from src.core.contracts import RunEvent, RunEventCursor, delivery_idempotency_key
 from src.core.evaluation.events import (
     EVALUATION_DESTINATION,
@@ -102,6 +106,11 @@ class RunEventRepository:
             and EVALUATION_DESTINATION not in destinations
         ):
             destinations = (*destinations, EVALUATION_DESTINATION)
+        if (
+            event_type in TERMINAL_RUN_EVENTS
+            and ADAPTIVE_OUTCOME_DESTINATION not in destinations
+        ):
+            destinations = (*destinations, ADAPTIVE_OUTCOME_DESTINATION)
 
         sequence = await self._allocate_sequence(run_id)
 
