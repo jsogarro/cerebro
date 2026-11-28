@@ -65,6 +65,10 @@ Other modules in the group: `model_schemas.py` is in use: `ModelTier` and `Routi
 
 Tests that exercise it: `tests/test_prompt_safety.py`, `tests/test_cache_ttl_expiry.py`.
 
+## Delegation brief and prompt identity
+
+> **Not wired.** The `DelegationContract` brief that `LLMWorkerAgentBase` appends to a plan worker's model prompt is not covered by recorded prompt identity: worker prompts are not pinned today, and the brief is added after the agent builds its prompt. See [research execution](05-research-execution.md).
+
 ## Stub packages
 
 > **Not wired.** This package is a script target with no other caller.
@@ -92,7 +96,6 @@ Tests that exercise them live in `tests/unit/core/claims/`. `src/core/acquisitio
 
 | Module | What it holds | Imported by |
 |---|---|---|
-| `src/agents/delegation_contract.py` | `DelegationContract` | `tests/test_fast_path.py` |
 | `src/services/evaluation_regression.py` | Golden-dataset regression scoring | `tests/regression/` |
 | `src/services/text_alignment/` | Deterministic span alignment over source text | `tests/unit/services/test_text_alignment.py` |
 

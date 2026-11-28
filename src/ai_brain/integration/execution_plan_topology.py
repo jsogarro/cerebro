@@ -13,6 +13,10 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
+from src.agents.delegation_contract import (
+    DELEGATION_BRIEF_CONTEXT_KEY,
+    brief_for_worker,
+)
 from src.agents.llm_worker_base import (
     RESERVED_RUNTIME_INPUT_KEYS,
     UPSTREAM_PAYLOAD_LIMIT_BYTES,
@@ -377,6 +381,7 @@ class ExecutionPlanTopologyExecutor:
                     **task.context,
                     BUDGET_LEDGER_CONTEXT_KEY: ledger,
                     MODEL_INVOCATION_CONTEXT_KEY: invocation,
+                    DELEGATION_BRIEF_CONTEXT_KEY: brief_for_worker(worker),
                     WORKER_SCOPE_CONTEXT_KEY: (
                         f"{plan.execution_plan_id}:{worker.worker_id}"
                     ),

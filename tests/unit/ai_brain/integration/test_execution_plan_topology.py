@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 import pytest
 
 from src.agents.content_agents import DraftingAgent, EditingAgent
+from src.agents.delegation_contract import DelegationContract
 from src.agents.llm_worker_base import LLMWorkerAgentBase, _GenerationRoute
 from src.agents.models import AgentResult, AgentTask
 from src.agents.synthesis_agent import SynthesisAgent
@@ -172,6 +173,7 @@ async def test_a_worker_task_inherits_its_parent_s_durable_context() -> None:
         context = dict(worker_task.context)
         assert isinstance(context.pop(BUDGET_LEDGER_CONTEXT_KEY), BudgetLedger)
         context.pop(MODEL_INVOCATION_CONTEXT_KEY)
+        assert isinstance(context.pop("delegation_brief"), DelegationContract)
         assert context.pop("worker_scope") == expected_scopes[worker_task.id]
         assert context == {
             k: v for k, v in parent_context.items() if k != "worker_scope"
