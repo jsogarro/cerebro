@@ -26,6 +26,7 @@ class ExecutionAuthorityRepository:
         binding: ExecutionAuthorityBinding,
         *,
         organization_id: uuid.UUID | str,
+        is_template: bool = False,
     ) -> AgentExecutionAuthority:
         """Store a binding under the tenant that owns it; flushes, never commits."""
         organization = normalize_organization_id(organization_id)
@@ -39,6 +40,7 @@ class ExecutionAuthorityRepository:
             authority_version=binding.authority_version,
             configuration=configuration,
             content_sha256=hash_configuration(configuration),
+            is_template=is_template,
         )
         self.session.add(row)
         await self.session.flush()
@@ -50,13 +52,29 @@ class ExecutionAuthorityRepository:
         authority_id: str,
         authority_version: str,
         organization_id: uuid.UUID | str,
+        require_template: bool = False,
     ) -> AgentExecutionAuthority | None:
-        result = await self.session.execute(
-            select(AgentExecutionAuthority).where(
-                AgentExecutionAuthority.authority_id == authority_id,
-                AgentExecutionAuthority.authority_version == authority_version,
-                AgentExecutionAuthority.organization_id
-                == normalize_organization_id(organization_id),
-            )
+        query = select(AgentExecutionAuthority).where(
+            AgentExecutionAuthority.authority_id == authority_id,
+            AgentExecutionAuthority.authority_version == authority_version,
+            AgentExecutionAuthority.organization_id
+            == normalize_organization_id(organization_id),
         )
+        if require_template:
+            query = query.where(AgentExecutionAuthority.is_template.is_(True))
+        result = await self.session.execute(query)
         return result.scalar_one_or_none()
+
+    async def get_template(
+        self,
+        *,
+        authority_id: str,
+        authority_version: str,
+        organization_id: uuid.UUID | str,
+    ) -> AgentExecutionAuthority | None:
+        return await self.get(
+            authority_id=authority_id,
+            authority_version=authority_version,
+            organization_id=organization_id,
+            require_template=True,
+        )
