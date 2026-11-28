@@ -171,7 +171,7 @@ A field is listed here when a production module outside `src/core/config.py` rea
 | Setting | Default | Read by | Effect |
 |---|---|---|---|
 | `ENABLE_TRACING` | `false` | `src/core/otel.py` (`is_otel_enabled`) | activates the private OpenTelemetry `TracerProvider` and FastAPI, SQLAlchemy, httpx and workflow/worker/provider/tool instrumentation in the API lifespan; overridden by `OTEL_SDK_DISABLED=true` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | `src/core/otel.py` (`init_otel`) | OTLP/HTTP trace endpoint (a base URL without `/v1/traces` has `/v1/traces` appended); supports standard OTLP collectors and Langfuse's OTLP endpoint; when unset with `ENABLE_TRACING=true`, spans stay in-process with no network export |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | `src/core/otel.py` (`init_otel`) | OTLP/HTTP trace endpoint (standard port `4318`; a base URL without `/v1/traces` has `/v1/traces` appended); supports standard OTLP collectors and Langfuse's OTLP endpoint; when unset with `ENABLE_TRACING=true`, spans stay in-process with no network export |
 | `OTEL_SERVICE_NAME` | `cerebro-api` | `src/core/otel.py` (`init_otel`) | `service.name` resource attribute on the private OpenTelemetry `TracerProvider` |
 | `ENABLE_CONTEXT_COMPACTION_TELEMETRY` | `false` | `src/core/telemetry.py` (`telemetry_enabled`) | token-count measurements logged by supervisors and `DirectExecutionService` |
 | `LANGFUSE_ENABLED` | `false` | `src/core/tracing.py` (`_initialize_langfuse`), `src/api/main.py` (`lifespan`) | enables the Langfuse client, created eagerly at startup |

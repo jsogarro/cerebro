@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import threading
 import time
+import tomllib
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import pytest
+import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from opentelemetry import trace
@@ -183,6 +187,41 @@ class TestConfigurationAndPrecedence:
     def test_semconv_schema_urls_are_pinned(self) -> None:
         assert SEMCONV_SCHEMA_URL.startswith("https://opentelemetry.io/schemas/")
         assert "semconv-genai" in GENAI_SEMCONV_SCHEMA_URL
+
+    def test_otlp_http_exporter_declared_as_direct_dependency(self) -> None:
+        repo_root = Path(__file__).resolve().parents[3]
+        pyproject = tomllib.loads(
+            (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        dependencies: list[str] = pyproject["project"]["dependencies"]
+        assert any(
+            dep.lower().startswith("opentelemetry-exporter-otlp-proto-http")
+            for dep in dependencies
+        ), "opentelemetry-exporter-otlp-proto-http must be declared directly"
+
+    def test_repo_otlp_endpoint_templates_use_http_port_4318(self) -> None:
+        repo_root = Path(__file__).resolve().parents[3]
+        endpoints: dict[str, str] = {}
+        for name in (".env.example", ".env.production.example"):
+            for raw_line in (repo_root / name).read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if line.startswith("OTEL_EXPORTER_OTLP_ENDPOINT="):
+                    endpoints[name] = line.split("=", 1)[1].strip()
+                    break
+            assert name in endpoints, f"OTEL_EXPORTER_OTLP_ENDPOINT missing in {name}"
+
+        configmap = yaml.safe_load(
+            (repo_root / "k8s" / "configmap.yaml").read_text(encoding="utf-8")
+        )
+        endpoints["k8s/configmap.yaml"] = configmap["data"][
+            "OTEL_EXPORTER_OTLP_ENDPOINT"
+        ]
+
+        for source, endpoint in endpoints.items():
+            parsed = urlparse(endpoint)
+            assert parsed.scheme in {"http", "https"}, (source, endpoint)
+            assert parsed.port == 4318, (source, endpoint)
+            assert normalize_otlp_traces_endpoint(endpoint).endswith(":4318/v1/traces")
 
 
 class TestPrivateProviderAndInstrumentation:
