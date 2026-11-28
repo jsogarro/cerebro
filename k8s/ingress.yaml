@@ -13,8 +13,45 @@ spec:
   - host: api.research-platform.example.com
     http:
       paths:
-      - path: /
+      # Explicit prefixes, never `/`: the Prometheus `/metrics` route is
+      # scraped inside the cluster and must not be routed publicly.
+      - path: /api
         pathType: Prefix
+        backend:
+          service:
+            name: research-api-service
+            port:
+              number: 80
+      - path: /ws
+        pathType: Prefix
+        backend:
+          service:
+            name: research-api-service
+            port:
+              number: 80
+      - path: /health
+        pathType: Exact
+        backend:
+          service:
+            name: research-api-service
+            port:
+              number: 80
+      - path: /ready
+        pathType: Exact
+        backend:
+          service:
+            name: research-api-service
+            port:
+              number: 80
+      - path: /live
+        pathType: Exact
+        backend:
+          service:
+            name: research-api-service
+            port:
+              number: 80
+      - path: /openapi.json
+        pathType: Exact
         backend:
           service:
             name: research-api-service

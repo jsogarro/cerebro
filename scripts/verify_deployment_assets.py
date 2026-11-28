@@ -94,9 +94,20 @@ def _check_networking(docs: list[dict[str, Any]]) -> Iterable[str]:
             if p["targetPort"] not in ports:
                 yield f"Service/{name}: targetPort {p['targetPort']} is no container port"
     for ing in (d for d in docs if d["kind"] == "Ingress"):
+        who = f"Ingress/{ing['metadata']['name']}"
+        if "defaultBackend" in ing["spec"]:
+            yield f"{who}: defaultBackend exposes /metrics"
         for rule in ing["spec"]["rules"]:
             for path in rule["http"]["paths"]:
                 backend = path["backend"]["service"]
+                # /metrics is scraped in-cluster; the public Ingress must not route it.
+                prefix = path["path"].rstrip("/")
+                if path.get("pathType") == "Exact":
+                    exposed = path["path"] == "/metrics"
+                else:
+                    exposed = "/metrics".startswith(prefix)
+                if exposed:
+                    yield f"{who}: path {path['path']!r} exposes /metrics"
                 svc = services.get(backend["name"])
                 if svc is None:
                     yield f"Ingress/{ing['metadata']['name']}: Service {backend['name']!r} not rendered"

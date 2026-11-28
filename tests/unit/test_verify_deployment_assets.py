@@ -79,6 +79,20 @@ MUTATIONS = {
         lambda d: d["metadata"].update(namespace="elsewhere"),
         "is not a rendered Namespace",
     ),
+    "ingress exposes metrics": (
+        "Ingress",
+        lambda d: d["spec"]["rules"][0]["http"]["paths"][0].update(
+            path="/", pathType="Prefix"
+        ),
+        "exposes /metrics",
+    ),
+    "ingress default backend": (
+        "Ingress",
+        lambda d: d["spec"].update(
+            defaultBackend={"service": {"name": "x", "port": {"number": 80}}}
+        ),
+        "exposes /metrics",
+    ),
     "no limits": (
         "Deployment",
         lambda d: d["spec"]["template"]["spec"]["containers"][0].pop("resources"),
