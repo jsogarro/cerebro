@@ -21,7 +21,8 @@ import os
 import socket
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager, nullcontext
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -44,6 +45,7 @@ from src.core.budget import (
     BudgetExceededError,
     BudgetLedger,
 )
+from src.core.config import settings
 from src.core.constants import DEFAULT_AGENT_TIMEOUT, MAX_RETRY_ATTEMPTS
 from src.core.observability import (
     run_cancellation_delay_seconds,
@@ -52,6 +54,7 @@ from src.core.observability import (
 )
 from src.core.telemetry import count_tokens, telemetry_enabled
 from src.models.db.run_event import EVENT_ENVELOPE_VERSION
+from src.models.db.session import tenant_session
 from src.repositories.artifact_repository import ArtifactRepository
 from src.repositories.capability_repository import CapabilityRepository
 from src.repositories.checkpoint_repository import (
@@ -70,6 +73,7 @@ from src.repositories.run_config_snapshot_repository import (
 from src.repositories.run_event_repository import RunEventRepository
 from src.repositories.run_lifecycle_repository import (
     ResearchRunJournalOwner,
+    RunCapExceededError,
     RunLifecycleRepository,
     StaleFenceError,
 )
@@ -608,6 +612,29 @@ class DirectExecutionService:
             "concurrent_executions": 0,
         }
 
+    @asynccontextmanager
+    async def _tenant_session(
+        self, organization_id: str | uuid.UUID | None
+    ) -> AsyncIterator[Any]:
+        """Open a session whose every transaction sets Postgres RLS tenant context.
+
+        Delegates to ``src.models.db.session.tenant_session`` so multi-transaction
+        sessions (such as lease renewal followed by cancellation polling) retain
+        ``app.current_org_id`` after each commit. Falls back to the raw session
+        when ``organization_id`` is ``None`` or a test mock lacks ``sync_session``.
+        """
+        assert self.session_factory is not None
+        async with self.session_factory() as session:
+            if organization_id is None or not hasattr(session, "sync_session"):
+                yield session
+                return
+
+            def _borrow() -> Any:
+                return nullcontext(session)
+
+            async with tenant_session(_borrow, organization_id) as scoped:
+                yield scoped
+
     @property
     def supervisor_registry(self) -> TypedRegistry:
         """Retain the legacy name as a read-only view of the kernel catalog."""
@@ -664,7 +691,7 @@ class DirectExecutionService:
             return
 
         try:
-            async with self.session_factory() as session:
+            async with self._tenant_session(run.tenant_id) as session:
                 if execution_status._fencing_token is not None:
                     # A checkpoint carries the run's output, so a worker that
                     # lost its lease must not be able to publish it here.
@@ -860,6 +887,9 @@ class DirectExecutionService:
                 cross-process admission already durably won this exact run —
                 not a database problem, so not treated as one. Carries the
                 execution id the caller should coalesce onto.
+            RunCapExceededError: The organization's concurrent or 24-hour run
+                admission cap was exceeded; the transaction was rolled back and
+                no row remains.
         """
         if not self.session_factory:
             return
@@ -875,11 +905,16 @@ class DirectExecutionService:
             ready_task = task.transition_to(TaskStatus.READY, at=now)
             lease_sent_at = time.monotonic()
 
-            async with self.session_factory() as session:
+            async with self._tenant_session(binding.run.tenant_id) as session:
                 try:
                     repo = RunLifecycleRepository(session)
                     await repo.create_run(
                         binding.run, organization_id=binding.run.tenant_id
+                    )
+                    await repo.enforce_admission_caps(
+                        binding.run.tenant_id,
+                        max_concurrent_per_org=settings.RUN_MAX_CONCURRENT_PER_ORG,
+                        max_daily_per_org=settings.RUN_MAX_DAILY_PER_ORG,
                     )
                     await repo.record_run_transition(
                         queued_run, organization_id=binding.run.tenant_id
@@ -979,6 +1014,8 @@ class DirectExecutionService:
             raise RunAdmissionError(
                 f"run {binding.run.run_id!r} could not be admitted durably"
             ) from exc
+        except RunCapExceededError:
+            raise
         except Exception as exc:
             logger.warning(
                 "run_admission_persistence_failed",
@@ -1400,7 +1437,9 @@ class DirectExecutionService:
         if not self.session_factory or execution_status.run_id is None:
             return
         try:
-            async with self.session_factory() as session:
+            async with self._tenant_session(
+                execution_status.organization_id
+            ) as session:
                 repo = RunLifecycleRepository(session)
                 run_row = await repo.get_run(
                     execution_status.run_id,
@@ -1506,7 +1545,6 @@ class DirectExecutionService:
             or execution_status._attempt is None
         ):
             return {}
-        from src.core.config import settings
 
         return {
             MODEL_INVOCATION_CONTEXT_KEY: ModelInvocationContext(
@@ -1559,7 +1597,9 @@ class DirectExecutionService:
         if token is None or execution_status.run_id is None or not self.session_factory:
             return
         try:
-            async with self.session_factory() as session:
+            async with self._tenant_session(
+                execution_status.organization_id
+            ) as session:
                 await RunLifecycleRepository(session).renew_lease(
                     execution_status.run_id,
                     owner=self.owner_instance_id,
@@ -1594,7 +1634,7 @@ class DirectExecutionService:
             ):
                 continue
             try:
-                async with self.session_factory() as session:
+                async with self._tenant_session(run.tenant_id) as session:
                     await RunLifecycleRepository(session).release_lease(
                         run.run_id, owner=self.owner_instance_id, fencing_token=token
                     )
@@ -1627,7 +1667,9 @@ class DirectExecutionService:
             sent_at = time.monotonic()
             refused = False
             try:
-                async with self.session_factory() as session:
+                async with self._tenant_session(
+                    execution_status.organization_id
+                ) as session:
                     repo = RunLifecycleRepository(session)
                     if sent_at - last_renewed >= self.lease_renew_seconds:
                         refused = not await repo.renew_lease(
@@ -1808,7 +1850,7 @@ class DirectExecutionService:
         if not self.session_factory or execution_status._run is None:
             return
         try:
-            async with self.session_factory() as session:
+            async with self._tenant_session(execution_status._run.tenant_id) as session:
                 await self._append_event(
                     session,
                     run=execution_status._run,
@@ -2002,7 +2044,7 @@ class DirectExecutionService:
         last_error: Exception | None = None
         for attempt_number in range(1, self.durable_write_max_attempts + 1):
             try:
-                async with self.session_factory() as session:
+                async with self._tenant_session(run.tenant_id) as session:
                     try:
                         if await self._terminal_transition_already_committed(
                             session, transition
@@ -2305,7 +2347,7 @@ class DirectExecutionService:
             if attempt is not None:
                 attempt = attempt.request_cancellation(at=now, reason=reason)
 
-            async with self.session_factory() as session:
+            async with self._tenant_session(run.tenant_id) as session:
                 repo = RunLifecycleRepository(session)
                 await repo.record_run_transition(run, organization_id=run.tenant_id)
                 if task is not None:
@@ -2685,6 +2727,8 @@ class DirectExecutionService:
                 does not own the referenced authority, or supplied none.
             RunAdmissionError: Persistence is configured and the admission
                 write did not land; no execution was started.
+            RunCapExceededError: The organization's concurrent or 24-hour run
+                admission cap was exceeded; no execution was started.
         """
         if self.closed:
             raise RuntimeError("Direct execution service is closed")
@@ -2792,7 +2836,7 @@ class DirectExecutionService:
         if not self.session_factory:
             return None
         try:
-            async with self.session_factory() as session:
+            async with self._tenant_session(organization_id) as session:
                 lifecycle_repo = RunLifecycleRepository(session)
                 run_row = await lifecycle_repo.get_run(run_id)
                 if run_row is None:
@@ -3416,7 +3460,7 @@ class DirectExecutionService:
         """
         if not self.session_factory or organization_id is None:
             return None
-        async with self.session_factory() as session:
+        async with self._tenant_session(organization_id) as session:
             project = await ResearchRepository(session).get(
                 project_id, organization_id=organization_id
             )
