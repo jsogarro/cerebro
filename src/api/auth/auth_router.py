@@ -14,6 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.auth.tokens_router import router as tokens_router
 from src.api.client_ip import client_ip
 from src.api.middleware.rate_limiter import (
     RedisRateLimitStore,
@@ -40,6 +41,7 @@ from src.auth.password_service import (
     PasswordService,
     PasswordTokenStoreUnavailableError,
 )
+from src.auth.pat_service import user_claims
 from src.core.config import settings
 from src.middleware.auth_middleware import (
     get_current_token,
@@ -54,6 +56,7 @@ from src.security.login_throttle import LoginThrottle
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+router.include_router(tokens_router)
 
 # Security scheme
 security = HTTPBearer()
@@ -128,10 +131,7 @@ def provisioned_organization_id(user: User) -> UUID:
 
 def _claims_for(user: User) -> tuple[list[str], list[str]]:
     """Roles and permissions an account carries in its tokens."""
-    roles = [user.role] if user.role else ["user"]
-    if user.is_superuser:
-        return [*roles, "admin"], ["*"]
-    return roles, []
+    return user_claims(user)
 
 
 async def _current_identity(db: AsyncSession, user_id: str) -> RefreshIdentity:

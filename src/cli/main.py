@@ -13,6 +13,7 @@ from src.cli import __version__
 from src.cli.commands.agents import agents_group
 from src.cli.commands.authority import authority_group
 from src.cli.commands.projects import projects_group
+from src.cli.commands.tokens import tokens_group
 from src.cli.config import config
 from src.cli.formatters import OutputFormatter
 
@@ -170,6 +171,7 @@ def health_check(ctx: Context) -> None:
 cli.add_command(agents_group)
 cli.add_command(authority_group)
 cli.add_command(projects_group)
+cli.add_command(tokens_group)
 
 
 # Shell completion

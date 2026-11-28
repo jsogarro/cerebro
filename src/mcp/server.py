@@ -22,7 +22,11 @@ from src.api.services.research_kernel import (
     execution_status_payload,
     get_kernel_execution_status,
 )
-from src.auth.models import TokenPayload
+from src.auth.models import (
+    PAT_SCOPE_READ,
+    PersonalAccessTokenPayload,
+    TokenPayload,
+)
 from src.middleware.tenant_context import TenantContext, require_organization_id
 from src.security.audit_logger import AuditEventType, AuditLogger
 
@@ -33,7 +37,9 @@ _READ_ONLY_ANNOTATIONS: dict[str, bool] = {
 }
 
 
-def _caller() -> tuple[TenantContext, Any]:
+def _caller(
+    *, required_scope: str | None = None
+) -> tuple[TenantContext, Any, str | None]:
     """Resolve authenticated tenant context from the active HTTP request."""
     try:
         request = get_http_request()
@@ -41,15 +47,27 @@ def _caller() -> tuple[TenantContext, Any]:
         raise ToolError("Authentication required: MCP tools require HTTP") from exc
 
     payload = getattr(request.state, "token_payload", None)
-    if not isinstance(payload, TokenPayload):
+    if not isinstance(payload, (TokenPayload, PersonalAccessTokenPayload)):
         raise ToolError("Authentication required")
+
+    pat_id: str | None = None
+    if isinstance(payload, PersonalAccessTokenPayload):
+        pat_id = payload.pat_id
+        if required_scope and not payload.has_scope(required_scope):
+            raise ToolError(
+                f"Personal access token missing required scope: {required_scope}"
+            )
 
     try:
         organization_id = require_organization_id(payload)
     except HTTPException as exc:
         raise ToolError(str(exc.detail)) from exc
 
-    return TenantContext(user_id=payload.sub, organization_id=organization_id), request
+    return (
+        TenantContext(user_id=payload.sub, organization_id=organization_id),
+        request,
+        pat_id,
+    )
 
 
 def build_mcp_server(
@@ -73,11 +91,14 @@ def build_mcp_server(
         result: str,
         tenant: TenantContext | None = None,
         request: Any = None,
+        pat_id: str | None = None,
         detail: str | None = None,
     ) -> None:
         metadata: dict[str, Any] = {"tool": tool_name}
         if tenant is not None:
             metadata["organization_id"] = tenant.organization_id
+        if pat_id is not None:
+            metadata["pat_id"] = pat_id
         if detail is not None:
             metadata["detail"] = detail
         await audit_logger.log_event(
@@ -96,8 +117,9 @@ def build_mcp_server(
         """Get the status and progress of a research execution."""
         tenant: TenantContext | None = None
         request: Any = None
+        pat_id: str | None = None
         try:
-            tenant, request = _caller()
+            tenant, request, pat_id = _caller(required_scope=PAT_SCOPE_READ)
             exec_status = await get_kernel_execution_status(
                 kernel,
                 execution_id,
@@ -114,6 +136,7 @@ def build_mcp_server(
                 result="failure",
                 tenant=tenant,
                 request=request,
+                pat_id=pat_id,
                 detail=str(exc),
             )
             raise
@@ -125,6 +148,7 @@ def build_mcp_server(
             result="success",
             tenant=tenant,
             request=request,
+            pat_id=pat_id,
         )
         return payload
 
@@ -133,8 +157,9 @@ def build_mcp_server(
         """Get completed research results with trust labels and claim verdicts."""
         tenant: TenantContext | None = None
         request: Any = None
+        pat_id: str | None = None
         try:
-            tenant, request = _caller()
+            tenant, request, pat_id = _caller(required_scope=PAT_SCOPE_READ)
             payload = await build_research_results_payload(
                 kernel,
                 execution_id,
@@ -151,6 +176,7 @@ def build_mcp_server(
                 result="failure",
                 tenant=tenant,
                 request=request,
+                pat_id=pat_id,
                 detail=str(exc),
             )
             raise
@@ -162,6 +188,7 @@ def build_mcp_server(
             result="success",
             tenant=tenant,
             request=request,
+            pat_id=pat_id,
         )
         return payload
 
@@ -174,8 +201,9 @@ def build_mcp_server(
         """List metadata-only evidence records for a research run."""
         tenant: TenantContext | None = None
         request: Any = None
+        pat_id: str | None = None
         try:
-            tenant, request = _caller()
+            tenant, request, pat_id = _caller(required_scope=PAT_SCOPE_READ)
             if session_factory is None:
                 raise ToolError("Evidence storage is unavailable")
             try:
@@ -197,6 +225,7 @@ def build_mcp_server(
                 result="failure",
                 tenant=tenant,
                 request=request,
+                pat_id=pat_id,
                 detail=str(exc),
             )
             raise
@@ -208,6 +237,7 @@ def build_mcp_server(
             result="success",
             tenant=tenant,
             request=request,
+            pat_id=pat_id,
         )
         return payload
 

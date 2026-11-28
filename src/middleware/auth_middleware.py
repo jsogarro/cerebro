@@ -21,10 +21,15 @@ from starlette.responses import Response
 
 from src.api.middleware.error_envelope import build_error_payload
 from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
-from src.auth.models import TokenPayload
+from src.auth.models import PAT_PREFIX, PersonalAccessTokenPayload, TokenPayload
+from src.auth.pat_service import (
+    PATServiceUnavailableError,
+    PATValidationError,
+    PersonalAccessTokenService,
+)
 from src.core.config import settings
 from src.models.db.audit_log import AuditEventType
-from src.models.db.session import get_session
+from src.models.db.session import get_maintenance_session_factory, get_session
 from src.models.db.user import User
 from src.repositories.user_repository import UserRepository
 from src.security.audit_middleware import audit_rejection
@@ -61,12 +66,19 @@ PUBLIC_ROUTE_ALLOWLIST: Final[dict[tuple[str, str], str]] = {
 }
 
 
-def _set_request_identity(request: Request, token_payload: TokenPayload) -> None:
+def _set_request_identity(
+    request: Request, token_payload: TokenPayload | PersonalAccessTokenPayload
+) -> None:
     """Expose the validated identity to audit, rate-limit, and tenant code."""
     request.state.user = token_payload.sub
     request.state.user_id = token_payload.sub
     request.state.token_payload = token_payload
     request.state.organization_id = token_payload.organization_id
+    request.state.pat_id = (
+        token_payload.pat_id
+        if isinstance(token_payload, PersonalAccessTokenPayload)
+        else None
+    )
 
 
 def _authentication_response(
@@ -121,6 +133,41 @@ async def resolve_jwt_service(connection: HTTPConnection) -> JWTService:
     return cast(JWTService, service)
 
 
+async def get_pat_service() -> PersonalAccessTokenService:
+    """Return a PAT validator backed by the maintenance session factory."""
+    try:
+        return PersonalAccessTokenService(
+            session_factory=get_maintenance_session_factory()
+        )
+    except Exception as exc:
+        logger.error("PAT authentication service unavailable", error=str(exc))
+        raise AuthenticationServiceUnavailableError from exc
+
+
+async def resolve_pat_service(
+    connection: HTTPConnection,
+) -> PersonalAccessTokenService:
+    """Resolve PAT validation while honoring FastAPI test overrides."""
+    dependency_overrides = getattr(connection.app, "dependency_overrides", {})
+    service_factory: Callable[..., Any] = dependency_overrides.get(
+        get_pat_service, get_pat_service
+    )
+
+    try:
+        service = service_factory()
+        if inspect.isawaitable(service):
+            service = await service
+    except Exception as exc:
+        logger.error("PAT authentication service unavailable", error=str(exc))
+        raise AuthenticationServiceUnavailableError from exc
+
+    if service is None or not callable(getattr(service, "validate_token", None)):
+        logger.error("PAT authentication service has no token validator")
+        raise AuthenticationServiceUnavailableError
+
+    return cast(PersonalAccessTokenService, service)
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """
     Authentication middleware for all requests.
@@ -158,6 +205,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.user_id = None
         request.state.token_payload = None
         request.state.organization_id = None
+        request.state.pat_id = None
 
         route_signature = (request.method.upper(), request.url.path)
         if route_signature in PUBLIC_ROUTE_ALLOWLIST:
@@ -168,15 +216,33 @@ class AuthMiddleware(BaseHTTPMiddleware):
             audit_rejection(request, AuditEventType.UNAUTHORIZED_ACCESS, "no token")
             return _authentication_response(401, "Authentication required")
 
+        if token.startswith(PAT_PREFIX) and request.url.path != "/mcp":
+            audit_rejection(
+                request,
+                AuditEventType.UNAUTHORIZED_ACCESS,
+                "pat restricted to /mcp",
+            )
+            return _authentication_response(
+                401, "Personal access tokens are only accepted on /mcp"
+            )
+
+        token_payload: TokenPayload | PersonalAccessTokenPayload
         try:
             jwt_service = await resolve_jwt_service(request)
-            token_payload = await jwt_service.validate_token(token)
+            if token.startswith(PAT_PREFIX):
+                pat_service = await resolve_pat_service(request)
+                token_payload = await pat_service.validate_token(
+                    token, jwt_service=jwt_service
+                )
+            else:
+                token_payload = await jwt_service.validate_token(token)
         except (
             AuthenticationServiceUnavailableError,
             JWTServiceUnavailableError,
+            PATServiceUnavailableError,
         ):
             return _authentication_response(503, "Authentication service unavailable")
-        except JWTError:
+        except (JWTError, PATValidationError):
             audit_rejection(
                 request, AuditEventType.UNAUTHORIZED_ACCESS, "invalid token"
             )
@@ -248,6 +314,12 @@ async def get_current_token(
         HTTPException: If token is invalid or missing
     """
     cached_payload = getattr(request.state, "token_payload", None)
+    if isinstance(cached_payload, PersonalAccessTokenPayload):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Personal access tokens are not accepted on this endpoint",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if isinstance(cached_payload, TokenPayload):
         return cached_payload
 
@@ -259,6 +331,12 @@ async def get_current_token(
         )
 
     token = credentials.credentials
+    if token.startswith(PAT_PREFIX):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Personal access tokens are not accepted on this endpoint",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     try:
         token_payload = await jwt_service.validate_token(token)

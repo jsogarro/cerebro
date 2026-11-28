@@ -25,6 +25,7 @@ from src.models.db.experiment import (
 from src.models.db.generated_report import GeneratedReport, ReportFormat
 from src.models.db.model_call_reservation import ModelCallReservation
 from src.models.db.oauth_account import OAuthAccount, OAuthProvider
+from src.models.db.personal_access_token import PersonalAccessToken
 from src.models.db.research_project import ResearchProject
 from src.models.db.research_result import ResearchResult
 from src.models.db.run_config_snapshot import AgentRunConfigSnapshot
@@ -87,6 +88,7 @@ __all__ = [
     "ModelCallReservation",
     "OAuthAccount",
     "OAuthProvider",
+    "PersonalAccessToken",
     "ReportFormat",
     "ResearchProject",
     "ResearchResult",
