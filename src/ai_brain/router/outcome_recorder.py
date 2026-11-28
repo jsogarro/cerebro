@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from structlog import get_logger
 
@@ -21,6 +21,7 @@ from .routing_outcome import (
     OutcomeSource,
     RoutingOutcome,
 )
+from .routing_types import CollaborationMode
 
 if TYPE_CHECKING:
     from .masr import MASRouter, RoutingDecision
@@ -28,6 +29,61 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 _IDENTIFIER_VERSION = "v1"
+ADAPTIVE_OUTCOME_DESTINATION: Final = "adaptive_outcome"
+TERMINAL_RUN_EVENTS: Final[frozenset[str]] = frozenset(
+    {
+        "run.succeeded",
+        "run.failed",
+        "run.budget_exceeded",
+        "run.cancelled",
+        "run.interrupted",
+    }
+)
+
+
+@dataclass(frozen=True)
+class RecordedAdaptiveMetadata:
+    """Minimal adaptive attribution rebuilt from durable run metadata."""
+
+    proposed_arm: int = 0
+    applied_arm: int = 0
+    final_worker_count: int = 1
+
+
+@dataclass(frozen=True)
+class RecordedAllocation:
+    """Minimal allocation summary for durable outcome recording."""
+
+    worker_count: int = 1
+
+
+@dataclass(frozen=True)
+class RecordedRoutingDecision:
+    """Durable routing decision view accepted by :class:`RoutingOutcomeRecorder`."""
+
+    collaboration_mode: CollaborationMode
+    agent_allocation: RecordedAllocation
+    adaptive_metadata: RecordedAdaptiveMetadata | None = None
+
+    @classmethod
+    def from_allocation(
+        cls,
+        *,
+        collaboration_mode: CollaborationMode,
+        worker_count: int,
+        proposed_arm: int = 0,
+        applied_arm: int = 0,
+    ) -> RecordedRoutingDecision:
+        bounded_workers = max(1, worker_count)
+        return cls(
+            collaboration_mode=collaboration_mode,
+            agent_allocation=RecordedAllocation(worker_count=bounded_workers),
+            adaptive_metadata=RecordedAdaptiveMetadata(
+                proposed_arm=proposed_arm,
+                applied_arm=applied_arm,
+                final_worker_count=bounded_workers,
+            ),
+        )
 
 
 def derive_opaque_identifier(kind: str, *stable_parts: str) -> str:
@@ -52,12 +108,15 @@ class ExecutedAllocationOutcome:
     allocation_key: str
     allocation_attempt_id: str
     execution_status: str
-    latency_ms: int
+    latency_ms: int | None
     source: OutcomeSource
     measured_cost: float | None = None
     cost_availability: MetricAvailability = MetricAvailability.UNAVAILABLE
     quality_score: float | None = None
     quality_availability: MetricAvailability = MetricAvailability.UNAVAILABLE
+    evaluator_name: str | None = None
+    evaluator_version: str | None = None
+    evaluation_id: str | None = None
     run_id: str | None = None
     task_id: str | None = None
 
@@ -82,7 +141,7 @@ class RoutingOutcomeRecorder:
 
     async def record(
         self,
-        decision: RoutingDecision,
+        decision: RoutingDecision | RecordedRoutingDecision,
         observation: ExecutedAllocationOutcome,
     ) -> OutcomeApplicationResult:
         """Deliver one outcome, retrying transient failures with the same ID."""
@@ -112,6 +171,7 @@ class RoutingOutcomeRecorder:
             routing_id=routing_id,
             run_id=observation.run_id,
             task_id=observation.task_id,
+            evaluation_id=observation.evaluation_id,
             policy_version=self._router.adaptive_policy_version,
             schema_version=self._router.adaptive_schema_version,
             source=observation.source,
@@ -125,6 +185,8 @@ class RoutingOutcomeRecorder:
             cost_availability=observation.cost_availability,
             quality_score=observation.quality_score,
             quality_availability=observation.quality_availability,
+            evaluator_name=observation.evaluator_name,
+            evaluator_version=observation.evaluator_version,
         )
 
         result: OutcomeApplicationResult | None = None
@@ -154,7 +216,12 @@ class RoutingOutcomeRecorder:
 
 
 __all__ = [
+    "ADAPTIVE_OUTCOME_DESTINATION",
+    "TERMINAL_RUN_EVENTS",
     "ExecutedAllocationOutcome",
+    "RecordedAdaptiveMetadata",
+    "RecordedAllocation",
+    "RecordedRoutingDecision",
     "RoutingOutcomeRecorder",
     "derive_opaque_identifier",
 ]

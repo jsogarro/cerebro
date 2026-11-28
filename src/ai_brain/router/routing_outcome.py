@@ -208,7 +208,9 @@ class EvaluatorEligibilityPolicy:
         policy_version: str = ADAPTIVE_POLICY_VERSION,
         schema_version: str = ADAPTIVE_OUTCOME_SCHEMA_VERSION,
         allowed_evaluators: Mapping[str, frozenset[str]] | None = None,
-        successful_statuses: frozenset[str] = frozenset({"completed", "success"}),
+        successful_statuses: frozenset[str] = frozenset(
+            {"completed", "success", "succeeded"}
+        ),
         max_outcome_age: timedelta = timedelta(
             seconds=ADAPTIVE_OUTCOME_MAX_AGE_SECONDS
         ),
