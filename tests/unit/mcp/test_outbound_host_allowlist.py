@@ -147,7 +147,9 @@ def _authority_binding(
     *,
     tools: tuple[str, ...],
     allowed_outbound_hosts: tuple[str, ...] = (),
+    now: datetime | None = None,
 ) -> ExecutionAuthorityBinding:
+    anchor = now or datetime.now(UTC)
     worker_kwargs: dict[str, Any] = {
         "worker_id": "worker-research",
         "worker_type": "literature_review",
@@ -188,8 +190,8 @@ def _authority_binding(
         ),
         stop_conditions=("complete",),
         evaluator_requirements=(),
-        deadline=NOW + timedelta(minutes=10),
-        compiled_at=NOW,
+        deadline=anchor + timedelta(minutes=10),
+        compiled_at=anchor,
     )
 
 
@@ -596,6 +598,7 @@ class TestCapabilityContractAndIssuerHostEnforcement:
                 "arithmetic",
             ),
             allowed_outbound_hosts=("export.arxiv.org", "unrecognized.example"),
+            now=NOW,
         )
 
         grants = {
@@ -860,6 +863,7 @@ class TestReviewHardeningFixes:
             tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
             allowed_outbound_hosts=(),
         )
+        anchor = datetime.now(UTC)
         binding = ExecutionAuthorityBinding.create_for_test(
             authority_id="auth-2w",
             authority_version="1",
@@ -896,8 +900,8 @@ class TestReviewHardeningFixes:
             ),
             stop_conditions=("complete",),
             evaluator_requirements=(),
-            deadline=NOW + timedelta(minutes=10),
-            compiled_at=NOW,
+            deadline=anchor + timedelta(minutes=10),
+            compiled_at=anchor,
         )
         grants = PlanCapabilityIssuer.issue(
             binding,
