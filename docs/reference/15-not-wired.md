@@ -92,7 +92,6 @@ Tests that exercise them live in `tests/unit/core/claims/`. `src/core/acquisitio
 
 | Module | What it holds | Imported by |
 |---|---|---|
-| `src/agents/delegation_contract.py` | `DelegationContract` | `tests/test_fast_path.py` |
 | `src/services/evaluation_regression.py` | Golden-dataset regression scoring | `tests/regression/` |
 | `src/services/text_alignment/` | Deterministic span alignment over source text | `tests/unit/services/test_text_alignment.py` |
 

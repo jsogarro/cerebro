@@ -127,6 +127,8 @@ A worker with direct predecessors receives their validated outputs in the reserv
 
 `RESERVED_RUNTIME_INPUT_KEYS` (`upstream_results`, `previous_result`, `agent_outputs`, `background`) belong to the runtime: client-supplied values for them are dropped before a worker is called, and `objective`, `output_schema`, `permission_scopes`, `tool_allowlist` and `provider_model_policy` are always set from the plan.
 
+Each worker's task context carries a `DelegationContract` brief (`src/agents/delegation_contract.py`) that `brief_for_worker` builds from the assignment: the objective, the output schema, the tool allowlist and the permission scopes. `LLMWorkerAgentBase.execute` appends it to the prompt as an escaped `<delegation_brief>` block only when the context value is a `DelegationContract` instance, so a dict supplied by a client is never rendered.
+
 ## Fixture mode
 
 > **Not wired.** `start_research_execution` accepts `execution_policy` and `fixture_result`; with `execution_policy.fixture_mode` set, it returns `fixture_result` as the execution output without running any worker. No caller passes them: `intelligent_research_query` reaches `start_research_execution` through the kernel adapter, whose call signature has neither argument, and `POST /api/v1/research/projects` passes only `authority_reference`.

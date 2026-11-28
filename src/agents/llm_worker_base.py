@@ -24,6 +24,10 @@ from typing import TYPE_CHECKING, Any, Final
 from pydantic.errors import PydanticUserError
 
 from src.agents.base import BaseAgent
+from src.agents.delegation_contract import (
+    DELEGATION_BRIEF_CONTEXT_KEY,
+    DelegationContract,
+)
 from src.agents.models import AgentResult, AgentTask
 from src.agents.tools.base_tool import ToolResult
 from src.agents.tools.mediation import ToolCallIdentity
@@ -1212,6 +1216,10 @@ class LLMWorkerAgentBase(BaseAgent):
         computed = self._precompute(task)
 
         prompt = self._build_prompt(query, task)
+
+        brief = task.context.get(DELEGATION_BRIEF_CONTEXT_KEY)
+        if isinstance(brief, DelegationContract) and not brief.validate():
+            prompt += f"\n\n{brief.render()}\n"
 
         # Append procedural memory context if available (feature-flagged)
         procedural_context = await self._get_procedural_context(task)
