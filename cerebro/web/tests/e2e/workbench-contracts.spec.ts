@@ -2,7 +2,9 @@ import { expect, test } from '@playwright/test';
 import {
   adaptArtifact,
   adaptClaimSupport,
+  adaptEvaluation,
   adaptEvidence,
+  adaptEvidenceCollection,
   adaptRun,
   adaptTask,
   runRefetchInterval,
@@ -140,5 +142,53 @@ test.describe('workbench transport contracts', () => {
     expect(subresourceRefetchInterval('running', 0)).toBe(2_000);
     expect(subresourceRefetchInterval('running', 3)).toBe(false);
     expect(subresourceRefetchInterval('completed', 0)).toBe(false);
+  });
+
+  test('adapts evaluation explanation from explanation, rationale, or default text', () => {
+    const base = {
+      evaluation_id: 'eval-1',
+      run_id: 'run-1',
+      evaluator_id: 'claims.coverage',
+      evaluator_version: '1.0.0',
+      method: 'deterministic',
+      status: 'passed',
+      severity: 'info',
+    };
+
+    const withExplanation = adaptEvaluation({
+      ...base,
+      explanation: 'All claims are backed by evidence.',
+      rationale: 'Ignored because explanation is present.',
+    });
+    expect(withExplanation.value?.explanation).toBe('All claims are backed by evidence.');
+
+    const withRationale = adaptEvaluation({
+      ...base,
+      rationale: 'Coverage met threshold.',
+    });
+    expect(withRationale.value?.explanation).toBe('Coverage met threshold.');
+
+    const withNeither = adaptEvaluation({
+      ...base,
+      rationale: null,
+    });
+    expect(withNeither.value?.explanation).toBe('No evaluation explanation provided.');
+  });
+
+  test('propagates top-level run_id onto evidence items in adaptEvidenceCollection', () => {
+    const collection = adaptEvidenceCollection({
+      run_id: 'run-1',
+      items: [
+        {
+          evidence_id: 'ev-1',
+          source_type: 'web',
+          locator: 'char:0-10',
+          content_sha256: 'abc',
+          acquired_at: '2026-11-01T00:00:00Z',
+        },
+      ],
+    });
+    expect(collection.items).toHaveLength(1);
+    expect(collection.items[0]?.runId).toBe('run-1');
   });
 });

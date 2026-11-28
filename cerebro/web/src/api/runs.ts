@@ -243,7 +243,6 @@ export function adaptRun(value: unknown): ResourceContract<Run> {
     { canonical: 'run_id', aliases: ['id'] },
     { canonical: 'workflow_id' },
     { canonical: 'workflow_version' },
-    { canonical: 'objective' },
   ]);
   if (required.issues.length > 0) {
     return { value: null, presentation: presentation.malformed(required.issues) };
@@ -274,7 +273,9 @@ export function adaptRun(value: unknown): ResourceContract<Run> {
       id: required.values.run_id,
       workflowId: required.values.workflow_id,
       workflowVersion: required.values.workflow_version,
-      objective: required.values.objective,
+      // The run row stores no request text; the API sends the first task's
+      // objective and omits it before any task exists.
+      objective: readString(value, 'objective') ?? 'Objective not recorded',
       inputs: inputs ?? {},
       mode: mode.mode,
       rawMode: mode.raw,
@@ -431,7 +432,6 @@ export function adaptEvent(value: unknown): ResourceContract<Event> {
     { canonical: 'version' },
     { canonical: 'run_id' },
     { canonical: 'type', aliases: ['event_type'] },
-    { canonical: 'summary' },
   ]);
   if (required.issues.length > 0) {
     return { value: null, presentation: presentation.malformed(required.issues) };
@@ -451,7 +451,7 @@ export function adaptEvent(value: unknown): ResourceContract<Event> {
       newState: newState.state,
       rawNewState: newState.raw,
       occurredAt: optionalTimestamp(value, 'occurred_at') ?? optionalTimestamp(value, 'timestamp'),
-      summary: required.values.summary,
+      summary: readString(value, 'summary') ?? required.values.type,
       traceId: readString(value, 'trace_id'),
       metrics: adaptOperationalMetrics(value.measured_values ?? value.operational_metrics),
     },
@@ -492,8 +492,9 @@ export function adaptEvidence(value: unknown): ResourceContract<Evidence> {
       locator: required.values.locator,
       title: readString(value, 'title'),
       publisher: readString(value, 'publisher') ?? readString(value, 'author'),
-      retrievedAt: optionalTimestamp(value, 'retrieved_at'),
-      contentHash: readString(value, 'content_hash'),
+      retrievedAt:
+        optionalTimestamp(value, 'retrieved_at') ?? optionalTimestamp(value, 'acquired_at'),
+      contentHash: readString(value, 'content_hash') ?? readString(value, 'content_sha256'),
       fixtureReference: readString(value, 'fixture_reference'),
       excerpt: readString(value, 'excerpt'),
       structuredValue: value.structured_value ?? null,
@@ -510,6 +511,20 @@ export function adaptEvidence(value: unknown): ResourceContract<Evidence> {
 }
 
 export function adaptEvidenceCollection(value: unknown): CollectionContract<Evidence> {
+  if (isRecord(value) && typeof value.run_id === 'string' && Array.isArray(value.items)) {
+    const runId = value.run_id;
+    return adaptCollection(
+      {
+        ...value,
+        items: value.items.map((item) =>
+          isRecord(item) && item.run_id === undefined ? { run_id: runId, ...item } : item,
+        ),
+      },
+      ['items', 'evidence', 'results'],
+      'Evidence',
+      adaptEvidence,
+    );
+  }
   return adaptCollection(value, ['items', 'evidence', 'results'], 'Evidence', adaptEvidence);
 }
 
@@ -698,7 +713,6 @@ export function adaptEvaluation(value: unknown): ResourceContract<Evaluation> {
     { canonical: 'run_id' },
     { canonical: 'evaluator_id' },
     { canonical: 'evaluator_version' },
-    { canonical: 'explanation' },
   ]);
   if (required.issues.length > 0) {
     return { value: null, presentation: presentation.malformed(required.issues) };
@@ -731,7 +745,10 @@ export function adaptEvaluation(value: unknown): ResourceContract<Evaluation> {
       rawStatus: status.raw,
       severity: severity.severity,
       rawSeverity: severity.raw,
-      explanation: required.values.explanation,
+      explanation:
+        readString(value, 'explanation') ??
+        readString(value, 'rationale') ??
+        'No evaluation explanation provided.',
       artifactIds: referenceIds(value.artifact_ids),
       evidenceIds: referenceIds(value.evidence_ids),
       metrics: adaptEvaluationMetrics(value.metrics),
@@ -814,23 +831,47 @@ export async function cancelRun(runId: string): Promise<ResourceContract<Run>> {
   return contract;
 }
 
+const COLLECTION_PAGE_LIMIT = 200;
+const MAX_COLLECTION_PAGES = 50;
+
+/**
+ * Reads a run sub-resource to the end. Cursor-paged resources (`event-history`,
+ * `evidence`) are followed while the server reports `has_more`; the others
+ * return one bounded page.
+ */
 async function fetchRunCollection<T>(
   runId: string,
   resource: string,
   adapter: (value: unknown) => CollectionContract<T>,
   signal?: AbortSignal,
 ): Promise<CollectionContract<T>> {
-  const { data } = await apiClient.get<unknown>(
-    `/runs/${encodeURIComponent(runId)}/${resource}`,
-    { handleErrorLocally: true, signal },
-  );
-  return adapter(data);
+  const items: unknown[] = [];
+  let cursor: string | undefined;
+  let lastData: Record<string, unknown> = {};
+  for (let page = 0; page < MAX_COLLECTION_PAGES; page += 1) {
+    const { data } = await apiClient.get<unknown>(
+      `/runs/${encodeURIComponent(runId)}/${resource}`,
+      {
+        params: { limit: COLLECTION_PAGE_LIMIT, ...(cursor ? { cursor } : {}) },
+        handleErrorLocally: true,
+        signal,
+      },
+    );
+    if (!isRecord(data) || !Array.isArray(data.items)) return adapter(data);
+    lastData = data;
+    items.push(...data.items);
+    if (data.has_more !== true || typeof data.next_cursor !== 'string') {
+      return adapter({ ...data, items });
+    }
+    cursor = data.next_cursor;
+  }
+  return adapter({ ...lastData, items });
 }
 
 export const fetchRunTasks = (runId: string, signal?: AbortSignal) =>
   fetchRunCollection(runId, 'tasks', adaptTaskCollection, signal);
 export const fetchRunEvents = (runId: string, signal?: AbortSignal) =>
-  fetchRunCollection(runId, 'events', adaptEventCollection, signal);
+  fetchRunCollection(runId, 'event-history', adaptEventCollection, signal);
 export const fetchRunEvidence = (runId: string, signal?: AbortSignal) =>
   fetchRunCollection(runId, 'evidence', adaptEvidenceCollection, signal);
 export const fetchRunArtifacts = (runId: string, signal?: AbortSignal) =>

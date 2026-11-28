@@ -14,7 +14,7 @@ const requiredOperations = {
   '/api/v1/runs/{run_id}': ['get'],
   '/api/v1/runs/{run_id}/cancel': ['post'],
   '/api/v1/runs/{run_id}/tasks': ['get'],
-  '/api/v1/runs/{run_id}/events': ['get'],
+  '/api/v1/runs/{run_id}/event-history': ['get'],
   '/api/v1/runs/{run_id}/evidence': ['get'],
   '/api/v1/runs/{run_id}/artifacts': ['get'],
   '/api/v1/runs/{run_id}/evaluations': ['get'],

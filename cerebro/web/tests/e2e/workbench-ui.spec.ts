@@ -50,7 +50,7 @@ test.describe('research workbench journey', () => {
         name: 'Provider and cost ledger',
       });
       await expect(artifactHeading).toBeVisible();
-      for (const resource of ['tasks', 'events', 'evidence', 'artifacts', 'evaluations']) {
+      for (const resource of ['tasks', 'event-history', 'evidence', 'artifacts', 'evaluations']) {
         expect(
           resourceRequestCounts.get(resource),
           `${resource} receives a final fetch after the run becomes terminal`,

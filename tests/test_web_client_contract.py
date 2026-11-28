@@ -22,27 +22,19 @@ WEB_SRC = Path(__file__).resolve().parents[1] / "cerebro" / "web" / "src"
 API_PREFIX = "/api/v1"
 VERBS = "get|post|put|patch|delete|head|options"
 
-# Surfaces the client renders but the server has no counterpart for yet (there
-# is no run/workflow read API, memory explorer, or agent log feed). Each entry
-# is a known gap, not a licence: the test fails if one becomes served, so this
-# list can only shrink.
+# Surfaces the client renders but the server has no counterpart for yet (run
+# launch and cancel, a single-workflow read, the memory explorer, the agent log
+# feed). Each entry is a known gap, not a licence: the test fails if one
+# becomes served, so this list can only shrink.
 KNOWN_UNSERVED = {
-    ("GET", "/runs"),
     ("POST", "/runs"),
-    ("GET", "/runs/{}"),
     ("POST", "/runs/{}/cancel"),
-    ("GET", "/runs/{}/tasks"),
-    ("GET", "/runs/{}/artifacts"),
-    ("GET", "/runs/{}/evaluations"),
     ("GET", "/workflows/{}"),
     ("GET", "/memory/nodes"),
     ("GET", "/agents/{}/logs"),
-    # Mounted, but as an SSE stream; the client reads it as JSON.
-    ("GET", "/runs/{}/events"),
 }
-SSE_MOUNTED_BUT_MISREAD = {("GET", "/runs/{}/events")}
 
-_RUN_RESOURCE_CALL = re.compile(r"fetchRunCollection\(\s*runId,\s*'(\w+)'")
+_RUN_RESOURCE_CALL = re.compile(r"fetchRunCollection\(\s*runId,\s*'([\w-]+)'")
 _WS_PATH = re.compile(r"\$\{host\}(/ws[\w/]*)")
 # <call prefix> optionally followed by a generic, then the opening paren.
 _CALLS = [
@@ -185,10 +177,15 @@ def test_known_unserved_entries_are_still_called_and_unserved(
     assert entry in calls, (
         f"{entry} is no longer called by the client; drop it from KNOWN_UNSERVED"
     )
-    if entry not in SSE_MOUNTED_BUT_MISREAD:
-        assert entry not in _served(), (
-            f"{entry} is now mounted; drop it from KNOWN_UNSERVED"
-        )
+    assert entry not in _served(), (
+        f"{entry} is now mounted; drop it from KNOWN_UNSERVED"
+    )
+
+
+def test_client_reads_event_history_not_the_sse_stream_as_json() -> None:
+    calls, _ = _scan()
+    assert ("GET", "/runs/{}/event-history") in calls
+    assert ("GET", "/runs/{}/events") not in calls
 
 
 def test_websocket_path_is_mounted() -> None:

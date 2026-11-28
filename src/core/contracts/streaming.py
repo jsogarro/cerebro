@@ -31,7 +31,9 @@ class RunEventCursor(ContractModel):
     """
 
     run_id: ContractId
-    last_sequence: int = Field(default=0, ge=0)
+    # int64 ceiling: the column is a BigInteger, so a larger forged value would be
+    # a database error rather than a rejected cursor.
+    last_sequence: int = Field(default=0, ge=0, le=2**63 - 1)
 
     def advanced_to(self, sequence: int) -> Self:
         """Return the cursor moved forward to ``sequence``.

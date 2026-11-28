@@ -94,7 +94,7 @@ async def test_run_evidence_hides_another_organizations_run(client, db, new_acco
 
 
 async def test_evidence_reads_are_scoped_to_the_callers_organization(db, new_account):
-    """Evidence has no HTTP route yet (P08), so the repository is the read surface."""
+    """The repository read the HTTP evidence route is built on."""
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     alice, bob = await new_account("alice"), await new_account("bob")
@@ -170,14 +170,6 @@ def _missing(packet: str, what: str) -> pytest.MarkDecorator:
 
 _MISSING_READ_ROUTES = [
     pytest.param(
-        "/api/v1/runs", marks=_missing("P08", "GET /api/v1/runs missing"), id="runs"
-    ),
-    pytest.param(
-        "/api/v1/runs/{run_id}/artifacts",
-        marks=_missing("P08", "GET /api/v1/runs/{run_id}/artifacts missing"),
-        id="artifacts",
-    ),
-    pytest.param(
         "/api/v1/memory",
         marks=_missing("P16", "GET /api/v1/memory missing"),
         id="memory",
@@ -191,6 +183,50 @@ async def test_read_route_exists_for_isolation_check(client, new_account, path):
     pytest.fail(
         "route landed: assert Bob cannot read Alice's rows through it, then drop the xfail"
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "lists_rows"),
+    [
+        ("/api/v1/runs", True),
+        ("/api/v1/runs/{run_id}", False),
+        ("/api/v1/runs/{run_id}/tasks", True),
+        ("/api/v1/runs/{run_id}/evidence", True),
+        ("/api/v1/runs/{run_id}/artifacts", True),
+        ("/api/v1/runs/{run_id}/evaluations", False),
+        ("/api/v1/runs/{run_id}/event-history", False),
+    ],
+    ids=[
+        "runs",
+        "detail",
+        "tasks",
+        "evidence",
+        "artifacts",
+        "evaluations",
+        "event-history",
+    ],
+)
+async def test_run_read_route_is_served_and_isolated(
+    client, db, new_account, path, lists_rows
+):
+    alice, bob = await new_account("alice"), await new_account("bob")
+    run_id, evidence_id = await seed_run_with_evidence(db, alice.org_id)
+    await require_operation(client, alice, "GET", path)
+
+    url = path.format(run_id=run_id)
+    own = await client.get(url, headers=alice.headers)
+    assert own.status_code == 200, own.text
+    if lists_rows:
+        assert own.json()["items"], own.text
+        assert run_id in own.text or evidence_id in own.text
+
+    other = await client.get(url, headers=bob.headers)
+    if "{run_id}" in path:
+        assert other.status_code == 404, other.text
+    else:
+        assert other.status_code == 200, other.text
+        assert other.json()["items"] == []
+    assert run_id not in other.text and evidence_id not in other.text
 
 
 @pytest.mark.parametrize("path", ["/api/v1/admin/alerts", "/api/v1/admin/audit-events"])

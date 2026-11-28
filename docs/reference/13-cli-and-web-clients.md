@@ -1,6 +1,6 @@
 # CLI and web clients
 
-Two clients talk to the HTTP API: the `research-cli` command-line tool in `src/cli/` and the React workbench in `cerebro/web/`. Both authenticate with a bearer token and neither has a sign-in flow of its own. The workflows, runs, run detail and memory pages call routes the API does not mount.
+Two clients talk to the HTTP API: the `research-cli` command-line tool in `src/cli/` and the React workbench in `cerebro/web/`. Both authenticate with a bearer token and neither has a sign-in flow of its own. The run launch and cancel buttons and the memory page call routes the API does not mount.
 
 ## Summary
 
@@ -10,7 +10,7 @@ Two clients talk to the HTTP API: the `research-cli` command-line tool in `src/c
 | Progress streaming over WebSocket | Active | `research-cli projects progress ID --stream` | `src/cli/websocket_client.py` (`CLIWebSocketClient`) |
 | `research-platform` script | Not wired | `research-platform` | `src/research_platform/__init__.py` (`main`) |
 | Web workbench: research projects, agents list | Active | `/app/research`, `/app/agents` | `cerebro/web/src/api/research.ts`, `cerebro/web/src/api/agents.ts` |
-| Web workbench: workflows, runs, run detail | Not wired | `/app/workflows`, `/app/runs`, `/app/runs/:id` | `cerebro/web/src/api/workflows.ts`, `cerebro/web/src/api/runs.ts` |
+| Web workbench: workflows, runs, run detail | Partly wired | `/app/workflows`, `/app/runs`, `/app/runs/:id` | `cerebro/web/src/api/workflows.ts`, `cerebro/web/src/api/runs.ts` |
 | Web workbench: memory | Not wired | `/app/memory` | `cerebro/web/src/api/memory.ts` |
 | Web workbench: dashboard, QA, costs, benchmarks, settings | Not wired | `/app/dashboard`, `/app/qa`, `/app/costs`, `/app/benchmarks`, `/app/settings` | `cerebro/web/src/pages/` |
 | Playwright end-to-end suite | Active | `npm run test:e2e` | `cerebro/web/tests/e2e/` |
@@ -147,15 +147,15 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 
 ### Pages
 
-> **Not wired.** The workflows, runs, run detail and memory pages call routes the API does not mount. The API mounts `GET /api/v1/workflows` (the catalogue listing) but no `/api/v1/runs` list, create or detail route, no `/api/v1/runs/{id}/cancel`, no `/api/v1/memory/nodes` and no `/api/v1/agents/{id}/logs`. The only run route it mounts is `GET /api/v1/runs/{run_id}/events`, which streams server-sent events rather than returning a JSON collection. The dashboard, QA, costs and benchmarks pages never call the API: the dashboard holds its figures in the component, and the QA, costs and benchmarks clients return fixed values with the real call commented out. The settings page has inputs and a switch with no handlers.
+> **Not wired.** The run form, the run cancel button and the memory page call routes the API does not mount. The API mounts `GET /api/v1/workflows` (the catalogue listing) and the read-only run routes (`GET /api/v1/runs`, `/runs/{id}` and its `/tasks`, `/evidence`, `/artifacts`, `/evaluations`, `/event-history`), but no `POST /api/v1/runs`, no `/api/v1/runs/{id}/cancel`, no `GET /api/v1/workflows/{id}`, no `/api/v1/memory/nodes` and no `/api/v1/agents/{id}/logs`. The run detail page reads history from `/event-history`; `GET /api/v1/runs/{run_id}/events` streams server-sent events and the client does not call it. The dashboard, QA, costs and benchmarks pages never call the API: the dashboard holds its figures in the component, and the QA, costs and benchmarks clients return fixed values with the real call commented out. The settings page has inputs and a switch with no handlers.
 
 | Route | Page | Backend calls | Backed |
 |---|---|---|---|
 | `/` | `Landing` | none | static |
 | `/app` | redirect to `/app/workflows` | none | static |
 | `/app/workflows` | `Workflows` | `GET /api/v1/workflows`; `POST /api/v1/runs` from the run form | Partly. `GET /api/v1/workflows` is mounted; `POST /api/v1/runs` is not, so the page cannot start a run. |
-| `/app/runs` | `Runs` | `GET /api/v1/runs`; `POST /api/v1/runs/{id}/cancel` | No. The page shows an unavailable notice. |
-| `/app/runs/:id` | `RunDetail` | `GET /api/v1/runs/{id}`, `/tasks`, `/events`, `/evidence`, `/artifacts`, `/evaluations` | No. Only `/events` (streams) and `/evidence` are mounted. |
+| `/app/runs` | `Runs` | `GET /api/v1/runs`; `POST /api/v1/runs/{id}/cancel` | Partly. The list is mounted; cancel is not. |
+| `/app/runs/:id` | `RunDetail` | `GET /api/v1/runs/{id}`, `/tasks`, `/event-history`, `/evidence`, `/artifacts`, `/evaluations` | Reads are mounted. The client pages `event-history` and `evidence` with `next_cursor` (up to 50 pages of 200 rows) and reads the remaining sub-resources (`tasks`, `artifacts`, `evaluations`) as one page of up to 200 rows (the response's `truncated` is not surfaced). Where the API has no objective, event summary or evaluation explanation the adapters show a placeholder. |
 | `/app/dashboard` | `Dashboard` | none | static; fixed values in the component |
 | `/app/research`, `/app/research/:id` | `Research` | `GET` and `POST /api/v1/research/projects`; `GET /api/v1/research/projects/{id}`; WebSocket `/ws` | Yes |
 | `/app/agents` | `Agents` | `GET /api/v1/agents`; `GET /api/v1/agents/{id}/logs` | Partly: the list is mounted, the logs route is not |

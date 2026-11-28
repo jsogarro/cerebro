@@ -20,7 +20,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any, TypeVar
 
-from sqlalchemy import func, or_, select, text, update
+from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.contracts import Attempt, Run, Task
@@ -43,6 +43,7 @@ from src.repositories.tenant_scope import (
     TenantMismatchError,
     enforce_tenant_identity,
     normalize_organization_id,
+    scope_to_organization,
 )
 
 OrganizationId = uuid.UUID | str | None
@@ -274,6 +275,89 @@ class RunLifecycleRepository:
     ) -> AgentRun | None:
         """Fetch one run row, optionally scoped to an organization."""
         return await self._get_run_row(run_id, organization_id=organization_id)
+
+    async def list_runs_page(
+        self,
+        *,
+        organization_id: uuid.UUID | str,
+        limit: int,
+        workflow_id: str | None = None,
+        status: str | None = None,
+        after: tuple[datetime, str] | None = None,
+    ) -> list[AgentRun]:
+        """One tenant's runs, newest first, keyed on ``(created_at, run_id)``.
+
+        ``organization_id`` is required: a listing has no maintenance form, so
+        a caller without a tenant fails closed instead of scanning every run.
+        """
+        query = scope_to_organization(
+            select(AgentRun),
+            AgentRun.organization_id,
+            normalize_organization_id(organization_id),
+        )
+        if workflow_id is not None:
+            query = query.where(AgentRun.workflow_definition_id == workflow_id)
+        if status is not None:
+            query = query.where(AgentRun.status == status)
+        if after is not None:
+            created_at, run_id = after
+            query = query.where(
+                or_(
+                    AgentRun.created_at < created_at,
+                    and_(AgentRun.created_at == created_at, AgentRun.run_id < run_id),
+                )
+            )
+        query = query.order_by(AgentRun.created_at.desc(), AgentRun.run_id.desc())
+        result = await self.session.execute(query.limit(limit))
+        return list(result.scalars().all())
+
+    async def first_task_objectives(
+        self, run_ids: Sequence[str], *, organization_id: uuid.UUID | str
+    ) -> dict[str, str]:
+        """Each run's first task objective: the run row stores no request text.
+
+        "First" is ``(created_at, id)``, so the choice is stable, and the window
+        keeps it to one row per run however many tasks a run has.
+        """
+        first = (
+            func.row_number()
+            .over(
+                partition_by=AgentRunTask.run_id,
+                order_by=(AgentRunTask.created_at, AgentRunTask.id),
+            )
+            .label("position")
+        )
+        ranked = scope_to_organization(
+            select(AgentRunTask.run_id, AgentRunTask.objective, first).where(
+                AgentRunTask.run_id.in_(run_ids)
+            ),
+            AgentRunTask.organization_id,
+            normalize_organization_id(organization_id),
+        ).subquery()
+        rows = await self.session.execute(
+            select(ranked.c.run_id, ranked.c.objective).where(ranked.c.position == 1)
+        )
+        return dict(rows.all())
+
+    async def get_attempts_for_run(
+        self,
+        run_id: str,
+        *,
+        organization_id: uuid.UUID | str,
+        task_ids: Sequence[str],
+    ) -> list[AgentTaskAttempt]:
+        """Attempts of the given tasks of a run, by task then ordinal."""
+        query = scope_to_organization(
+            select(AgentTaskAttempt)
+            .where(
+                AgentTaskAttempt.run_id == run_id,
+                AgentTaskAttempt.task_id.in_(task_ids),
+            )
+            .order_by(AgentTaskAttempt.task_id, AgentTaskAttempt.ordinal),
+            AgentTaskAttempt.organization_id,
+            normalize_organization_id(organization_id),
+        )
+        return list((await self.session.execute(query)).scalars().all())
 
     async def list_non_terminal_runs(
         self, *, organization_id: OrganizationId = None
@@ -573,14 +657,20 @@ class RunLifecycleRepository:
         return row
 
     async def get_tasks_for_run(
-        self, run_id: str, *, organization_id: OrganizationId = None
+        self,
+        run_id: str,
+        *,
+        organization_id: OrganizationId = None,
+        limit: int | None = None,
     ) -> list[AgentRunTask]:
         """Return every task for a run, in creation order."""
         query = (
             select(AgentRunTask)
             .where(AgentRunTask.run_id == run_id)
-            .order_by(AgentRunTask.created_at)
+            .order_by(AgentRunTask.created_at, AgentRunTask.id)
         )
+        if limit is not None:
+            query = query.limit(limit)
         if organization_id is not None:
             query = query.where(
                 AgentRunTask.organization_id
