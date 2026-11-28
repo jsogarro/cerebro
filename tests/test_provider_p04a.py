@@ -1,7 +1,7 @@
 """Provider catalog, vocabulary, readiness and plan-route behaviour that spends nothing."""
 
 import asyncio
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -241,6 +241,54 @@ def test_ready_stays_200_when_no_provider_is_configured(
 
     assert response.status_code == 200
     assert response.json()["checks"]["providers"] == "unconfigured"
+
+
+@pytest.mark.parametrize("trips", [0, 1])
+def test_ready_reports_the_observed_gemini_breaker_and_stays_200(
+    monkeypatch: pytest.MonkeyPatch, trips: int
+) -> None:
+    from types import SimpleNamespace
+
+    from src.api.main import app
+    from src.api.routes import health
+    from src.core.tools.circuit import CircuitBreaker
+
+    async def ok() -> None:
+        return None
+
+    monkeypatch.setattr(health, "_check_database", ok)
+    monkeypatch.setattr(health, "_check_redis", ok)
+    monkeypatch.setattr(health, "_check_audit_logger", lambda _request: ok())
+    monkeypatch.setattr(health, "_check_jwt_keys", ok)
+    monkeypatch.setattr(settings, "GEMINI_ENABLED", True)
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "k")
+    breaker = CircuitBreaker(failure_threshold=1)
+    for _ in range(trips):
+        breaker.record_failure(datetime.now(UTC))
+    monkeypatch.setattr(
+        app.state, "gemini_service", SimpleNamespace(circuit=breaker), raising=False
+    )
+
+    response = TestClient(app).get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["checks"]["providers"] == ("open" if trips else "closed")
+
+
+def test_observed_state_reads_an_open_breaker_past_its_cooldown_as_half_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from src.core.provider_readiness import observed_provider_state
+    from src.core.tools.circuit import CircuitBreaker
+
+    monkeypatch.setattr(settings, "GEMINI_ENABLED", True)
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "k")
+    breaker = CircuitBreaker(failure_threshold=1, cooldown_seconds=30)
+    breaker.record_failure(datetime.now(UTC) - timedelta(seconds=31))
+
+    assert observed_provider_state(SimpleNamespace(circuit=breaker)) == "half_open"
 
 
 @pytest.mark.parametrize("name", ["GEMINI_MAX_CONCURRENT", "GEMINI_TEMPERATURE"])

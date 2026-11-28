@@ -34,7 +34,7 @@ from src.auth.pat_service import (
 )
 from src.core.config import settings
 from src.models.db.audit_log import AuditEventType
-from src.models.db.session import get_session
+from src.models.db.session import SessionDep
 from src.models.db.user import User
 from src.repositories.user_repository import UserRepository
 from src.security.audit_middleware import audit_rejection
@@ -392,7 +392,7 @@ async def get_current_token(
 
 async def get_current_user(
     token_payload: TokenPayload = Depends(get_current_token),
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
 ) -> User:
     """
     Get current authenticated user.

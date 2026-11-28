@@ -9,6 +9,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
+from fastapi import Depends
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -268,7 +269,14 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+# scope="function" runs get_session's commit before the response is sent: the
+# default request scope commits in teardown, after the client already has its 2xx,
+# and a failed commit would have nothing left to turn into an error.
+SessionDep = Depends(get_session, scope="function")
+
+
 __all__ = [
+    "SessionDep",
     "close_db",
     "get_maintenance_session_factory",
     "get_session",

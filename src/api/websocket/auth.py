@@ -17,7 +17,6 @@ from src.api.websocket.run_stream import (
     RunStreamEntitlement,
 )
 from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
-from src.core.config import settings
 from src.middleware.auth_middleware import (
     AuthenticationServiceUnavailableError,
     resolve_jwt_service,
@@ -54,15 +53,11 @@ class WebSocketAuthError(Exception):
 async def verify_websocket_claims(
     token: str | None,
     jwt_service: JWTService,
-    *,
-    allow_anonymous: bool = True,
 ) -> tuple[str | None, str | None]:
     """Validate a WebSocket token and return ``(user_id, organization_id)``.
 
-    Both values are ``None`` for a connection admitted by the explicit
-    anonymous-development opt-in. ``organization_id`` alone is ``None`` for a
-    token that carries no tenant claim; callers that scope anything by tenant
-    must treat that as unauthorized rather than as unscoped.
+    ``organization_id`` is ``None`` for a token that carries no tenant claim;
+    callers that scope anything by tenant must treat that as unauthorized rather than as unscoped.
 
     Args:
         token: JWT token string.
@@ -74,18 +69,6 @@ async def verify_websocket_claims(
         WebSocketAuthError: If authentication fails.
     """
     if not token:
-        # Anonymous access is a narrow, explicit local-development opt-in.
-        # ENVIRONMENT alone is not an authorization control, and production
-        # can never enable this bypass even if the opt-in is misconfigured.
-        if allow_anonymous and (
-            settings.ENVIRONMENT == "development"
-            and settings.DEV_ALLOW_ANONYMOUS_WEBSOCKETS
-        ):
-            logger.warning(
-                "Allowing anonymous WebSocket connection by explicit development opt-in"
-            )
-            return None, None
-
         raise WebSocketAuthError("Authentication token required")
 
     try:
@@ -138,17 +121,13 @@ async def verify_websocket_claims(
 async def verify_websocket_token(
     token: str | None,
     jwt_service: JWTService,
-    *,
-    allow_anonymous: bool = True,
 ) -> str | None:
     """Verify a WebSocket token and return its user id.
 
     Retained for callers that need identity but no tenant scope; see
     :func:`verify_websocket_claims` for the full claim set.
     """
-    user_id, _ = await verify_websocket_claims(
-        token, jwt_service, allow_anonymous=allow_anonymous
-    )
+    user_id, _ = await verify_websocket_claims(token, jwt_service)
     return user_id
 
 
@@ -183,15 +162,6 @@ async def verify_project_access(
     Returns:
         True only if the project resolves inside the caller's boundary.
     """
-    # Match the explicit anonymous-development opt-in used by token
-    # verification. Merely selecting the development environment must not
-    # disable project authorization.
-    if (
-        settings.ENVIRONMENT == "development"
-        and settings.DEV_ALLOW_ANONYMOUS_WEBSOCKETS
-    ):
-        return True
-
     if not user_id or not organization_id or session is None:
         logger.warning(
             "Denying WebSocket project access without a complete tenant context",
@@ -233,10 +203,8 @@ async def resolve_run_stream_entitlement(
 ) -> RunStreamEntitlement:
     """Derive a run-stream subscriber's tenant entitlement from its token.
 
-    Deliberately does not honor the anonymous development opt-in that
-    ``verify_websocket_token`` allows: an anonymous connection carries no
-    organization claim, and the run event stream has no safe unscoped mode.
-    Every subscriber must present a token with a tenant organization.
+    The run event stream has no safe unscoped mode: every subscriber must
+    present a token with a tenant organization.
 
     Raises:
         WebSocketAuthError: The token is missing, invalid, or carries no
@@ -294,8 +262,6 @@ async def authenticate_websocket_connection(
     token: str | None,
     user_agent: str | None,
     jwt_service: JWTService,
-    *,
-    allow_anonymous: bool = True,
 ) -> tuple[str | None, str]:
     """
     Authenticate a WebSocket connection and determine client type.
@@ -315,7 +281,6 @@ async def authenticate_websocket_connection(
         token,
         user_agent,
         jwt_service,
-        allow_anonymous=allow_anonymous,
     )
     return principal.user_id, principal.client_type
 
@@ -324,8 +289,6 @@ async def authenticate_websocket_principal(
     token: str | None,
     user_agent: str | None,
     jwt_service: JWTService,
-    *,
-    allow_anonymous: bool = True,
 ) -> WebSocketPrincipal:
     """Authenticate a connection and carry its tenant claim forward.
 
@@ -339,7 +302,6 @@ async def authenticate_websocket_principal(
     user_id, organization_id = await verify_websocket_claims(
         token,
         jwt_service,
-        allow_anonymous=allow_anonymous,
     )
     client_type = extract_client_type(user_agent)
 
@@ -372,7 +334,6 @@ async def require_authenticated_websocket(
             token,
             websocket.headers.get("user-agent"),
             jwt_service,
-            allow_anonymous=False,
         )
         websocket.state.websocket_principal = principal
     except WebSocketAuthError as exc:

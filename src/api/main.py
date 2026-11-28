@@ -363,6 +363,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         else:
             direct_execution_service.execution_authority_resolver = None
 
+        # Loaded whatever the dispatch flag says, so a manifest or corpus that
+        # fails its pinned hash stops startup instead of the first report.
+        from src.core.evaluation.registry import build_default_registry
+
+        evaluation_registry = build_default_registry()
+
         if (
             durable_session_factory is not None
             and maintenance_session_factory is not None
@@ -379,11 +385,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     EvaluationOutboxHandler,
                 )
                 from src.core.evaluation.events import EVALUATION_DESTINATION
-                from src.core.evaluation.registry import build_default_registry
 
                 outbox_handlers[EVALUATION_DESTINATION] = EvaluationOutboxHandler(
                     session_factory=durable_session_factory,
-                    registry=build_default_registry(),
+                    registry=evaluation_registry,
                 )
             outbox_relay = OutboxRelay(
                 session_factory=maintenance_session_factory,
@@ -445,6 +450,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "direct_execution_service",
             direct_execution_service.close,
         )
+        app.state.gemini_service = gemini_service
+        if gemini_service is not None:
+            # None is shared by every keyless lifespan, so it has no owner to match.
+            resources.callback(
+                _remove_app_state_if_owned, app, "gemini_service", gemini_service
+            )
         app.state.direct_execution_service = direct_execution_service
         resources.callback(
             _remove_app_state_if_owned,

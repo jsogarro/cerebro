@@ -12,7 +12,6 @@ This page lists code and settings present in the repository that no production p
 | Model configuration manager | Not wired | none | `src/ai_brain/config/`, `configs/models/` |
 | Prompt manager and versioning | Not wired | none | `src/prompts/` |
 | Stub packages | Not wired | none | `src/research_platform/` |
-| Citation binding | Not wired | none | `src/core/claims/citation_*.py`, `src/core/contracts/citation.py` |
 | Orphan modules | Not wired | none | see [Orphan modules](#orphan-modules) |
 | Dead execution attributes | Not wired | none | `src/api/services/direct_execution_service.py`, `src/core/config.py` |
 | Settings with no effect | Not wired | none | `src/core/config.py` (`Settings`) |
@@ -20,6 +19,7 @@ This page lists code and settings present in the repository that no production p
 | MCP server | Wired | `src/api/main.py` mount `/mcp` (`MCP_SERVER_ENABLED`) | `src/mcp/server.py` |
 | Row-level security for execution-service sessions | Not wired | none | `src/api/services/direct_execution_service.py` |
 | Model-call journal owner | Not wired | none | `src/repositories/model_call_reservation_repository.py`, `src/services/model_invocation.py` |
+| Circuit state for providers other than Gemini | Not wired | none | `src/core/provider_readiness.py` |
 
 ## Multi-tier memory
 
@@ -85,18 +85,13 @@ Tests that exercise it: `tests/test_prompt_safety.py`, `tests/test_cache_ttl_exp
 |---|---|
 | `src/research_platform/` | `main()`, the `research-platform` script target; see [CLI and web clients](13-cli-and-web-clients.md) |
 
-## Citation binding
-
-> **Not wired.** These modules bind claim spans to citations rendered from held metadata and validate citations against a registry corpus. Only their own unit tests import them.
-
-- `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`
-- `src/core/contracts/citation.py`
-
-Tests that exercise them live in `tests/unit/core/claims/`. `src/core/acquisition/pdf_text.py` is not in this group: `extract_pdf_text` is live through `extract_child.py` for document uploads; `build_extracted_text_artifact` in the same module has no caller outside tests.
-
 ## Evaluation dispatch and results
 
-> **Dark by default; no reader.** With `EVALUATION_DISPATCH_ENABLED` false (the default) no `evaluation` outbox row is written and no handler is registered, so no `agent_evaluation_results` row exists. When it is true, only `ClaimsCoverageEvaluator` is registered. Nothing in production reads the stored rows: `evaluation_states` (`src/core/evaluation/registry.py`) is called only by tests, and `EvaluationResultRepository.list_evaluations_for_run` only by the dispatcher, the handler and tests, and no route or report shows them.
+> **Dark by default; no reader.** With `EVALUATION_DISPATCH_ENABLED` false (the default) no `evaluation` outbox row is written and no handler is registered, so no `agent_evaluation_results` row exists. When it is true, `ClaimsCoverageEvaluator` is registered, plus the fixture claim-support pass when `CLAIM_SUPPORT_FIXTURE_MANIFEST` is set and the four citation checks when `CITATION_CORPUS` is set. With neither configured, no claim ever leaves `not_attempted`. Nothing in production reads the stored evaluation rows: `evaluation_states` (`src/core/evaluation/registry.py`) is called only by tests, and `EvaluationResultRepository.list_evaluations_for_run` only by the dispatcher, the handler and tests. No route lists the evaluation rows. A run-bound report reads only the latest claim-support rows (not the evaluation rows) to bind its citations.
+
+The claim-support pass is fixture containment, not a model judge: a verdict stands only when an authored label's quote is contained in the evidence excerpt, and no live semantic judge exists. The derived cited report is not stored as an artifact; the minted citations and gaps are stored in the report row's `configuration`.
+
+A report without a `run_id` keeps its project or caller citations as supplied and is labelled `citation_binding: unbound`. A report with a `run_id` takes no project and no supplied findings, insights, citations or recommendations (422), so its body is its title and query plus the run's minted citations; building the body from the run's own report is not done.
 
 ## Orphan modules
 
@@ -142,7 +137,6 @@ With no `trace_parent` supplied, `invoke_model` opens no provider span even with
 - `src/ai_brain/config/`, `configs/models/`: model configuration manager and YAML files
 - `src/prompts/`: `PromptManager`, versioning, templates
 - `src/research_platform/`: stub packages
-- `src/core/claims/citation_binding.py`, `citation_prose.py`, `citation_render.py`, `citation_validation.py`, `src/core/contracts/citation.py`: citation modules (the rest of `src/core/claims/` is the live claim-support path)
 - `tests/architecture/test_module_reachability.py`: import-graph test that lists the modules no entry point reaches
 - `src/api/services/direct_execution_service.py`: the dead execution attributes
 - `src/repositories/model_call_reservation_repository.py`: the journal with no owner
@@ -156,3 +150,7 @@ Consequences:
 - Under `cerebro_app` those sessions would read no rows and fail their inserts. The default compose stack therefore keeps `DATABASE_URL` on the `research` superuser, which bypasses row-level security, so for execution-service sessions the repository `organization_id` predicates are the effective boundary.
 - A deployment that points `DATABASE_URL` at `cerebro_app` before these sessions adopt `tenant_session` loses run persistence.
 - `reconcile_expired_runs` is cross-tenant but runs on the application factory, so under `cerebro_app` it would find no expired leases and leave interrupted runs and their open model-call reservations unsettled. It moves to the maintenance factory with the rest of this work.
+
+## Circuit state for providers other than Gemini
+
+> **Not wired.** `/ready` reports the circuit state of the application's Gemini service (`app.state.gemini_service`), the only provider that keeps a breaker. DeepSeek, Llama and OpenRouter have none, so with only those configured `checks.providers` is `unknown`. Other `GeminiService` instances (workers, TalkHier, supervisor coordination) keep their own breakers, which `/ready` does not read.

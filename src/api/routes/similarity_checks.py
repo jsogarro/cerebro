@@ -32,7 +32,7 @@ from src.middleware.tenant_context import (
     owner_ids,
 )
 from src.models.db.job_constants import ACTIVE_STATUSES
-from src.models.db.session import get_session, get_session_factory
+from src.models.db.session import SessionDep, get_session_factory
 from src.models.db.similarity_check import SIMILARITY_CHECKS
 from src.repositories.similarity_repository import (
     MAX_LIST,
@@ -196,7 +196,7 @@ def _missing() -> HTTPException:
 
 TenantDep = Annotated[TenantContext, Depends(get_tenant_context)]
 IdentityDep = Annotated[TenantContext, Depends(get_tenant_identity)]
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
+SessionDep = Annotated[AsyncSession, SessionDep]
 
 
 @dataclass(frozen=True)

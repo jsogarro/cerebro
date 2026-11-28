@@ -32,7 +32,7 @@ from src.middleware.tenant_context import (
 )
 from src.models.db.document_critique import DOCUMENT_CRITIQUES
 from src.models.db.job_constants import ACTIVE_STATUSES
-from src.models.db.session import get_session, get_session_factory
+from src.models.db.session import SessionDep, get_session_factory
 from src.repositories.critique_repository import (
     CRITIQUE_DEADLINE_S,
     CritiqueRepository,
@@ -245,7 +245,7 @@ async def start_critique(
     document_id: uuid.UUID,
     body: CritiqueRequest,
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant: TenantContext = Depends(get_tenant_context),
     model_factory: ModelFactory = Depends(get_review_model),
     session_factory: Callable[[], AsyncSession] = Depends(get_job_session_factory),
@@ -359,7 +359,7 @@ async def start_critique(
 async def list_critiques(
     document_id: uuid.UUID,
     limit: Annotated[int, Query(ge=1, le=50)] = 50,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> list[CritiqueSummaryOut]:
     ids = owner_ids(tenant)
@@ -393,7 +393,7 @@ async def _owned_critique(
 )
 async def get_critique(
     critique_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> CritiqueOut:
     view, _ = await _owned_critique(critique_id, session, tenant)
@@ -403,7 +403,7 @@ async def get_critique(
 @router.get("/critiques/{critique_id}/report", dependencies=[Depends(_enabled)])
 async def get_report(
     critique_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> Response:
     view, document = await _owned_critique(critique_id, session, tenant)
@@ -427,7 +427,7 @@ async def get_report(
 async def delete_critique(
     critique_id: uuid.UUID,
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> Response:
     ids = owner_ids(tenant)

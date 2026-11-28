@@ -7,7 +7,7 @@ The persistence layer is SQLAlchemy 2.1 over an async engine (`asyncpg` on Postg
 | Feature | Status | Entry point | Source |
 |---|---|---|---|
 | Async engine and session factory | Active | `init_db()` in the API lifespan | `src/models/db/session.py` (`init_db`, `get_session_factory`) |
-| Request-scoped session | Active | `Depends(get_session)` | `src/models/db/session.py` (`get_session`) |
+| Request-scoped session | Active | `SessionDep` | `src/models/db/session.py` (`get_session`) |
 | Soft-delete base model | Active | every `BaseModel` table | `src/models/db/base.py` (`BaseModel`) |
 | Append-only guard (ORM, plus a PostgreSQL trigger on four of the five) | Active | five durable tables | `src/models/db/append_only.py` (`register_append_only`) |
 | Tenant filter in repositories | Active | every repository read and write | `src/repositories/base.py` (`BaseRepository.apply_organization_scope`), `src/repositories/tenant_scope.py` (`scope_to_organization`) |
@@ -23,7 +23,7 @@ The persistence layer is SQLAlchemy 2.1 over an async engine (`asyncpg` on Postg
 - `init_db(database_url=None, **engine_kwargs)` builds the engine from `settings.DATABASE_URL`, creates an `async_sessionmaker` (`expire_on_commit=False`, `autoflush=False`, `autocommit=False`) and runs `SELECT 1` to test the connection. A second call logs `database_already_initialized` and returns. A failed connection test disposes the engine and re-raises. The API lifespan calls `init_db()` with no arguments.
 - `create_engine` defaults: `pool_size=20`, `max_overflow=10`, `pool_timeout=30`, `pool_pre_ping=True`, `pool_recycle=3600`, pool class `AsyncAdaptedQueuePool`. When the URL contains `sqlite`, `init_db` sets `use_null_pool=True` and `NullPool` replaces the queue pool, with none of the pool arguments.
 - `get_session_factory()` returns the factory and raises `RuntimeError("Database not initialized. Call init_db() first.")` before `init_db()` has run. The durable execution service, the outbox relay and the run event streams obtain sessions through this factory.
-- `get_session()` is the FastAPI dependency. It yields a session, commits when the request handler returns without raising, rolls back and re-raises on an exception and closes the session.
+- `get_session()` is the FastAPI dependency; routes declare it as `SessionDep`, a function-scoped `Depends(get_session)`. It yields a session, commits when the request handler returns without raising, rolls back and re-raises on an exception and closes the session. Function scope runs that commit before the response is sent, so a 2xx means the write is durable and a failed commit returns a 500.
 - `close_db()` disposes the engine and clears both module-level references.
 
 ## Model base classes

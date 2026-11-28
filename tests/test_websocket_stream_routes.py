@@ -88,22 +88,6 @@ class TestRunStreamEntitlementResolution:
         with pytest.raises(WebSocketAuthError):
             await resolve_run_stream_entitlement("token", service)  # type: ignore[arg-type]
 
-    @pytest.mark.asyncio
-    async def test_anonymous_development_opt_in_does_not_apply(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The dev bypass that ``/ws`` allows must not open an unscoped stream."""
-        from src.core import config
-
-        monkeypatch.setattr(config.settings, "ENVIRONMENT", "development")
-        monkeypatch.setattr(
-            config.settings, "DEV_ALLOW_ANONYMOUS_WEBSOCKETS", True, raising=False
-        )
-        service = _StubJWTService(_payload(str(ORG_ID)))
-
-        with pytest.raises(WebSocketAuthError):
-            await resolve_run_stream_entitlement(None, service)  # type: ignore[arg-type]
-
 
 class _RecordingWebSocket:
     def __init__(self) -> None:

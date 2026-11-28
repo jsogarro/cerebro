@@ -172,7 +172,6 @@ def build_trial_authority(
     task_timeout_seconds: int,
     model_route: ProviderModelRoute,
     tool_grants: tuple[str, ...] = (),
-    allowed_outbound_hosts: tuple[str, ...] | None = None,
 ) -> ExecutionAuthorityBinding:
     """Mint and cache one run's authority; mint it right before admission.
 
@@ -181,16 +180,12 @@ def build_trial_authority(
     """
     if domain not in DOMAIN_WORKERS:
         raise LiveEnvironmentError(f"unknown evaluation domain {domain!r}")
-    effective_outbound_hosts = (
-        tuple(
-            dict.fromkeys(
-                host
-                for tool_name in tool_grants
-                for host in OUTBOUND_TOOL_HOSTS.get(tool_name, ())
-            )
+    effective_outbound_hosts = tuple(
+        dict.fromkeys(
+            host
+            for tool_name in tool_grants
+            for host in OUTBOUND_TOOL_HOSTS.get(tool_name, ())
         )
-        if allowed_outbound_hosts is None
-        else allowed_outbound_hosts
     )
     now = datetime.now(UTC)
     worker_types = DOMAIN_WORKERS[domain]

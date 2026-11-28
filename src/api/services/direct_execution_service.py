@@ -22,7 +22,7 @@ import socket
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -344,19 +344,6 @@ class _PendingTerminalOutcome:
     expires_at: float
 
 
-class _BorrowedSession:
-    """Adapter letting ``tenant_session`` scope a session already opened once."""
-
-    def __init__(self, session: Any) -> None:
-        self._session = session
-
-    async def __aenter__(self) -> Any:
-        return self._session
-
-    async def __aexit__(self, *_exc: Any) -> None:
-        return None
-
-
 def _discard_unretrieved_admission_error(future: "asyncio.Future[str]") -> None:
     """Mark a failed admission claim's exception as seen.
 
@@ -638,17 +625,13 @@ class DirectExecutionService:
         when ``organization_id`` is ``None`` or a test mock lacks ``sync_session``.
         """
         assert self.session_factory is not None
-        if organization_id is None:
-            async with self.session_factory() as session:
-                yield session
-            return
         async with self.session_factory() as session:
-            if not hasattr(session, "sync_session"):
+            if organization_id is None or not hasattr(session, "sync_session"):
                 yield session
                 return
 
             def _borrow() -> Any:
-                return _BorrowedSession(session)
+                return nullcontext(session)
 
             async with tenant_session(_borrow, organization_id) as scoped:
                 yield scoped

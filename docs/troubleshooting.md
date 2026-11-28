@@ -67,9 +67,8 @@ The WebSocket routes are `/ws`, `/ws/projects/{project_id}`, `/ws/cli/{project_i
 
 1. Check the unauthenticated probe: `curl http://localhost:8000/ws/health`.
 2. Pass the access token as the `token` query parameter (`ws://localhost:8000/ws?token=<access-token>`). An `Authorization` header alone does not authenticate a WebSocket connection, and the route dependency `require_authenticated_websocket` rejects a connection without a token.
-3. `DEV_ALLOW_ANONYMOUS_WEBSOCKETS` does not admit a tokenless connection. Every mounted route depends on `require_authenticated_websocket`, which passes `allow_anonymous=False`, so the step 2 check rejects the connection before the flag is read.
-4. When the token is valid but the connection closes, the token can lack an `organization_id` claim, or the project can belong to another organization. See [authentication and tenancy](reference/04-authentication-and-tenancy.md).
-5. Behind nginx, `docker/nginx/nginx.conf` proxies `/ws` with upgrade headers and a 86400-second read timeout and limits new connections to 5 per second per client address.
+3. When the token is valid but the connection closes, the token can lack an `organization_id` claim, or the project can belong to another organization. See [authentication and tenancy](reference/04-authentication-and-tenancy.md).
+4. Behind nginx, `docker/nginx/nginx.conf` proxies `/ws` with upgrade headers and a 86400-second read timeout and limits new connections to 5 per second per client address.
 
 ## Authentication errors
 

@@ -176,14 +176,6 @@ A field is listed here when a production module outside `src/core/config.py` rea
 | `LANGFUSE_SECRET_KEY` | unset | `src/core/tracing.py` (`_initialize_langfuse`) | required when enabled; same rule as the public key |
 | `LANGFUSE_HOST` | unset | `src/core/tracing.py` (`_initialize_langfuse`) | Langfuse server URL; unset uses Langfuse cloud |
 
-### WebSocket development bypass
-
-> **Off by default.** With `ENVIRONMENT=development` and `DEV_ALLOW_ANONYMOUS_WEBSOCKETS=true` both set, project authorization is skipped for callers who authenticated. It does not admit a connection without a token: every WebSocket route requires one.
-
-| Setting | Default | Read by | Effect |
-|---|---|---|---|
-| `DEV_ALLOW_ANONYMOUS_WEBSOCKETS` | `false` | `src/api/websocket/auth.py` (`verify_websocket_claims`, `verify_project_access`) | with `ENVIRONMENT=development`, `verify_project_access` returns `True` without checking project ownership; a WebSocket connection still needs a token |
-
 Notes on the provider rows:
 
 - The `DEEPSEEK_*`, `LLAMA_*` and `GEMINI_DEFAULT_MODEL` rows reach providers only through `Settings.get_ai_brain_config()["providers"]`. That method has one production caller, `_build_plan_route` in `src/agents/llm_worker_base.py`. It reads only the entry for the plan's primary provider and forces `enabled` to true for it.
@@ -446,3 +438,5 @@ The file also sets values that differ from the code defaults: `DEBUG=true` (defa
 - `docker-compose.yml`, `docker-compose.production.yml`: compose-level variables and literal service environment
 
 `EVALUATION_DISPATCH_ENABLED` (default `false`) adds an `evaluation` outbox destination to each `run.succeeded` event and registers the evaluation handler on the relay. `OUTBOX_HANDLER_TIMEOUT_SECONDS` (default `20`) bounds each registered outbox handler call. See [durable runs and events](08-durable-runs-and-events.md).
+
+`CLAIM_SUPPORT_FIXTURE_MANIFEST` (default unset) is the path of an expert-labelled claim-support manifest and `CLAIM_SUPPORT_FIXTURE_MANIFEST_SHA256` its pinned hash; when the path is set, `build_default_registry` registers the fixture claim-support evaluator and startup fails if the hash does not match or the file is malformed, whether or not `EVALUATION_DISPATCH_ENABLED` is true (the lifespan builds the registry before reading that flag). A hash with no path is a startup error. `CITATION_CORPUS` and `CITATION_CORPUS_SHA256` do the same for the registry corpus the four citation checks read. With a variable unset, the evaluators it gates are not registered. See [tool boundary and evidence](09-tool-boundary-and-evidence.md).
