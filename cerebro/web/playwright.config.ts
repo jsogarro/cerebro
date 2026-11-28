@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import process from 'node:process';
+import { SIGNED_IN_STATE } from './tests/e2e/global-setup';
 
 const host = process.env.PLAYWRIGHT_HOST ?? '127.0.0.1';
 const port = process.env.PLAYWRIGHT_PORT ?? '5173';
@@ -11,6 +12,7 @@ const backendURL =
 
 export default defineConfig({
     testDir: './tests/e2e',
+    globalSetup: './tests/e2e/global-setup.ts',
     fullyParallel: true,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
@@ -18,6 +20,7 @@ export default defineConfig({
     reporter: 'html',
     use: {
         baseURL,
+        storageState: SIGNED_IN_STATE,
         reducedMotion: 'reduce',
         trace: 'on-first-retry',
     },

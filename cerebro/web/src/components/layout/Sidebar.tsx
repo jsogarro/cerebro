@@ -23,7 +23,6 @@ const legacyNavigation = [
     { name: "Dashboard", href: "/app/dashboard", icon: LayoutDashboard },
     { name: "Research", href: "/app/research", icon: FlaskConical },
     { name: "Agents", href: "/app/agents", icon: Network },
-    { name: "Memory", href: "/app/memory", icon: Brain },
     { name: "QA", href: "/app/qa", icon: ShieldCheck },
     { name: "Costs", href: "/app/costs", icon: DollarSign },
     { name: "Benchmarks", href: "/app/benchmarks", icon: BarChart2 },

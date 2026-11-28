@@ -22,14 +22,3 @@ export const useAgents = () => {
         },
     });
 };
-
-export const useAgentLogs = (agentId: string) => {
-    return useQuery({
-        queryKey: ['agents', 'logs', agentId],
-        queryFn: async () => {
-            const { data } = await apiClient.get(`/agents/${agentId}/logs`);
-            return data;
-        },
-        enabled: !!agentId,
-    });
-};
