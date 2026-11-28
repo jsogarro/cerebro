@@ -18,11 +18,12 @@ then reads the bytes back out of the store and re-checks them against the
 digest the tool reported, so a handler that lies about what it stored is caught
 by the next step rather than trusted.
 
-When the fetched content is a PDF (``application/pdf`` or ``%PDF-`` header),
-the handler extracts full text through the sandboxed PDF extractor, stores the
-normalized text via :func:`~src.core.acquisition.pdf_text.build_extracted_text_artifact`
-tagged as ``full_text``, and includes its digest, storage URI, and canonical
-locator on the returned handle.
+When the fetched content is a PDF (``application/pdf``, or absent/generic binary
+media type starting with ``%PDF-`` at offset 0), the handler extracts full text
+through the sandboxed PDF extractor, stores the normalized text via
+:func:`~src.core.acquisition.pdf_text.build_extracted_text_artifact` tagged as
+``full_text``, and includes its digest, storage URI, and canonical locator on
+the returned handle.
 """
 
 from __future__ import annotations
@@ -30,11 +31,12 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
-from collections.abc import Awaitable, Callable, Collection, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Final, cast, final
 
+import httpcore
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -79,6 +81,9 @@ SOURCE_FETCH_TOOL: Final[str] = "source.fetch"
 DEFAULT_MAX_REDIRECTS: Final[int] = 5
 DEFAULT_MAX_FETCH_BYTES: Final[int] = 25 * 1024 * 1024
 _REDIRECT_STATUS_CODES: Final[frozenset[int]] = frozenset({301, 302, 303, 307, 308})
+_PDF_SNIFFABLE_MEDIA_TYPES: Final[frozenset[str]] = frozenset(
+    {"", "application/octet-stream", "binary/octet-stream"}
+)
 _METADATA_NETWORKS: Final[tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]] = (
     ipaddress.ip_network("169.254.169.254/32"),
     ipaddress.ip_network("fd00:ec2::254/128"),
@@ -136,7 +141,7 @@ async def validate_fetch_target(
     declared_hosts: Collection[str],
     allowed_hosts: Collection[str] | None,
     dns_resolver: DnsResolver,
-) -> httpx.URL:
+) -> tuple[httpx.URL, tuple[str, ...]]:
     """Validate URL scheme, host allowlist, and resolved IPs before connecting."""
     try:
         parsed = httpx.URL(url)
@@ -170,12 +175,90 @@ async def validate_fetch_target(
                 f"host {hostname!r} resolved to disallowed IP {ip_str!r}"
             )
 
-    return parsed
+    return parsed, tuple(resolved_ips)
 
 
 def _is_pdf_content(media_type: str, content: bytes) -> bool:
     mime = media_type.partition(";")[0].strip().lower()
-    return mime == "application/pdf" or b"%PDF-" in content[:1024]
+    if mime == "application/pdf":
+        return True
+    if mime in _PDF_SNIFFABLE_MEDIA_TYPES:
+        return content.startswith(b"%PDF-")
+    return False
+
+
+class _PinnedIpNetworkBackend(httpcore.AsyncNetworkBackend):
+    """Dial only pre-validated IPs so TCP connect cannot perform a second DNS lookup."""
+
+    def __init__(
+        self,
+        *,
+        pinned_ips: dict[str, tuple[str, ...]],
+        inner: httpcore.AsyncNetworkBackend | None = None,
+    ) -> None:
+        self._pinned_ips = pinned_ips
+        self._inner = inner or httpcore.AnyIOBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[Any] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        ips = self._pinned_ips.get(host.lower())
+        if not ips:
+            raise SSRFBlockedError(f"no validated IP pinned for host {host!r}")
+        last_error: httpcore.ConnectError | None = None
+        for ip_str in ips:
+            if is_disallowed_ip(ip_str):
+                raise SSRFBlockedError(
+                    f"disallowed pinned IP {ip_str!r} for host {host!r}"
+                )
+            try:
+                return await self._inner.connect_tcp(
+                    host=ip_str,
+                    port=port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except httpcore.ConnectError as exc:
+                last_error = exc
+        assert last_error is not None
+        raise last_error
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Iterable[Any] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        raise SSRFBlockedError("unix domain sockets are forbidden for source.fetch")
+
+    async def sleep(self, seconds: float) -> None:
+        await self._inner.sleep(seconds)
+
+
+class _PinnedIpAsyncTransport(httpx.AsyncHTTPTransport):
+    """``AsyncHTTPTransport`` wired to ``_PinnedIpNetworkBackend`` without keepalive reuse."""
+
+    def __init__(self, *, network_backend: httpcore.AsyncNetworkBackend) -> None:
+        super().__init__(
+            trust_env=False,
+            limits=httpx.Limits(max_keepalive_connections=0),
+        )
+        # Disabling keepalive forces every redirect hop to dial the validated IP
+        # recorded for that hop rather than reusing an earlier socket.
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=httpx.create_ssl_context(verify=True, trust_env=False),
+            max_connections=10,
+            max_keepalive_connections=0,
+            http1=True,
+            http2=False,
+            network_backend=network_backend,
+        )
 
 
 async def _default_pdf_extractor(data: bytes) -> tuple[ExtractedText, int]:
@@ -270,6 +353,7 @@ class HardenedHttpFetcher:
         timeout_seconds: float = 30.0,
         client: httpx.AsyncClient | None = None,
         dns_resolver: DnsResolver | None = None,
+        network_backend: httpcore.AsyncNetworkBackend | None = None,
     ) -> None:
         if max_redirects < 0:
             raise ValueError("max_redirects must be non-negative")
@@ -281,22 +365,36 @@ class HardenedHttpFetcher:
         self._timeout_seconds = timeout_seconds
         self._client = client
         self._dns_resolver = dns_resolver or _default_dns_resolver
+        self._network_backend = network_backend
 
     async def __call__(
         self, request: SourceFetchInput, context: ToolCallContext
     ) -> FetchedSource:
-        allowed_hosts = context.allowed_hosts
+        # Cross-host redirects (e.g. doi.org -> arxiv.org) need the grant's full
+        # approved host set, while direct unit callers may supply only allowed_hosts.
+        allowed_hosts = context.grant_allowed_hosts or context.allowed_hosts
         if self._client is not None:
             return await self._fetch_with_client(
                 self._client, request.source_uri, allowed_hosts=allowed_hosts
             )
+        pinned_ips: dict[str, tuple[str, ...]] = {}
+        transport = _PinnedIpAsyncTransport(
+            network_backend=_PinnedIpNetworkBackend(
+                pinned_ips=pinned_ips,
+                inner=self._network_backend,
+            )
+        )
         async with httpx.AsyncClient(
+            transport=transport,
             follow_redirects=False,
             trust_env=False,
             timeout=httpx.Timeout(self._timeout_seconds),
         ) as owned_client:
             return await self._fetch_with_client(
-                owned_client, request.source_uri, allowed_hosts=allowed_hosts
+                owned_client,
+                request.source_uri,
+                allowed_hosts=allowed_hosts,
+                pinned_ips=pinned_ips,
             )
 
     async def _fetch_with_client(
@@ -305,48 +403,83 @@ class HardenedHttpFetcher:
         start_url: str,
         *,
         allowed_hosts: tuple[str, ...],
+        pinned_ips: dict[str, tuple[str, ...]] | None = None,
     ) -> FetchedSource:
         current_url = start_url
         hops = 0
         while True:
-            parsed = await validate_fetch_target(
+            parsed, resolved_ips = await validate_fetch_target(
                 current_url,
                 declared_hosts=self._declared_hosts,
                 allowed_hosts=allowed_hosts,
                 dns_resolver=self._dns_resolver,
             )
-            response = await client.get(str(parsed), follow_redirects=False)
-            if response.status_code in _REDIRECT_STATUS_CODES:
-                location = response.headers.get("location")
-                if not location:
-                    raise SSRFBlockedError("redirect response missing Location header")
-                if hops >= self._max_redirects:
-                    raise SSRFBlockedError(
-                        f"exceeded max redirects ({self._max_redirects})"
-                    )
-                hops += 1
-                current_url = str(parsed.join(location))
-                continue
+            if pinned_ips is not None:
+                pinned_ips[parsed.host.lower()] = resolved_ips
 
-            response.raise_for_status()
-            body = response.content
-            if not body:
-                raise ValueError("fetched source returned an empty body")
-            if len(body) > self._max_bytes:
-                raise ValueError(
-                    f"fetched source exceeded {self._max_bytes} byte limit"
+            async with client.stream(
+                "GET",
+                str(parsed),
+                follow_redirects=False,
+                extensions={"sni_hostname": parsed.host},
+            ) as response:
+                if response.status_code in _REDIRECT_STATUS_CODES:
+                    location = response.headers.get("location")
+                    if not location:
+                        raise SSRFBlockedError(
+                            "redirect response missing Location header"
+                        )
+                    if hops >= self._max_redirects:
+                        raise SSRFBlockedError(
+                            f"exceeded max redirects ({self._max_redirects})"
+                        )
+                    hops += 1
+                    try:
+                        current_url = str(parsed.join(location))
+                    except httpx.InvalidURL as exc:
+                        raise SSRFBlockedError(
+                            f"invalid redirect Location {location!r}"
+                        ) from exc
+                    continue
+
+                response.raise_for_status()
+                content_length = response.headers.get("content-length")
+                if content_length is not None:
+                    try:
+                        declared_length = int(content_length.strip())
+                    except ValueError:
+                        declared_length = None
+                    if (
+                        declared_length is not None
+                        and declared_length > self._max_bytes
+                    ):
+                        raise ValueError(
+                            f"fetched source exceeded {self._max_bytes} byte limit"
+                        )
+
+                buf = bytearray()
+                async for chunk in response.aiter_bytes():
+                    buf.extend(chunk)
+                    if len(buf) > self._max_bytes:
+                        raise ValueError(
+                            f"fetched source exceeded {self._max_bytes} byte limit"
+                        )
+                body = bytes(buf)
+                if not body:
+                    raise ValueError("fetched source returned an empty body")
+                raw_content_type = response.headers.get("content-type")
+                if raw_content_type is None:
+                    media_type = "application/octet-stream"
+                else:
+                    media_type = (
+                        raw_content_type.partition(";")[0].strip()
+                        or "application/octet-stream"
+                    )
+                return FetchedSource(
+                    content=body,
+                    media_type=media_type,
+                    final_uri=str(parsed),
                 )
-            media_type = (
-                response.headers.get("content-type", "application/octet-stream")
-                .partition(";")[0]
-                .strip()
-                or "application/octet-stream"
-            )
-            return FetchedSource(
-                content=body,
-                media_type=media_type,
-                final_uri=str(parsed),
-            )
 
 
 def _target_hosts_resolver(

@@ -45,6 +45,7 @@ from typing import Final, final
 from pydantic import JsonValue, ValidationError
 
 from src.core.contracts.capabilities import ApprovalRef, CapabilityGrant
+from src.core.contracts.locators import InvalidLocatorError
 from src.core.contracts.pinning import PinnedVersions
 from src.core.contracts.provenance import (
     AbsentEvidenceReason,
@@ -66,7 +67,7 @@ from src.repositories.tenant_scope import normalize_organization_id
 
 from .fetch_tool import SOURCE_FETCH_TOOL, SourceFetchOutput
 from .pdf_text import ExtractedText, PageSpan, build_extracted_text_artifact
-from .resolution import locate, resolve
+from .resolution import UnresolvableLocatorError, locate, resolve
 from .snapshots import SnapshotIntegrityError, SnapshotNotFoundError, SnapshotStore
 from .sources import SourceType, trust_for_source
 
@@ -448,35 +449,54 @@ class SourceAcquisitionService:
                         "snapshot store does not hold"
                     ),
                 )
-            extracted_text = extracted_bytes.decode("utf-8")
-            raw_pages = handle.extracted_pages or [
-                {"page": 1, "start": 0, "end": len(extracted_text)}
-            ]
-            pages = tuple(
-                PageSpan(
-                    page=int(entry["page"]),
-                    start=int(entry["start"]),
-                    end=int(entry["end"]),
+            try:
+                if handle.extracted_text_locator is not None:
+                    resolve(handle.extracted_text_locator, extracted_bytes)
+                extracted_text = extracted_bytes.decode("utf-8")
+                raw_pages = handle.extracted_pages or [
+                    {"page": 1, "start": 0, "end": len(extracted_text)}
+                ]
+                pages_list: list[PageSpan] = []
+                text_len = len(extracted_text)
+                for entry in raw_pages:
+                    page = int(entry["page"])
+                    start = int(entry["start"])
+                    end = int(entry["end"])
+                    if page < 1 or not (0 <= start <= end <= text_len):
+                        raise ValueError(
+                            f"extracted page span {entry!r} is outside 0..{text_len}"
+                        )
+                    pages_list.append(PageSpan(page=page, start=start, end=end))
+                extracted_text_artifact = build_extracted_text_artifact(
+                    ExtractedText(
+                        text=extracted_text,
+                        pages=tuple(pages_list),
+                        text_sha256=handle.extracted_text_sha256,
+                        source_sha256=handle.content_sha256,
+                    ),
+                    store=self._store,
+                    artifact_id=self._id_factory(),
+                    run_id=run_id,
+                    task_id=task_id,
+                    attempt_id=attempt_id,
+                    created_at=now,
+                    content_kind=handle.content_kind or "full_text",
+                    source_uri=handle.final_uri,
+                    locator=handle.extracted_text_locator,
                 )
-                for entry in raw_pages
-            )
-            extracted_text_artifact = build_extracted_text_artifact(
-                ExtractedText(
-                    text=extracted_text,
-                    pages=pages,
-                    text_sha256=handle.extracted_text_sha256,
-                    source_sha256=handle.content_sha256,
-                ),
-                store=self._store,
-                artifact_id=self._id_factory(),
-                run_id=run_id,
-                task_id=task_id,
-                attempt_id=attempt_id,
-                created_at=now,
-                content_kind=handle.content_kind or "full_text",
-                source_uri=handle.final_uri,
-                locator=handle.extracted_text_locator,
-            )
+            except (
+                UnicodeDecodeError,
+                KeyError,
+                TypeError,
+                ValueError,
+                InvalidLocatorError,
+                UnresolvableLocatorError,
+            ) as error:
+                return _unavailable(
+                    outcome,
+                    reason=AbsentEvidenceReason.SOURCE_INACCESSIBLE,
+                    detail=f"extracted text metadata is invalid: {error}",
+                )
 
         artifact = Artifact(
             artifact_id=self._id_factory(),

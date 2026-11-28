@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import socket
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import httpcore
 import httpx
 import pytest
 from fpdf import FPDF
@@ -44,6 +46,7 @@ from src.core.acquisition.snapshots import FilesystemSnapshotStore
 from src.core.acquisition.sources import SourceType
 from src.core.capabilities.issuer import PlanCapabilityIssuer
 from src.core.contracts import (
+    AbsentEvidenceReason,
     CapabilityDenialReason,
     CapabilityGrant,
     ExecutionBudget,
@@ -720,3 +723,543 @@ class TestSourceFetchBoundaryAndPdfFullText:
             SNAPSHOT_ARTIFACT_KIND,
             "extracted_text",
         }
+
+
+class _CountingAsyncStream(httpx.AsyncByteStream):
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+        self.chunks_yielded = 0
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self._chunks:
+            self.chunks_yielded += 1
+            yield chunk
+
+
+class _RecordingNetworkStream(httpcore.AsyncNetworkStream):
+    def __init__(
+        self,
+        *,
+        response_bytes: bytes,
+        sni_hostnames: list[str | None],
+        written_chunks: list[bytes],
+    ) -> None:
+        self._response = response_bytes
+        self._offset = 0
+        self._sni_hostnames = sni_hostnames
+        self._written_chunks = written_chunks
+
+    async def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        if self._offset >= len(self._response):
+            return b""
+        chunk = self._response[self._offset : self._offset + max_bytes]
+        self._offset += len(chunk)
+        return chunk
+
+    async def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        self._written_chunks.append(bytes(buffer))
+
+    async def aclose(self) -> None:
+        return None
+
+    async def start_tls(
+        self,
+        ssl_context: Any,
+        server_hostname: str | None = None,
+        timeout: float | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        self._sni_hostnames.append(server_hostname)
+        return self
+
+
+class _RecordingNetworkBackend(httpcore.AsyncNetworkBackend):
+    def __init__(self, response_bytes: bytes) -> None:
+        self._response_bytes = response_bytes
+        self.connected_targets: list[tuple[str, int]] = []
+        self.sni_hostnames: list[str | None] = []
+        self.written_chunks: list[bytes] = []
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        self.connected_targets.append((host, port))
+        return _RecordingNetworkStream(
+            response_bytes=self._response_bytes,
+            sni_hostnames=self.sni_hostnames,
+            written_chunks=self.written_chunks,
+        )
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        raise AssertionError("unix socket connect must never be called")
+
+    async def sleep(self, seconds: float) -> None:
+        return None
+
+
+class TestReviewHardeningRegressions:
+    @pytest.mark.asyncio
+    async def test_fetcher_pins_validated_ip_and_preserves_tls_sni_and_host_header(
+        self,
+    ) -> None:
+        from src.core.tools.spec import ToolCallContext
+
+        dns_calls: list[tuple[str, int]] = []
+
+        async def rebinding_dns(host: str, port: int) -> list[str]:
+            dns_calls.append((host, port))
+            if len(dns_calls) == 1:
+                return [PUBLIC_IP]
+            return ["127.0.0.1"]
+
+        raw_http = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/plain\r\n"
+            b"Content-Length: 14\r\n"
+            b"\r\n"
+            b"pinned-ip-body"
+        )
+        backend = _RecordingNetworkBackend(raw_http)
+        fetcher = HardenedHttpFetcher(
+            declared_hosts=SOURCE_FETCH_OUTBOUND_HOSTS,
+            dns_resolver=rebinding_dns,
+            network_backend=backend,
+        )
+        ctx = ToolCallContext(
+            run_id="run-1",
+            task_id="task-1",
+            attempt_id="att-1",
+            tool_invocation_id="inv-1",
+            resolve_secret=lambda _ref: "",
+            allowed_hosts=("arxiv.org",),
+        )
+
+        fetched = await fetcher(
+            SourceFetchInput(
+                source_uri="https://arxiv.org/abs/2401.00001",
+                source_type=SourceType.ACADEMIC_PAPER,
+            ),
+            ctx,
+        )
+
+        assert fetched.content == b"pinned-ip-body"
+        assert dns_calls == [("arxiv.org", 443)]
+        assert backend.connected_targets == [(PUBLIC_IP, 443)]
+        assert backend.sni_hostnames == ["arxiv.org"]
+        sent_wire = b"".join(backend.written_chunks).lower()
+        assert b"host: arxiv.org\r\n" in sent_wire
+
+    @pytest.mark.asyncio
+    async def test_streaming_rejects_oversized_content_length_without_reading_body(
+        self,
+    ) -> None:
+        from src.core.tools.spec import ToolCallContext
+
+        stream = _CountingAsyncStream([b"a" * 200, b"b" * 200])
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda _req: httpx.Response(
+                    200,
+                    headers={"content-length": "400", "content-type": "text/plain"},
+                    stream=stream,
+                )
+            )
+        )
+        fetcher = HardenedHttpFetcher(
+            declared_hosts=SOURCE_FETCH_OUTBOUND_HOSTS,
+            max_bytes=100,
+            client=client,
+            dns_resolver=_static_dns({"arxiv.org": [PUBLIC_IP]}),
+        )
+        ctx = ToolCallContext(
+            run_id="run-1",
+            task_id="task-1",
+            attempt_id="att-1",
+            tool_invocation_id="inv-1",
+            resolve_secret=lambda _ref: "",
+            allowed_hosts=("arxiv.org",),
+        )
+
+        with pytest.raises(ValueError, match="byte limit"):
+            await fetcher(
+                SourceFetchInput(
+                    source_uri="https://arxiv.org/abs/2401.00001",
+                    source_type=SourceType.ACADEMIC_PAPER,
+                ),
+                ctx,
+            )
+        assert stream.chunks_yielded == 0
+
+    @pytest.mark.asyncio
+    async def test_streaming_aborts_chunked_response_as_soon_as_cap_exceeded(
+        self,
+    ) -> None:
+        from src.core.tools.spec import ToolCallContext
+
+        stream = _CountingAsyncStream([b"x" * 100 for _ in range(10)])
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda _req: httpx.Response(
+                    200,
+                    headers={"content-type": "text/plain"},
+                    stream=stream,
+                )
+            )
+        )
+        fetcher = HardenedHttpFetcher(
+            declared_hosts=SOURCE_FETCH_OUTBOUND_HOSTS,
+            max_bytes=250,
+            client=client,
+            dns_resolver=_static_dns({"arxiv.org": [PUBLIC_IP]}),
+        )
+        ctx = ToolCallContext(
+            run_id="run-1",
+            task_id="task-1",
+            attempt_id="att-1",
+            tool_invocation_id="inv-1",
+            resolve_secret=lambda _ref: "",
+            allowed_hosts=("arxiv.org",),
+        )
+
+        with pytest.raises(ValueError, match="byte limit"):
+            await fetcher(
+                SourceFetchInput(
+                    source_uri="https://arxiv.org/abs/2401.00001",
+                    source_type=SourceType.ACADEMIC_PAPER,
+                ),
+                ctx,
+            )
+        assert stream.chunks_yielded == 3
+
+    @pytest.mark.asyncio
+    async def test_boundary_allows_cross_host_redirect_within_grant_and_blocks_disallowed_hop(
+        self, tmp_path: Path
+    ) -> None:
+        captured: list[httpx.Request] = []
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            captured.append(req)
+            if req.url.host == "doi.org" and req.url.path == "/10.48550/allowed":
+                return httpx.Response(
+                    302,
+                    headers={"Location": "https://arxiv.org/pdf/2401.00001.pdf"},
+                )
+            if req.url.host == "doi.org" and req.url.path == "/10.48550/disallowed":
+                return httpx.Response(
+                    302,
+                    headers={"Location": "https://export.arxiv.org/pdf/2401.00001.pdf"},
+                )
+            return httpx.Response(
+                200,
+                content=b"resolved paper text",
+                headers={"content-type": "text/plain"},
+            )
+
+        store = FilesystemSnapshotStore(root=tmp_path / "snaps")
+        fetcher = HardenedHttpFetcher(
+            declared_hosts=SOURCE_FETCH_OUTBOUND_HOSTS,
+            client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+            dns_resolver=_static_dns(
+                {
+                    "doi.org": [PUBLIC_IP],
+                    "arxiv.org": [PUBLIC_IP],
+                    "export.arxiv.org": [PUBLIC_IP],
+                }
+            ),
+        )
+        boundary = build_tool_boundary(audit_store=InMemoryToolAuditStore())
+        boundary.register(
+            hardened_source_fetch_tool(
+                store=store,
+                fetcher=fetcher,
+                timeout_seconds=30.0,
+            )
+        )
+        grant = _grant(allowed_hosts=("doi.org", "arxiv.org"))
+
+        allowed_outcome = await boundary.invoke(
+            tool_name=SOURCE_FETCH_TOOL,
+            run_id="run-1",
+            task_id="task-1",
+            attempt_id="att-1",
+            organization_id="org-1",
+            capability_scope=grant.capability_scope,
+            arguments={
+                "source_uri": "https://doi.org/10.48550/allowed",
+                "source_type": SourceType.ACADEMIC_PAPER.value,
+            },
+            input_trust=TrustClassification.USER_SUPPLIED,
+            output_trust=TrustClassification.EXTERNAL_UNTRUSTED,
+            grants=(grant,),
+        )
+        assert allowed_outcome.succeeded, allowed_outcome.detail
+        assert (
+            plain(allowed_outcome.unwrap())["final_uri"]
+            == "https://arxiv.org/pdf/2401.00001.pdf"
+        )
+        assert [r.url.host for r in captured] == ["doi.org", "arxiv.org"]
+
+        captured.clear()
+        disallowed_outcome = await boundary.invoke(
+            tool_name=SOURCE_FETCH_TOOL,
+            run_id="run-1",
+            task_id="task-1",
+            attempt_id="att-1",
+            organization_id="org-1",
+            capability_scope=grant.capability_scope,
+            arguments={
+                "source_uri": "https://doi.org/10.48550/disallowed",
+                "source_type": SourceType.ACADEMIC_PAPER.value,
+            },
+            input_trust=TrustClassification.USER_SUPPLIED,
+            output_trust=TrustClassification.EXTERNAL_UNTRUSTED,
+            grants=(grant,),
+        )
+        assert disallowed_outcome.status is ToolOutcomeStatus.FAILED
+        assert disallowed_outcome.detail is not None
+        assert "export.arxiv.org" in disallowed_outcome.detail
+        assert [r.url.host for r in captured] == ["doi.org"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("content_type", "body"),
+        [
+            ("text/html", b"<html><body>PDFs begin with %PDF-1.7.</body></html>"),
+            ("text/html; charset=utf-8", b"%PDF-1.7 is mentioned at offset zero"),
+            ("text/plain", b"%PDF-1.7 magic header documentation"),
+            ("application/json", b'{"magic": "%PDF-1.7"}'),
+            ("application/octet-stream", b"prefix before %PDF-1.7"),
+        ],
+    )
+    async def test_pdf_sniffing_never_misclassifies_text_html_or_mid_body_magic(
+        self,
+        tmp_path: Path,
+        content_type: str,
+        body: bytes,
+    ) -> None:
+        extractor_calls: list[bytes] = []
+
+        async def spy_extractor(data: bytes) -> tuple[ExtractedText, int]:
+            extractor_calls.append(data)
+            return await _bounded_pdf_extractor(data)
+
+        store = FilesystemSnapshotStore(root=tmp_path / "snaps")
+        fetcher = HardenedHttpFetcher(
+            declared_hosts=SOURCE_FETCH_OUTBOUND_HOSTS,
+            client=httpx.AsyncClient(
+                transport=httpx.MockTransport(
+                    lambda _req: httpx.Response(
+                        200,
+                        content=body,
+                        headers={"content-type": content_type},
+                    )
+                )
+            ),
+            dns_resolver=_static_dns({"arxiv.org": [PUBLIC_IP]}),
+        )
+        boundary = build_tool_boundary(audit_store=InMemoryToolAuditStore())
+        boundary.register(
+            hardened_source_fetch_tool(
+                store=store,
+                fetcher=fetcher,
+                timeout_seconds=30.0,
+                pdf_extractor=spy_extractor,
+            )
+        )
+        grant = _grant(allowed_hosts=("arxiv.org",))
+
+        outcome = await boundary.invoke(
+            tool_name=SOURCE_FETCH_TOOL,
+            run_id="run-1",
+            task_id="task-1",
+            attempt_id="att-1",
+            organization_id="org-1",
+            capability_scope=grant.capability_scope,
+            arguments={
+                "source_uri": "https://arxiv.org/abs/2401.00001",
+                "source_type": SourceType.ACADEMIC_PAPER.value,
+            },
+            input_trust=TrustClassification.USER_SUPPLIED,
+            output_trust=TrustClassification.EXTERNAL_UNTRUSTED,
+            grants=(grant,),
+        )
+
+        assert outcome.succeeded, outcome.detail
+        assert extractor_calls == []
+        handle = plain(outcome.unwrap())
+        assert handle["extracted_text_sha256"] is None
+        assert handle["content_kind"] is None
+
+    @pytest.mark.asyncio
+    async def test_pdf_sniffing_still_detects_pdf_at_offset_zero_when_content_type_absent(
+        self, tmp_path: Path
+    ) -> None:
+        pdf_bytes = _make_pdf(["Absent content type PDF page."])
+        store = FilesystemSnapshotStore(root=tmp_path / "snaps")
+        fetcher = HardenedHttpFetcher(
+            declared_hosts=SOURCE_FETCH_OUTBOUND_HOSTS,
+            client=httpx.AsyncClient(
+                transport=httpx.MockTransport(
+                    lambda _req: httpx.Response(200, content=pdf_bytes)
+                )
+            ),
+            dns_resolver=_static_dns({"arxiv.org": [PUBLIC_IP]}),
+        )
+        boundary = build_tool_boundary(audit_store=InMemoryToolAuditStore())
+        boundary.register(
+            hardened_source_fetch_tool(
+                store=store,
+                fetcher=fetcher,
+                timeout_seconds=30.0,
+                pdf_extractor=_bounded_pdf_extractor,
+            )
+        )
+        grant = _grant(allowed_hosts=("arxiv.org",))
+
+        outcome = await boundary.invoke(
+            tool_name=SOURCE_FETCH_TOOL,
+            run_id="run-1",
+            task_id="task-1",
+            attempt_id="att-1",
+            organization_id="org-1",
+            capability_scope=grant.capability_scope,
+            arguments={
+                "source_uri": "https://arxiv.org/pdf/2401.00001.pdf",
+                "source_type": SourceType.ACADEMIC_PAPER.value,
+            },
+            input_trust=TrustClassification.USER_SUPPLIED,
+            output_trust=TrustClassification.EXTERNAL_UNTRUSTED,
+            grants=(grant,),
+        )
+
+        assert outcome.succeeded, outcome.detail
+        handle = plain(outcome.unwrap())
+        assert handle["content_kind"] == "full_text"
+        assert handle["extracted_text_sha256"] is not None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("extracted_payload", "locator", "pages"),
+        [
+            (b"valid text", "bytes:0-9999", [{"page": 1, "start": 0, "end": 10}]),
+            (
+                b"valid text",
+                "not-a-valid-locator",
+                [{"page": 1, "start": 0, "end": 10}],
+            ),
+            (b"\xff\xfe\x80", "bytes:0-3", [{"page": 1, "start": 0, "end": 1}]),
+            (b"valid text", "bytes:0-10", [{"page": 1, "start": 0, "end": 99}]),
+            (b"valid text", "bytes:0-10", [{"page": 1, "start": 5, "end": 2}]),
+            (b"valid text", "bytes:0-10", [{"page": 0, "start": 0, "end": 5}]),
+            (b"valid text", "bytes:0-10", [{"page": 1, "start": 0}]),
+        ],
+    )
+    async def test_acquisition_service_guards_extracted_text_locator_decode_and_pages(
+        self,
+        tmp_path: Path,
+        extracted_payload: bytes,
+        locator: str,
+        pages: list[dict[str, int]],
+    ) -> None:
+        from src.core.acquisition.fetch_tool import SourceFetchOutput
+        from src.core.acquisition.sources import LicenseDeclaration
+        from src.core.tools.spec import ToolSpec
+
+        store = FilesystemSnapshotStore(root=tmp_path / "snaps")
+        raw_pdf = b"%PDF-1.7 raw bytes"
+        raw_uri = store.put(raw_pdf)
+        extracted_uri = store.put(extracted_payload)
+
+        async def tampered_handler(_payload: Any, _ctx: Any) -> dict[str, Any]:
+            return {
+                "content_sha256": snapshot_digest(raw_pdf),
+                "storage_uri": raw_uri,
+                "media_type": "application/pdf",
+                "byte_length": len(raw_pdf),
+                "final_uri": "https://arxiv.org/pdf/2401.00001.pdf",
+                "license_identifier": None,
+                "license_declared_by": LicenseDeclaration.UNDECLARED.value,
+                "license_statement": None,
+                "content_kind": "full_text",
+                "extracted_text_sha256": snapshot_digest(extracted_payload),
+                "extracted_text_storage_uri": extracted_uri,
+                "extracted_text_locator": locator,
+                "extracted_text_byte_length": len(extracted_payload),
+                "extracted_page_count": len(pages),
+                "extracted_pages": pages,
+            }
+
+        registry = PromptRegistry()
+        registry.register(
+            PromptTemplate(
+                prompt_id="literature.acquire",
+                version="1.0.0",
+                source="Acquire $topic.",
+            )
+        )
+        prompt = PromptRenderer(
+            registry=registry, secret_provider=NullSecretProvider()
+        ).render(
+            prompt_id="literature.acquire",
+            version="1.0.0",
+            variables={"topic": "physics"},
+        )
+        boundary = ToolBoundary(
+            secret_provider=NullSecretProvider(),
+            audit_store=FakeAuditStore(),
+            event_publisher=NullEventPublisher(),
+            clock=lambda: NOW,
+            prompt_verifier=PromptIdentityVerifier(registry=registry),
+        )
+        boundary.register(
+            ToolSpec(
+                name=SOURCE_FETCH_TOOL,
+                version="1.0.0",
+                sensitivity=SensitivityClass.EXTERNAL_READ,
+                input_model=SourceFetchInput,
+                output_model=SourceFetchOutput,
+                timeout_seconds=30.0,
+                handler=tampered_handler,
+                outbound_hosts=("arxiv.org",),
+            )
+        )
+        artifacts = FakeArtifactRepository()
+        evidence = FakeEvidenceRepository()
+        service = SourceAcquisitionService(
+            boundary=boundary,
+            store=store,
+            artifacts=artifacts,  # type: ignore[arg-type]
+            evidence=evidence,  # type: ignore[arg-type]
+            secret_provider=NullSecretProvider(),
+            clock=lambda: NOW,
+            source_types={SOURCE_FETCH_TOOL: SourceType.ACADEMIC_PAPER},
+        )
+        grant = _grant(allowed_hosts=("arxiv.org",), now=NOW)
+
+        outcome = await service.acquire(
+            run_id="run-1",
+            task_id="task-1",
+            attempt_id="att-1",
+            organization_id="org-1",
+            source_uri="https://arxiv.org/pdf/2401.00001.pdf",
+            capability_scope=grant.capability_scope,
+            grants=(grant,),
+            prompt=prompt,
+            excerpts=[ExcerptRequest("bytes", 0, len(raw_pdf))],
+        )
+
+        assert outcome.status is AcquisitionStatus.UNAVAILABLE
+        assert (
+            outcome.absent_evidence_reason is AbsentEvidenceReason.SOURCE_INACCESSIBLE
+        )
+        assert artifacts.created == []
+        assert evidence.rows == []

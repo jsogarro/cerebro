@@ -725,12 +725,16 @@ class ToolBoundary:
                     return self._in_progress(conflict.invocation, decision=decision)
                 raise
 
+            grant_allowed_hosts = tuple(
+                host for host in grant.allowed_hosts if host in spec.outbound_hosts
+            )
             return await self._run_tool(
                 call,
                 validated_input=prepared.validated_input,
                 declared_output_trust=output_trust,
                 decision=decision,
                 allowed_hosts=target_hosts,
+                grant_allowed_hosts=grant_allowed_hosts,
                 cancellation=cancellation,
                 lease_monitor=lease_monitor,
             )
@@ -749,6 +753,7 @@ class ToolBoundary:
         declared_output_trust: TrustClassification | None,
         decision: CapabilityDecision,
         allowed_hosts: tuple[str, ...],
+        grant_allowed_hosts: tuple[str, ...],
         cancellation: CancellationToken | None,
         lease_monitor: _LeaseMonitor | None,
     ) -> ToolOutcome:
@@ -761,6 +766,7 @@ class ToolBoundary:
             tool_invocation_id=call.tool_invocation_id,
             resolve_secret=self._resolve_secret,
             allowed_hosts=allowed_hosts,
+            grant_allowed_hosts=grant_allowed_hosts,
         )
 
         try:
