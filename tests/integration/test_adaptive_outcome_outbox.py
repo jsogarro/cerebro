@@ -503,10 +503,14 @@ async def test_pending_evaluation_defers_adaptive_outcome_until_evaluation_finis
     assert captured[0].quality_score == pytest.approx(1.0)
     async with factory() as session:
         rows = (
-            await session.execute(
-                select(AgentRunEventOutbox).where(
-                    AgentRunEventOutbox.event_id == event_id
+            (
+                await session.execute(
+                    select(AgentRunEventOutbox).where(
+                        AgentRunEventOutbox.event_id == event_id
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert all(r.status == EventDeliveryStatus.DELIVERED.value for r in rows)
