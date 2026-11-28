@@ -23,9 +23,8 @@ API_PREFIX = "/api/v1"
 VERBS = "get|post|put|patch|delete|head|options"
 
 # Surfaces the client renders but the server has no counterpart for yet (there
-# is no run/workflow read API, or memory explorer). Each entry
-# is a known gap, not a licence: the test fails if one becomes served, so this
-# list can only shrink.
+# is no run/workflow read API). Each entry is a known gap, not a licence: the
+# test fails if one becomes served, so this list can only shrink.
 KNOWN_UNSERVED = {
     ("GET", "/runs"),
     ("POST", "/runs"),
@@ -35,7 +34,6 @@ KNOWN_UNSERVED = {
     ("GET", "/runs/{}/artifacts"),
     ("GET", "/runs/{}/evaluations"),
     ("GET", "/workflows/{}"),
-    ("GET", "/memory/nodes"),
     # Mounted, but as an SSE stream; the client reads it as JSON.
     ("GET", "/runs/{}/events"),
 }
