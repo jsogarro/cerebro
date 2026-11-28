@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.services.execution_authority_resolver import (
     serialize_execution_authority_binding,
+    validate_template_binding,
 )
 from src.models.db.execution_authority import AgentExecutionAuthority
 from src.models.execution_authority import ExecutionAuthorityBinding
@@ -29,6 +30,8 @@ class ExecutionAuthorityRepository:
         is_template: bool = False,
     ) -> AgentExecutionAuthority:
         """Store a binding under the tenant that owns it; flushes, never commits."""
+        if is_template:
+            validate_template_binding(binding)
         organization = normalize_organization_id(organization_id)
         enforce_tenant_identity(
             tenant_id=binding.run.tenant_id, organization_id=organization
@@ -52,7 +55,7 @@ class ExecutionAuthorityRepository:
         authority_id: str,
         authority_version: str,
         organization_id: uuid.UUID | str,
-        require_template: bool = False,
+        is_template: bool | None = None,
     ) -> AgentExecutionAuthority | None:
         query = select(AgentExecutionAuthority).where(
             AgentExecutionAuthority.authority_id == authority_id,
@@ -60,8 +63,8 @@ class ExecutionAuthorityRepository:
             AgentExecutionAuthority.organization_id
             == normalize_organization_id(organization_id),
         )
-        if require_template:
-            query = query.where(AgentExecutionAuthority.is_template.is_(True))
+        if is_template is not None:
+            query = query.where(AgentExecutionAuthority.is_template.is_(is_template))
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
@@ -76,5 +79,5 @@ class ExecutionAuthorityRepository:
             authority_id=authority_id,
             authority_version=authority_version,
             organization_id=organization_id,
-            require_template=True,
+            is_template=True,
         )

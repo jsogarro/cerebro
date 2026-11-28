@@ -9,7 +9,6 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-import sqlalchemy as sa
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -17,6 +16,7 @@ from sqlalchemy import (
     DateTime,
     String,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -36,7 +36,7 @@ class AgentExecutionAuthority(Base):
     configuration: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     is_template: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=sa.false()
+        Boolean, nullable=False, default=False, server_default=false()
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

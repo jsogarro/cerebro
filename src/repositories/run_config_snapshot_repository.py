@@ -156,16 +156,27 @@ class RunConfigSnapshotRepository:
         return list(result.scalars().all())
 
     async def list_all(
-        self, *, limit: int | None = None
+        self,
+        *,
+        limit: int | None = None,
+        exclude_authority_version_prefix: str | None = None,
     ) -> list[AgentRunConfigSnapshot]:
-        """Return every snapshot, oldest first.
+        """Return persisted snapshots, oldest first.
 
         Used to warm an in-process authority cache (e.g. at startup) from
-        every persisted binding.
+        persisted bindings. ``exclude_authority_version_prefix`` filters out
+        ephemeral per-run bindings in SQL so ``limit`` applies only to
+        cacheable operator authorities.
         """
         query = select(AgentRunConfigSnapshot).order_by(
             AgentRunConfigSnapshot.created_at
         )
+        if exclude_authority_version_prefix is not None:
+            query = query.where(
+                ~AgentRunConfigSnapshot.authority_version.startswith(
+                    exclude_authority_version_prefix
+                )
+            )
         if limit is not None:
             query = query.limit(limit)
         result = await self.session.execute(query)

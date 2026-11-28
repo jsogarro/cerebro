@@ -7,12 +7,14 @@ database settings are available, not against the HTTP API.
 import asyncio
 import json
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import click
 
 from src.api.services.execution_authority_resolver import (
     deserialize_execution_authority_binding,
+    is_minted_authority_version,
+    validate_template_binding,
 )
 from src.cli.formatters import print_error, print_success
 from src.models.execution_authority import ExecutionAuthorityBinding
@@ -80,11 +82,10 @@ def register_command(path: str, organization_id: str, is_template: bool) -> None
     try:
         uuid.UUID(organization_id)
         binding = _load_binding(path)
+        if is_minted_authority_version(binding.authority_version):
+            raise ValueError("authority_version cannot use reserved 'mint:' prefix")
         if is_template:
-            if binding.deadline.tzinfo is None or binding.deadline.utcoffset() is None:
-                raise ValueError("template deadline must be timezone-aware")
-            if (binding.deadline - binding.run.created_at) <= timedelta(0):
-                raise ValueError("template deadline must follow run.created_at")
+            validate_template_binding(binding)
     except (KeyError, ValueError, TypeError) as exc:
         print_error(f"Invalid authority: {exc}")
         raise click.exceptions.Exit(1) from exc

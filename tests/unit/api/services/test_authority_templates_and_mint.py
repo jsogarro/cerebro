@@ -36,9 +36,11 @@ from src.api.services.execution_authority_resolver import (
     PersistedExecutionAuthorityResolver,
     RequestIdExpiredError,
     mint_run_binding,
+    validate_template_binding,
 )
 from src.api.services.research_kernel import compose_application_research_kernel
 from src.core.capabilities.issuer import PlanCapabilityIssuer
+from src.core.config import settings
 from src.core.contracts import (
     ExecutionBudget,
     FallbackMode,
@@ -46,6 +48,7 @@ from src.core.contracts import (
     ProviderModelPolicy,
     ProviderModelRoute,
     RoutingEdge,
+    RunStatus,
     WorkerAssignment,
 )
 from src.middleware.tenant_context import TenantContext, get_tenant_context
@@ -64,7 +67,10 @@ from src.models.execution_authority import (
 )
 from src.repositories.execution_authority_repository import ExecutionAuthorityRepository
 from src.repositories.run_config_snapshot_repository import RunConfigSnapshotRepository
-from src.repositories.run_lifecycle_repository import RunLifecycleRepository
+from src.repositories.run_lifecycle_repository import (
+    RunCapExceededError,
+    RunLifecycleRepository,
+)
 from tests.fixtures.authenticated_caller import allow_authenticated
 from tests.integration.crash_fixtures import (
     _RoutingDecisionStub,
@@ -379,16 +385,7 @@ def test_mint_rejects_nonpositive_delta(bad_delta: timedelta) -> None:
         mint_run_binding(template, user_id="user-1", request_id="req-1", now=MINT_NOW)
 
 
-def test_minted_binding_compiles_plan_and_issues_capabilities() -> None:
-    """Risk R3: ExecutionPlanCompiler and PlanCapabilityIssuer accept a minted binding."""
-    template = _make_template_binding(
-        created_at=TEMPLATE_CREATED, delta=timedelta(minutes=30)
-    )
-    minted = dataclasses.replace(
-        mint_run_binding(template, user_id="user-1", request_id="req-r3", now=MINT_NOW),
-        clock=lambda: MINT_NOW + timedelta(seconds=1),
-    )
-
+def _matching_proposal() -> _RoutingDecisionStub:
     proposal = _RoutingDecisionStub()
     proposal.optimization_result = type(
         "_Opt",
@@ -406,8 +403,20 @@ def test_minted_binding_compiles_plan_and_issues_capabilities() -> None:
             ],
         },
     )()
+    return proposal
 
-    plan = ExecutionPlanCompiler().compile(proposal, minted)
+
+def test_minted_binding_compiles_plan_and_issues_capabilities() -> None:
+    """Risk R3: ExecutionPlanCompiler and PlanCapabilityIssuer accept a minted binding."""
+    template = _make_template_binding(
+        created_at=TEMPLATE_CREATED, delta=timedelta(minutes=30)
+    )
+    minted = dataclasses.replace(
+        mint_run_binding(template, user_id="user-1", request_id="req-r3", now=MINT_NOW),
+        clock=lambda: MINT_NOW + timedelta(seconds=1),
+    )
+
+    plan = ExecutionPlanCompiler().compile(_matching_proposal(), minted)
     assert plan.run_id == minted.run.run_id
     assert plan.deadline == MINT_NOW + timedelta(minutes=30)
     assert plan.compiled_at == MINT_NOW + timedelta(seconds=1)
@@ -875,24 +884,7 @@ def _matching_router() -> AsyncMock:
     router = AsyncMock()
 
     async def _route(*_args: Any, **_kwargs: Any) -> _RoutingDecisionStub:
-        proposal = _RoutingDecisionStub()
-        proposal.optimization_result = type(
-            "_Opt",
-            (),
-            {
-                "primary_model": type(
-                    "_M1", (), {"provider": "gemini", "model_name": "gemini-2.5-pro"}
-                )(),
-                "fallback_models": [
-                    type(
-                        "_M2",
-                        (),
-                        {"provider": "anthropic", "model_name": "claude-sonnet-4-6"},
-                    )()
-                ],
-            },
-        )()
-        return proposal
+        return _matching_proposal()
 
     router.route.side_effect = _route
     return router
@@ -992,5 +984,393 @@ async def test_integration_distinct_request_ids_give_two_runs_same_gives_one(
                 minted_1.run.run_id,
                 minted_2.run.run_id,
             }
+    finally:
+        await service.close()
+
+
+# --- 4. Review-hardening tests (roles, template execution guard, validation, SQL filter, cap retry) ---
+
+
+@pytest.mark.asyncio
+async def test_load_authority_rejects_template_row_as_runnable_authority(
+    sqlite_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, factory = sqlite_factory
+    template = _make_template_binding(
+        authority_id="tpl-not-runnable", authority_version="1"
+    )
+    async with factory() as session:
+        await ExecutionAuthorityRepository(session).create(
+            template, organization_id=ORG_A, is_template=True
+        )
+        await session.commit()
+
+    resolver = PersistedExecutionAuthorityResolver(session_factory=factory)
+    tpl_ref = ExecutionAuthorityReference(
+        authority_id="tpl-not-runnable", authority_version="1"
+    )
+
+    loaded = await resolver.load_authority(tpl_ref, organization_id=ORG_A)
+    assert loaded is None
+    assert ("tpl-not-runnable", "1") not in resolver._bindings
+
+    service = DirectExecutionService(
+        masr_router=_matching_router(),
+        supervisor_bridge=_CountingBridge(),
+        supervisor_factory=Mock(),
+        session_factory=factory,
+        execution_authority_resolver=resolver,
+    )
+    try:
+        with pytest.raises(ExecutionAuthorityUnavailableError):
+            await service.start_research_execution(
+                make_project("Direct template attempt"),
+                authority_reference=tpl_ref,
+                organization_id=ORG_A,
+            )
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_validate_template_binding_forbids_non_created_and_mint_prefix(
+    sqlite_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, factory = sqlite_factory
+    base = _make_template_binding(authority_id="tpl-val", authority_version="1")
+    queued = dataclasses.replace(
+        base,
+        run=base.run.transition_to(
+            RunStatus.QUEUED, at=base.run.created_at + timedelta(seconds=1)
+        ),
+    )
+    mint_prefixed = dataclasses.replace(
+        base, authority_version="mint:00000000-0000-0000-0000-000000000001"
+    )
+
+    assert validate_template_binding(base) == TEMPLATE_DELTA
+
+    with pytest.raises(ValueError, match="created"):
+        validate_template_binding(queued)
+    with pytest.raises(ValueError, match="created"):
+        mint_run_binding(queued, user_id="user-1", request_id="req-1", now=MINT_NOW)
+
+    with pytest.raises(ValueError, match="mint:"):
+        validate_template_binding(mint_prefixed)
+    with pytest.raises(ValueError, match="mint:"):
+        mint_run_binding(
+            mint_prefixed, user_id="user-1", request_id="req-1", now=MINT_NOW
+        )
+
+    async with factory() as session:
+        repo = ExecutionAuthorityRepository(session)
+        with pytest.raises(ValueError, match="created"):
+            await repo.create(queued, organization_id=ORG_A, is_template=True)
+        with pytest.raises(ValueError, match="mint:"):
+            await repo.create(mint_prefixed, organization_id=ORG_A, is_template=True)
+
+
+@pytest.mark.asyncio
+async def test_warm_from_snapshots_limit_skips_minted_in_sql(
+    sqlite_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, factory = sqlite_factory
+    template = _make_template_binding(authority_id="tpl-limit", authority_version="1")
+    minted = mint_run_binding(
+        template, user_id="user-1", request_id="req-old", now=MINT_NOW
+    )
+    operator_binding = dataclasses.replace(
+        _make_template_binding(authority_id="op-second", authority_version="1"),
+        run=_make_template_binding(
+            authority_id="op-second", authority_version="1"
+        ).run.model_copy(update={"run_id": "op-run-second", "idempotency_key": "op-2"}),
+    )
+
+    writer = PersistedExecutionAuthorityResolver(session_factory=factory)
+    async with factory() as session:
+        # Insert minted snapshot FIRST (oldest), then operator snapshot SECOND.
+        await RunLifecycleRepository(session).create_run(
+            minted.run, organization_id=ORG_A
+        )
+        await writer.register(
+            session,
+            binding=minted,
+            organization_id=ORG_A,
+            config_snapshot_id=f"{minted.run.run_id}:config",
+            pinned_versions=_pinned_versions(minted),
+        )
+        await RunLifecycleRepository(session).create_run(
+            operator_binding.run, organization_id=ORG_A
+        )
+        await writer.register(
+            session,
+            binding=operator_binding,
+            organization_id=ORG_A,
+            config_snapshot_id=f"{operator_binding.run.run_id}:config",
+            pinned_versions=_pinned_versions(operator_binding),
+        )
+        await session.commit()
+
+    cold = PersistedExecutionAuthorityResolver(session_factory=factory)
+    async with factory() as session:
+        warmed = await cold.warm_from_snapshots(session, limit=1)
+    assert warmed == 1
+    assert ("op-second", "1") in cold._bindings
+    assert (minted.authority_id, minted.authority_version) not in cold._bindings
+
+
+@pytest.mark.asyncio
+async def test_mint_uses_write_session_factory_separate_from_read_factory(
+    sqlite_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    _, factory = sqlite_factory
+    template = _make_template_binding(authority_id="tpl-split", authority_version="1")
+    async with factory() as session:
+        await ExecutionAuthorityRepository(session).create(
+            template, organization_id=ORG_A, is_template=True
+        )
+        await session.commit()
+
+    read_calls = 0
+    write_calls = 0
+
+    def _read_factory() -> AsyncSession:
+        nonlocal read_calls
+        read_calls += 1
+        return factory()
+
+    def _write_factory() -> AsyncSession:
+        nonlocal write_calls
+        write_calls += 1
+        return factory()
+
+    resolver = PersistedExecutionAuthorityResolver(
+        session_factory=_read_factory,
+        write_session_factory=_write_factory,
+    )
+    minted = await resolver.mint_authority_from_template(
+        ExecutionAuthorityReference(authority_id="tpl-split", authority_version="1"),
+        organization_id=ORG_A,
+        user_id="user-1",
+        request_id="req-split",
+        now=MINT_NOW,
+    )
+    assert write_calls == 1
+    assert read_calls == 0
+
+    loaded = await resolver.load_authority(
+        ExecutionAuthorityReference(
+            authority_id=minted.authority_id,
+            authority_version=minted.authority_version,
+        ),
+        organization_id=ORG_A,
+    )
+    assert loaded is not None
+    assert read_calls == 1
+
+
+def test_main_lifespan_wires_durable_write_session_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from src.api import main
+    from src.api.services import (
+        agent_execution_service,
+        component_catalog,
+        direct_execution_service,
+        masr_routing_service,
+        outbox_relay,
+        supervisor_coordination_service,
+        talkhier_session_service,
+    )
+    from src.core.kernel import TypedRegistry
+    from src.models.db import session as db_session
+
+    class _DummySession:
+        async def __aenter__(self) -> _DummySession:
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+    durable_factory = Mock(side_effect=lambda: _DummySession())
+    maint_factory = Mock(side_effect=lambda: _DummySession())
+
+    class _Runtime:
+        router = Mock()
+
+        async def close(self) -> None:
+            return None
+
+    class _ServiceStub:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        async def close(self) -> None:
+            return None
+
+    exec_service = DirectExecutionService(
+        masr_router=Mock(),
+        supervisor_bridge=Mock(),
+        supervisor_factory=Mock(),
+    )
+    exec_service.restore_active_executions = AsyncMock(return_value=0)  # type: ignore[method-assign]
+    exec_service.start_expired_run_reconciliation = Mock()  # type: ignore[method-assign]
+
+    monkeypatch.setattr(main.MASRRuntime, "create", AsyncMock(return_value=_Runtime()))
+    monkeypatch.setattr(main.settings, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(main.settings, "EVALUATION_DISPATCH_ENABLED", False)
+    monkeypatch.setattr(main.event_publisher, "initialize", AsyncMock())
+    monkeypatch.setattr(main.event_publisher, "shutdown", AsyncMock())
+    monkeypatch.setattr(db_session, "init_db", AsyncMock())
+    monkeypatch.setattr(db_session, "close_db", AsyncMock())
+    monkeypatch.setattr(db_session, "get_session_factory", lambda: durable_factory)
+    monkeypatch.setattr(
+        db_session, "get_maintenance_session_factory", lambda: maint_factory
+    )
+    monkeypatch.setattr(
+        PersistedExecutionAuthorityResolver,
+        "warm_from_snapshots",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        outbox_relay,
+        "OutboxRelay",
+        lambda **_kwargs: SimpleNamespace(start=Mock(), stop=AsyncMock()),
+    )
+    monkeypatch.setattr(
+        component_catalog, "build_application_component_registry", TypedRegistry
+    )
+    monkeypatch.setattr(
+        direct_execution_service,
+        "configure_direct_execution_service",
+        lambda **_kwargs: exec_service,
+    )
+    monkeypatch.setattr(
+        agent_execution_service,
+        "configure_agent_execution_service",
+        lambda **_kwargs: AsyncMock(),
+    )
+    monkeypatch.setattr(masr_routing_service, "MASRRoutingService", _ServiceStub)
+    monkeypatch.setattr(
+        talkhier_session_service, "TalkHierSessionService", _ServiceStub
+    )
+    monkeypatch.setattr(
+        supervisor_coordination_service,
+        "SupervisorCoordinationService",
+        _ServiceStub,
+    )
+
+    test_app = FastAPI(lifespan=main.lifespan)
+    with TestClient(test_app):
+        resolver = exec_service.execution_authority_resolver
+        assert isinstance(resolver, PersistedExecutionAuthorityResolver)
+        assert resolver._session_factory is maint_factory
+        assert resolver._write_session_factory is durable_factory
+
+
+@pytest.mark.asyncio
+async def test_pre_deadline_retry_after_cap_refusal_succeeds(
+    sqlite_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, factory = sqlite_factory
+    monkeypatch.setattr(settings, "RUN_MAX_CONCURRENT_PER_ORG", 1)
+    monkeypatch.setattr(settings, "RUN_MAX_DAILY_PER_ORG", 100)
+
+    template = _make_template_binding(
+        authority_id="tpl-cap-retry", authority_version="1", delta=timedelta(hours=1)
+    )
+    now = datetime.now(UTC)
+    blocker_binding = _make_template_binding(
+        authority_id="blocker", authority_version="1"
+    )
+    blocker_run = blocker_binding.run.model_copy(
+        update={
+            "run_id": "blocker-run",
+            "idempotency_key": "blocker-key",
+            "status": RunStatus.RUNNING,
+            "created_at": now - timedelta(seconds=10),
+            "updated_at": now - timedelta(seconds=5),
+            "started_at": now - timedelta(seconds=5),
+        }
+    )
+
+    async with factory() as session:
+        await ExecutionAuthorityRepository(session).create(
+            template, organization_id=ORG_A, is_template=True
+        )
+        await RunLifecycleRepository(session).create_run(
+            blocker_run, organization_id=ORG_A
+        )
+        await session.commit()
+
+    resolver = PersistedExecutionAuthorityResolver(session_factory=factory)
+    bridge = _CountingBridge()
+    service = DirectExecutionService(
+        masr_router=_matching_router(),
+        supervisor_bridge=bridge,
+        supervisor_factory=Mock(),
+        session_factory=factory,
+        execution_authority_resolver=resolver,
+    )
+
+    try:
+        tpl_ref = ExecutionAuthorityReference(
+            authority_id="tpl-cap-retry", authority_version="1"
+        )
+        minted = await resolver.mint_authority_from_template(
+            tpl_ref,
+            organization_id=ORG_A,
+            user_id="user-1",
+            request_id="req-cap-1",
+            now=now,
+        )
+        minted_ref = ExecutionAuthorityReference(
+            authority_id=minted.authority_id,
+            authority_version=minted.authority_version,
+        )
+        with pytest.raises(RunCapExceededError):
+            await service.start_research_execution(
+                make_project("Blocked first attempt"),
+                authority_reference=minted_ref,
+                organization_id=ORG_A,
+            )
+
+        # Clear the concurrent cap before deadline by completing the blocking run.
+        async with factory() as session:
+            finished_blocker = blocker_run.transition_to(
+                RunStatus.SUCCEEDED, at=datetime.now(UTC)
+            )
+            await RunLifecycleRepository(session).record_run_transition(
+                finished_blocker, organization_id=ORG_A
+            )
+            await session.commit()
+
+        # Retry same request_id before deadline -> reloads orphan row and admits cleanly.
+        reloaded = await resolver.mint_authority_from_template(
+            tpl_ref,
+            organization_id=ORG_A,
+            user_id="user-1",
+            request_id="req-cap-1",
+            now=datetime.now(UTC),
+        )
+        assert reloaded.run.run_id == minted.run.run_id
+        exec_id = await service.start_research_execution(
+            make_project("Succeeded retry"),
+            authority_reference=ExecutionAuthorityReference(
+                authority_id=reloaded.authority_id,
+                authority_version=reloaded.authority_version,
+            ),
+            organization_id=ORG_A,
+        )
+        assert isinstance(exec_id, str)
+        async with factory() as session:
+            admitted_run = await RunLifecycleRepository(session).get_run(
+                minted.run.run_id, organization_id=ORG_A
+            )
+            assert admitted_run is not None
+        assert bridge.admit_calls == 2
     finally:
         await service.close()

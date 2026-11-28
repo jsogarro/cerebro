@@ -21,6 +21,7 @@ from src.core.contracts import (
     RoutingEdge,
     RoutingPolicy,
     Run,
+    RunStatus,
     WorkerAssignment,
     WorkflowDefinition,
 )
@@ -76,6 +77,22 @@ def _normalize_org_for_mint(tenant_id: str) -> str:
         return tenant_id
 
 
+def validate_template_binding(binding: ExecutionAuthorityBinding) -> timedelta:
+    """Validate template invariants and return its positive deadline delta."""
+    if binding.run.status is not RunStatus.CREATED:
+        raise ValueError("template run status must be created")
+    if is_minted_authority_version(binding.authority_version):
+        raise ValueError(
+            "template authority_version cannot use reserved 'mint:' prefix"
+        )
+    if binding.deadline.tzinfo is None or binding.deadline.utcoffset() is None:
+        raise ValueError("template deadline must be timezone-aware")
+    delta = binding.deadline - binding.run.created_at
+    if delta <= timedelta(0):
+        raise ValueError("template deadline must follow run.created_at")
+    return delta
+
+
 def mint_run_binding(
     template: ExecutionAuthorityBinding,
     *,
@@ -95,11 +112,7 @@ def mint_run_binding(
         raise ValueError("user_id must be a non-empty string")
     if not isinstance(request_id, str) or not request_id.strip():
         raise ValueError("request_id must be a non-empty string")
-    if template.deadline.tzinfo is None or template.deadline.utcoffset() is None:
-        raise ValueError("template deadline must be timezone-aware")
-    delta = template.deadline - template.run.created_at
-    if delta <= timedelta(0):
-        raise ValueError("template deadline must follow run.created_at")
+    delta = validate_template_binding(template)
 
     org = _normalize_org_for_mint(template.run.tenant_id)
     canonical = json.dumps(
@@ -335,8 +348,15 @@ class PersistedExecutionAuthorityResolver:
         plan_id_factory: Callable[[], str] | None = None,
         session_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]]
         | None = None,
+        write_session_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]]
+        | None = None,
     ) -> None:
         self._session_factory = session_factory
+        self._write_session_factory = (
+            write_session_factory
+            if write_session_factory is not None
+            else session_factory
+        )
         self._bindings: dict[tuple[str, str], ExecutionAuthorityBinding] = {}
         self._clock: Callable[[], datetime] = clock or (lambda: datetime.now(UTC))
         self._plan_id_factory: Callable[[], str] = plan_id_factory or (
@@ -398,6 +418,7 @@ class PersistedExecutionAuthorityResolver:
                     authority_id=reference.authority_id,
                     authority_version=reference.authority_version,
                     organization_id=organization_id,
+                    is_template=False,
                 )
             if row is None:
                 snapshots = await RunConfigSnapshotRepository(
@@ -437,7 +458,7 @@ class PersistedExecutionAuthorityResolver:
         (no ``AgentRun`` yet) with :class:`RequestIdExpiredError`. Never
         inserts minted bindings into ``_bindings``.
         """
-        if self._session_factory is None or organization_id is None:
+        if self._write_session_factory is None or organization_id is None:
             raise ExecutionAuthorityUnavailableError(
                 "execution authority is unavailable"
             )
@@ -446,21 +467,20 @@ class PersistedExecutionAuthorityResolver:
             ExecutionAuthorityRepository,
         )
         from src.repositories.run_lifecycle_repository import RunLifecycleRepository
-        from src.repositories.tenant_scope import (
-            MissingOrganizationContextError,
-            normalize_organization_id,
-        )
+        from src.repositories.tenant_scope import normalize_organization_id
 
         try:
             normalized_org = normalize_organization_id(organization_id)
-        except (MissingOrganizationContextError, ValueError, TypeError) as exc:
+        except (ValueError, TypeError) as exc:
             raise ExecutionAuthorityUnavailableError(
                 "execution authority is unavailable"
             ) from exc
 
         mint_now = now if now is not None else self._clock()
         normalized_org_str = str(normalized_org)
-        session_factory = cast("Callable[[], AsyncSession]", self._session_factory)
+        session_factory = cast(
+            "Callable[[], AsyncSession]", self._write_session_factory
+        )
 
         async with tenant_session(session_factory, normalized_org) as session:
             template_row = await ExecutionAuthorityRepository(session).get_template(
@@ -502,6 +522,7 @@ class PersistedExecutionAuthorityResolver:
                 authority_id=minted.authority_id,
                 authority_version=minted.authority_version,
                 organization_id=normalized_org,
+                is_template=False,
             )
             if existing_row is None:
                 raise ExecutionAuthorityUnavailableError(
@@ -585,7 +606,10 @@ class PersistedExecutionAuthorityResolver:
             RunConfigSnapshotRepository,
         )
 
-        snapshots = await RunConfigSnapshotRepository(session).list_all(limit=limit)
+        snapshots = await RunConfigSnapshotRepository(session).list_all(
+            limit=limit,
+            exclude_authority_version_prefix=MINTED_AUTHORITY_VERSION_PREFIX,
+        )
         loaded = 0
         for snapshot in snapshots:
             if is_minted_authority_version(snapshot.authority_version):

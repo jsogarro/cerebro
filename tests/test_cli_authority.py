@@ -3,7 +3,7 @@
 import dataclasses
 import json
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ from src.api.services.execution_authority_resolver import (
 )
 from src.cli.commands import authority as authority_commands
 from src.cli.main import cli
+from src.core.contracts import RunStatus
 from tests.integration.crash_fixtures import ORG_ID, make_binding
 
 
@@ -115,6 +116,87 @@ def test_register_template_rejects_nonpositive_deadline_delta(
 
     assert result.exit_code == 1
     assert stored == []
+
+
+def test_register_template_rejects_non_created_run_status(
+    tmp_path: Path, stored: list[tuple[Any, str, bool]]
+) -> None:
+    binding = make_binding("cli-queued-tpl", authority_id="cli-queued-template")
+    queued = dataclasses.replace(
+        binding,
+        run=binding.run.transition_to(
+            RunStatus.QUEUED, at=binding.run.created_at + timedelta(seconds=1)
+        ),
+    )
+    result = CliRunner().invoke(
+        cli,
+        [
+            "authority",
+            "register",
+            "--file",
+            str(_file(tmp_path, queued)),
+            "--organization-id",
+            ORG_ID,
+            "--template",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert stored == []
+
+
+def test_register_template_rejects_naive_deadline(
+    tmp_path: Path, stored: list[tuple[Any, str, bool]]
+) -> None:
+    binding = make_binding("cli-naive-tpl", authority_id="cli-naive-template")
+    path = _file(tmp_path, binding)
+    document = json.loads(path.read_text())
+    document["configuration"]["deadline"] = datetime(2026, 8, 5, 12, 0, 0).isoformat()
+    path.write_text(json.dumps(document))
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "authority",
+            "register",
+            "--file",
+            str(path),
+            "--organization-id",
+            ORG_ID,
+            "--template",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert stored == []
+
+
+@pytest.mark.parametrize("extra_args", [[], ["--template"]])
+def test_register_rejects_reserved_mint_version_prefix(
+    tmp_path: Path,
+    stored: list[tuple[Any, str, bool]],
+    extra_args: list[str],
+) -> None:
+    binding = dataclasses.replace(
+        make_binding("cli-mint-prefix", authority_id="cli-mint-auth"),
+        authority_version="mint:00000000-0000-0000-0000-000000000001",
+    )
+    result = CliRunner().invoke(
+        cli,
+        [
+            "authority",
+            "register",
+            "--file",
+            str(_file(tmp_path, binding)),
+            "--organization-id",
+            ORG_ID,
+            *extra_args,
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert stored == []
+    assert datetime.now(UTC).tzinfo is not None
 
 
 def test_register_rejects_a_file_that_is_not_a_valid_binding(
