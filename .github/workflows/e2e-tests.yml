@@ -59,7 +59,7 @@ jobs:
         # window throttles the suite itself; no test asserts that limit.
         MAX_REQUESTS_PER_MINUTE: "1000"
       run: |
-        docker compose up -d
+        docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d
         timeout 90 bash -c 'until curl -fsS http://localhost:8000/health; do sleep 2; done'
 
     - name: Run Python e2e tests and journeys
@@ -96,8 +96,8 @@ jobs:
     - name: Dump docker-compose logs on failure
       if: failure()
       run: |
-        docker compose ps
-        docker compose logs --no-color > docker-compose.log
+        docker compose -f docker-compose.yml -f docker-compose.e2e.yml ps
+        docker compose -f docker-compose.yml -f docker-compose.e2e.yml logs --no-color > docker-compose.log
       continue-on-error: true
 
     - name: Upload docker-compose logs
@@ -111,4 +111,4 @@ jobs:
     - name: Stop services
       if: always()
       run: |
-        docker compose down -v
+        docker compose -f docker-compose.yml -f docker-compose.e2e.yml down -v
