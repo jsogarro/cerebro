@@ -34,6 +34,7 @@ from structlog import get_logger
 
 from src.api.services.event_publisher import EventPublisher
 from src.api.websocket.run_stream import RunStreamHub, run_stream_hub
+from src.core.evaluation.events import ADAPTIVE_OUTCOME_DESTINATION
 from src.core.observability import outbox_dead_lettered_total, outbox_rows
 from src.models.db.run_event import AgentRunEventOutbox, EventDeliveryStatus
 
@@ -164,17 +165,33 @@ class OutboxRelay:
             await self._export_backlog(session)
             await session.commit()
 
-        # Built-in destinations go first and serially; handler rows then run
-        # concurrently, each bounded by the handler timeout, so a slow handler
-        # delays neither them nor the other handlers past the claim lease.
+        # Built-in destinations go first and serially; custom handlers run
+        # concurrently, each bounded by the handler timeout, with adaptive
+        # outcome recording placed after sibling handlers (e.g. evaluation) so
+        # a succeeded run can read its committed evaluation row in one pass.
         core = [r for r in rows if r.destination not in self.handlers]
         custom = [r for r in rows if r.destination in self.handlers]
+        primary_custom = [
+            r for r in custom if r.destination != ADAPTIVE_OUTCOME_DESTINATION
+        ]
+        post_custom = [
+            r for r in custom if r.destination == ADAPTIVE_OUTCOME_DESTINATION
+        ]
         delivered = 0
         for row in core:
             delivered += await self._deliver_and_finalize(row)
-        delivered += sum(
-            await asyncio.gather(*(self._deliver_and_finalize(r) for r in custom))
-        )
+        if primary_custom:
+            delivered += sum(
+                await asyncio.gather(
+                    *(self._deliver_and_finalize(r) for r in primary_custom)
+                )
+            )
+        if post_custom:
+            delivered += sum(
+                await asyncio.gather(
+                    *(self._deliver_and_finalize(r) for r in post_custom)
+                )
+            )
         self._notify_stream_subscribers(rows)
         return delivered
 

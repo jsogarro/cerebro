@@ -5,6 +5,16 @@ from typing import Final
 
 EVALUATION_DESTINATION: Final = "evaluation"
 EVALUATION_TRIGGER_EVENT: Final = "run.succeeded"
+ADAPTIVE_OUTCOME_DESTINATION: Final = "adaptive_outcome"
+TERMINAL_RUN_EVENTS: Final[frozenset[str]] = frozenset(
+    {
+        "run.succeeded",
+        "run.failed",
+        "run.budget_exceeded",
+        "run.cancelled",
+        "run.interrupted",
+    }
+)
 EVALUATOR_EXCEPTION_CODE: Final = "evaluator_exception"
 EVALUATOR_CONTRACT_VIOLATION_CODE: Final = "evaluator_contract_violation"
 

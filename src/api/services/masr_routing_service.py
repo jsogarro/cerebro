@@ -7,6 +7,8 @@ Based on "MasRouter: Learning to Route LLMs" research patterns.
 """
 
 import uuid
+from collections import OrderedDict, deque
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -48,6 +50,29 @@ from src.models.masr_api_models import (
 from src.utils.type_coercion import coerce_float
 
 logger = get_logger()
+
+_MAX_LABELLED_FEEDBACK = 1000
+_MAX_ROUTING_HISTORY = 1000
+
+
+@dataclass(frozen=True)
+class LabelledRoutingFeedback:
+    """Manual routing feedback retained as labelled offline evaluation data only."""
+
+    routing_id: str
+    organization_id: str | None
+    collaboration_mode: str
+    routing_strategy: str | None
+    worker_count: int
+    actual_cost: float
+    actual_latency_ms: int
+    quality_score: float
+    user_satisfaction: float | None
+    error_occurred: bool
+    error_message: str | None
+    recorded_at: datetime
+    label_source: str = "manual"
+    eligible_for_live_learning: bool = False
 
 
 class MASRRoutingService:
@@ -99,7 +124,11 @@ class MASRRoutingService:
         self.feedback_learner = SupervisionFeedbackLearner()
 
         # Tracking and metrics
-        self.routing_history: dict[str, RoutingDecision] = {}
+        self.routing_history: OrderedDict[str, RoutingDecision] = OrderedDict()
+        self._routing_owners: dict[str, str | None] = {}
+        self.labelled_feedback: deque[LabelledRoutingFeedback] = deque(
+            maxlen=_MAX_LABELLED_FEEDBACK
+        )
         self.performance_metrics: dict[str, dict[str, float]] = {
             strategy.value: {
                 "total_requests": 0,
@@ -122,6 +151,8 @@ class MASRRoutingService:
             return
         self.closed = True
         self.routing_history.clear()
+        self._routing_owners.clear()
+        self.labelled_feedback.clear()
         if self._owns_bridge:
             try:
                 await self.bridge.cleanup()
@@ -131,14 +162,31 @@ class MASRRoutingService:
                     error=type(exc).__name__,
                 )
 
+    def _record_routing_history(
+        self,
+        routing_id: str,
+        decision: RoutingDecision,
+        *,
+        organization_id: str | None,
+    ) -> None:
+        self.routing_history[routing_id] = decision
+        self._routing_owners[routing_id] = organization_id
+        while len(self.routing_history) > _MAX_ROUTING_HISTORY:
+            evicted_id, _ = self.routing_history.popitem(last=False)
+            self._routing_owners.pop(evicted_id, None)
+
     async def get_routing_decision(
-        self, request: RoutingRequest
+        self,
+        request: RoutingRequest,
+        *,
+        organization_id: str | None = None,
     ) -> RoutingDecisionResponse:
         """
         Get intelligent routing decision for a query.
 
         Args:
             request: Routing request with query and constraints
+            organization_id: Owning organization for tenant-scoped feedback lookup
 
         Returns:
             RoutingDecisionResponse with routing decision and allocations
@@ -151,8 +199,10 @@ class MASRRoutingService:
             # Generate unique routing ID
             routing_id = str(uuid.uuid4())
 
-            # Store for feedback tracking
-            self.routing_history[routing_id] = decision
+            # Store for bounded tenant-scoped feedback tracking
+            self._record_routing_history(
+                routing_id, decision, organization_id=organization_id
+            )
 
             supervisor_allocations = []
             if hasattr(decision.agent_allocation, "supervisors"):
@@ -421,32 +471,53 @@ class MASRRoutingService:
             routing_recommendations=routing_recommendations,
         )
 
-    async def submit_feedback(self, feedback: RoutingFeedback) -> dict[str, Any]:
-        """
-        Submit feedback for routing decision learning.
+    def get_labelled_feedback(self) -> list[LabelledRoutingFeedback]:
+        """Return retained labelled feedback records for offline evaluation."""
+        return list(self.labelled_feedback)
 
-        Args:
-            feedback: Routing feedback with actual metrics
-
-        Returns:
-            Acknowledgment response
-        """
-        if feedback.routing_id not in self.routing_history:
+    async def submit_feedback(
+        self,
+        feedback: RoutingFeedback,
+        *,
+        organization_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Store manual feedback as labelled evaluation data only (no live learning)."""
+        if (
+            feedback.routing_id not in self.routing_history
+            or self._routing_owners.get(feedback.routing_id) != organization_id
+        ):
             raise ValueError(f"Unknown routing ID: {feedback.routing_id}")
 
         original_decision = self.routing_history[feedback.routing_id]
+        raw_mode = getattr(original_decision, "collaboration_mode", None)
+        mode_value = str(getattr(raw_mode, "value", raw_mode))
+        raw_strategy = getattr(original_decision, "routing_strategy", None)
+        strategy_value = (
+            None
+            if raw_strategy is None
+            else str(getattr(raw_strategy, "value", raw_strategy))
+        )
+        allocation = getattr(original_decision, "agent_allocation", None)
+        worker_count = getattr(allocation, "worker_count", 1)
 
-        # A manual submission is not authenticated evaluator output and this
-        # endpoint has no proof that the returned allocation executed. Keep the
-        # legacy acknowledgment fields, but do not convert these values into
-        # learning or measured execution telemetry.
-        del original_decision
-
-        # Clean up old history entries (keep last 1000)
-        if len(self.routing_history) > 1000:
-            oldest_keys = sorted(self.routing_history.keys())[:100]
-            for key in oldest_keys:
-                del self.routing_history[key]
+        # Manual submissions carry no proof of executed allocation or evaluator
+        # verdict, so retain them as labelled data only and never feed live learning.
+        self.labelled_feedback.append(
+            LabelledRoutingFeedback(
+                routing_id=feedback.routing_id,
+                organization_id=organization_id,
+                collaboration_mode=mode_value,
+                routing_strategy=strategy_value,
+                worker_count=int(worker_count),
+                actual_cost=feedback.actual_cost,
+                actual_latency_ms=feedback.actual_latency_ms,
+                quality_score=feedback.quality_score,
+                user_satisfaction=feedback.user_satisfaction,
+                error_occurred=feedback.error_occurred,
+                error_message=feedback.error_message,
+                recorded_at=datetime.now(UTC),
+            )
+        )
 
         return {
             "status": "accepted",

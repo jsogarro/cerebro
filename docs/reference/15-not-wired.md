@@ -7,7 +7,7 @@ This page lists code and settings present in the repository that no production p
 | Feature | Status | Entry point | Source |
 |---|---|---|---|
 | Multi-tier memory | Not wired | none | `src/ai_brain/memory/` |
-| A/B experimentation framework | Not wired | none | `src/ai_brain/experimentation/` (all but the adaptive allocation engine) |
+| A/B experimentation framework | Not wired | none | `src/ai_brain/experimentation/statistical/`, `src/models/db/experiment.py` |
 | Learning and self-improvement | Not wired | none | `src/ai_brain/learning/supervision_feedback.py` |
 | Model configuration manager | Not wired | none | `src/ai_brain/config/`, `configs/models/` |
 | Prompt manager and versioning | Not wired | none | `src/prompts/` |
@@ -38,9 +38,7 @@ Tests that exercise it: `tests/test_memory_architecture_ttl.py`, `tests/test_con
 
 ## A/B experimentation framework
 
-> **Not wired.** `statistical/enhanced_statistical_engine.py` (`FrequentistAnalyzer`, `BayesianAnalyzer`, `EnhancedStatisticalEngine`) is imported only by the `eval/` subpackage and tests, apart from `MultiBanditOptimizer` and `BanditAlgorithm`, which `core/adaptive_allocation_engine.py` uses: `MASRouter` builds an `AdaptiveAllocationEngine` only when `ADAPTIVE_ROUTING_ENABLED` is true, and the setting defaults to `false`. See [MASR routing](06-masr-routing.md).
-
-The `eval/` subpackage (`adaptive_routing_eval.py`, `adaptive_routing_promotion.py`) is imported only by `scripts/run_adaptive_routing_eval.py` and `scripts/evaluate_adaptive_routing_promotion.py`.
+> **Not wired.** `statistical/enhanced_statistical_engine.py` (`FrequentistAnalyzer`, `BayesianAnalyzer`, `EnhancedStatisticalEngine`) has no production caller apart from `MultiBanditOptimizer` and `BanditAlgorithm`, which `core/adaptive_allocation_engine.py` uses. `MASRouter` records terminal run outcomes into `AdaptiveAllocationEngine` in dark mode while `ADAPTIVE_ROUTING_ENABLED` defaults to `false` (leaving route selection unchanged). The offline evaluation and promotion scripts (`scripts/run_adaptive_routing_eval.py`, `scripts/evaluate_adaptive_routing_promotion.py`) are standalone entry points for `src/ai_brain/experimentation/eval/`. See [MASR routing](06-masr-routing.md).
 
 The five tables `experiments`, `experiment_variants`, `experiment_assignments`, `experiment_results` and `experiment_analyses` are defined in `src/models/db/experiment.py` and created by Alembic migrations. No repository and no route reads or writes them.
 
@@ -87,11 +85,15 @@ Tests that exercise it: `tests/test_prompt_safety.py`, `tests/test_cache_ttl_exp
 
 ## Evaluation dispatch and results
 
-> **Dark by default; no reader.** With `EVALUATION_DISPATCH_ENABLED` false (the default) no `evaluation` outbox row is written and no handler is registered, so no `agent_evaluation_results` row exists. When it is true, `ClaimsCoverageEvaluator` is registered, plus the fixture claim-support pass when `CLAIM_SUPPORT_FIXTURE_MANIFEST` is set and the four citation checks when `CITATION_CORPUS` is set. With neither configured, no claim ever leaves `not_attempted`. Nothing in production reads the stored evaluation rows: `evaluation_states` (`src/core/evaluation/registry.py`) is called only by tests, and `EvaluationResultRepository.list_evaluations_for_run` only by the dispatcher, the handler and tests. No route lists the evaluation rows. A run-bound report reads only the latest claim-support rows (not the evaluation rows) to bind its citations.
+> **Dark by default; no UI/API reader.** With `EVALUATION_DISPATCH_ENABLED` false (the default) no `evaluation` outbox row is written and no handler is registered, so no `agent_evaluation_results` row exists. When it is true, `ClaimsCoverageEvaluator` is registered, plus the fixture claim-support pass when `CLAIM_SUPPORT_FIXTURE_MANIFEST` is set and the four citation checks when `CITATION_CORPUS` is set. With neither configured, no claim ever leaves `not_attempted`. `AdaptiveOutcomeOutboxHandler` reads canonical terminal evaluation rows via `EvaluationResultRepository.list_evaluations_for_run` (`trigger="run.succeeded"`) for dark adaptive outcome recording. `evaluation_states` (`src/core/evaluation/registry.py`) is called only by tests, and no route lists the evaluation rows. A run-bound report reads only the latest claim-support rows (not the evaluation rows) to bind its citations.
 
 The claim-support pass is fixture containment, not a model judge: a verdict stands only when an authored label's quote is contained in the evidence excerpt, and no live semantic judge exists. The derived cited report is not stored as an artifact; the minted citations and gaps are stored in the report row's `configuration`.
 
 A report without a `run_id` keeps its project or caller citations as supplied and is labelled `citation_binding: unbound`. A report with a `run_id` takes no project and no supplied findings, insights, citations or recommendations (422), so its body is its title and query plus the run's minted citations; building the body from the run's own report is not done.
+
+## Labelled MASR feedback export
+
+> **No export or read route.** `POST /api/v1/masr/feedback` validates tenant ownership of `routing_id` and stores manual feedback in `MASRRoutingService.labelled_feedback` (bounded in-memory deque, lost on restart, never fed into live learning). `MASRRoutingService.get_labelled_feedback()` has no production caller or export route yet.
 
 ## Orphan modules
 

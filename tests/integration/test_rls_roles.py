@@ -709,3 +709,251 @@ async def test_the_evaluation_handler_cannot_deliver_on_the_maintenance_role(
     )
 
     assert await relay.run_once() == 0
+
+
+async def _seed_adaptive_outcome_run(
+    admin_url: str,
+    org: uuid.UUID,
+    *,
+    suffix: str,
+    cost_usd: str,
+    score: float,
+    queue_outbox: bool,
+) -> tuple[str, str]:
+    """Seed one tenant's terminal run, config snapshot, journal row, and eval verdict."""
+    from decimal import Decimal
+
+    from src.ai_brain.router.outcome_recorder import ADAPTIVE_OUTCOME_DESTINATION
+    from src.models.db.evaluation_result import AgentEvaluationResult
+    from src.models.db.model_call_reservation import ModelCallReservation
+    from src.models.db.run_config_snapshot import AgentRunConfigSnapshot
+
+    now = datetime.now(UTC)
+    run_id = f"run-adaptive-{suffix}-{org}"
+    event_id = f"evt-adaptive-{suffix}-{org}"
+    engine = admin_engine(admin_url)
+    async with (
+        engine.begin() as connection,
+        AsyncSession(bind=connection, expire_on_commit=False) as session,
+    ):
+        run = _run_row(org, run_id)
+        run.status = "succeeded"
+        run.started_at = now
+        run.completed_at = now
+        session.add(run)
+        await session.flush()
+        session.add(
+            AgentRunConfigSnapshot(
+                config_snapshot_id=f"{run_id}:config",
+                run_id=run_id,
+                tenant_id=str(org),
+                organization_id=org,
+                authority_id=f"a-{org}",
+                authority_version="1",
+                workflow_definition_id="w",
+                workflow_definition_version="1",
+                routing_policy_id="p",
+                routing_policy_version="1",
+                pinned_versions={"event_envelope_version": "1.0"},
+                configuration={
+                    "routing_policy": {"collaboration_mode": "parallel"},
+                    "workers": [{"worker_id": "w-0"}, {"worker_id": "w-1"}],
+                },
+                content_sha256="a" * 64,
+                created_at=now,
+            )
+        )
+        session.add(
+            ModelCallReservation(
+                organization_id=org,
+                call_id=f"call-{run_id}",
+                owner_kind="research_run",
+                owner_id=run_id,
+                price_digest="b" * 64,
+                reserved_tokens=200,
+                reserved_cost_usd=Decimal("0.05"),
+                dispatch_state="may_have_sent",
+                settlement_state="settled_known",
+                actual_tokens=150,
+                actual_cost_usd=Decimal(cost_usd),
+                settled_at=now,
+            )
+        )
+        session.add(
+            AgentEvaluationResult(
+                evaluation_result_id=f"eval-{run_id}",
+                run_id=run_id,
+                organization_id=org,
+                evaluator_id="claims.coverage",
+                evaluator_version="1.0.0",
+                dimension="claims.coverage",
+                status="passed",
+                deterministic=True,
+                score=score,
+                trigger="run.succeeded",
+                completed_at=now,
+            )
+        )
+        session.add(
+            AgentRunEvent(
+                event_id=event_id,
+                run_id=run_id,
+                organization_id=org,
+                aggregate_type="run",
+                aggregate_id=run_id,
+                sequence=1,
+                event_type="run.succeeded",
+                event_type_version="1",
+                occurred_at=now,
+                producer="test",
+                deduplication_key=event_id,
+                payload={},
+            )
+        )
+        await session.flush()
+        if queue_outbox:
+            session.add(
+                AgentRunEventOutbox(
+                    event_id=event_id,
+                    run_id=run_id,
+                    organization_id=org,
+                    destination=ADAPTIVE_OUTCOME_DESTINATION,
+                    idempotency_key=f"{ADAPTIVE_OUTCOME_DESTINATION}:{event_id}",
+                    payload={"event_type": "run.succeeded", "payload": {}},
+                )
+            )
+        await session.flush()
+    await engine.dispose()
+    return run_id, event_id
+
+
+async def test_the_adaptive_outcome_handler_reads_as_the_app_role_under_the_runs_tenant(
+    seeded: str, app_engine: AsyncEngine, maint_engine: AsyncEngine
+) -> None:
+    """Relay uses maint; AdaptiveOutcomeOutboxHandler reads all 5 tables as cerebro_app."""
+    from src.ai_brain.router.adaptive_state_store import InMemoryAdaptiveStateStore
+    from src.ai_brain.router.masr import MASRouter
+    from src.ai_brain.router.outcome_recorder import (
+        ADAPTIVE_OUTCOME_DESTINATION,
+        RoutingOutcomeRecorder,
+    )
+    from src.ai_brain.router.routing_outcome import (
+        EvaluatorEligibilityPolicy,
+        MetricAvailability,
+        OutcomeSource,
+        RoutingOutcome,
+    )
+    from src.api.services.adaptive_outcome_outbox_handler import (
+        AdaptiveOutcomeOutboxHandler,
+    )
+    from src.api.services.outbox_relay import OutboxRelay
+
+    run_a, event_a = await _seed_adaptive_outcome_run(
+        seeded, ORG_A, suffix="app", cost_usd="0.025", score=0.95, queue_outbox=True
+    )
+    await _seed_adaptive_outcome_run(
+        seeded, ORG_B, suffix="other", cost_usd="0.999", score=0.10, queue_outbox=False
+    )
+
+    captured: list[RoutingOutcome] = []
+    router = MASRouter(
+        config={"adaptive_routing_enabled": False},
+        adaptive_state_store=InMemoryAdaptiveStateStore(),
+        outcome_eligibility_policy=EvaluatorEligibilityPolicy(
+            allowed_evaluators={"claims.coverage": frozenset({"1.0.0"})}
+        ),
+    )
+    original = router.record_routing_outcome
+
+    async def spy(outcome: RoutingOutcome):
+        captured.append(outcome)
+        return await original(outcome)
+
+    router.record_routing_outcome = spy  # type: ignore[method-assign]
+
+    handler = AdaptiveOutcomeOutboxHandler(
+        session_factory=async_sessionmaker(app_engine, expire_on_commit=False),
+        outcome_recorder=RoutingOutcomeRecorder(router, retry_delay_seconds=0),
+    )
+    relay = OutboxRelay(
+        session_factory=async_sessionmaker(maint_engine, expire_on_commit=False),
+        event_publisher=AsyncMock(),
+        handlers={ADAPTIVE_OUTCOME_DESTINATION: handler},
+    )
+    await relay.run_once()
+
+    assert len(captured) == 1
+    assert captured[0].run_id == run_a
+    assert captured[0].source is OutcomeSource.EVALUATOR
+    assert captured[0].quality_score == pytest.approx(0.95)
+    assert captured[0].quality_availability is MetricAvailability.MEASURED
+    assert captured[0].measured_cost == pytest.approx(0.025)
+    assert captured[0].cost_availability is MetricAvailability.MEASURED
+
+    admin = admin_engine(seeded)
+    async with admin.begin() as connection:
+        status = await connection.scalar(
+            text(
+                "SELECT status FROM agent_run_event_outbox "
+                "WHERE event_id = :e AND destination = :d"
+            ),
+            {"e": event_a, "d": ADAPTIVE_OUTCOME_DESTINATION},
+        )
+    await admin.dispose()
+    assert status == "delivered"
+
+
+async def test_the_adaptive_outcome_handler_cannot_deliver_on_the_maintenance_role(
+    seeded: str, maint_engine: AsyncEngine
+) -> None:
+    """Negative control: cerebro_maint lacks grants on reservations/evaluations and fails closed."""
+    from src.ai_brain.router.masr import MASRouter
+    from src.ai_brain.router.outcome_recorder import (
+        ADAPTIVE_OUTCOME_DESTINATION,
+        RoutingOutcomeRecorder,
+    )
+    from src.ai_brain.router.routing_outcome import RoutingOutcome
+    from src.api.services.adaptive_outcome_outbox_handler import (
+        AdaptiveOutcomeOutboxHandler,
+    )
+    from src.api.services.outbox_relay import OutboxRelay
+
+    _run_b, event_b = await _seed_adaptive_outcome_run(
+        seeded, ORG_B, suffix="maint", cost_usd="0.050", score=0.80, queue_outbox=True
+    )
+
+    captured: list[RoutingOutcome] = []
+    router = MASRouter(config={"adaptive_routing_enabled": False})
+    original = router.record_routing_outcome
+
+    async def spy(outcome: RoutingOutcome):
+        captured.append(outcome)
+        return await original(outcome)
+
+    router.record_routing_outcome = spy  # type: ignore[method-assign]
+
+    maint_factory = async_sessionmaker(maint_engine, expire_on_commit=False)
+    relay = OutboxRelay(
+        session_factory=maint_factory,
+        event_publisher=AsyncMock(),
+        handlers={
+            ADAPTIVE_OUTCOME_DESTINATION: AdaptiveOutcomeOutboxHandler(
+                session_factory=maint_factory,
+                outcome_recorder=RoutingOutcomeRecorder(router, retry_delay_seconds=0),
+            )
+        },
+    )
+    await relay.run_once()
+
+    assert captured == []
+    admin = admin_engine(seeded)
+    async with admin.begin() as connection:
+        status = await connection.scalar(
+            text(
+                "SELECT status FROM agent_run_event_outbox "
+                "WHERE event_id = :e AND destination = :d"
+            ),
+            {"e": event_b, "d": ADAPTIVE_OUTCOME_DESTINATION},
+        )
+    await admin.dispose()
+    assert status == "failed"

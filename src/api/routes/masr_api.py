@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from src.api.services.masr_routing_service import MASRRoutingService
+from src.auth.models import TokenPayload
 from src.middleware.auth_middleware import get_current_token
 from src.models.masr_api_models import (
     ComplexityAnalysisRequest,
@@ -75,6 +76,7 @@ MASRServiceDependency = Annotated[
 async def get_routing_decision(
     request: RoutingRequest,
     routing_service: MASRServiceDependency,
+    token: Annotated[TokenPayload, Depends(get_current_token)],
 ) -> RoutingDecisionResponse:
     """
     Get intelligent routing decision for a query.
@@ -83,7 +85,9 @@ async def get_routing_decision(
     allocates supervisors and workers, and provides cost/latency estimates.
     """
     try:
-        return await routing_service.get_routing_decision(request)
+        return await routing_service.get_routing_decision(
+            request, organization_id=token.organization_id
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -280,27 +284,22 @@ async def get_models(routing_service: MASRServiceDependency) -> ModelsListRespon
 @router.post(
     "/feedback",
     response_model=dict[str, Any],
-    summary="Submit routing feedback",
+    summary="Submit labelled routing feedback",
     description=(
-        "Submit feedback on routing decision performance. "
-        "Used for continuous learning and optimization."
+        "Store manual routing feedback as labelled evaluation data only. "
+        "Submissions never update live routing weights or bandit state."
     ),
 )
 async def submit_feedback(
     feedback: RoutingFeedback,
     routing_service: MASRServiceDependency,
+    token: Annotated[TokenPayload, Depends(get_current_token)],
 ) -> dict[str, Any]:
-    """
-    Submit feedback for routing learning.
-
-    Feedback is used to:
-    - Improve cost predictions
-    - Optimize routing strategies
-    - Refine quality estimates
-    - Enhance overall performance
-    """
+    """Store manual routing feedback as labelled data only (no live learning)."""
     try:
-        return await routing_service.submit_feedback(feedback)
+        return await routing_service.submit_feedback(
+            feedback, organization_id=token.organization_id
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

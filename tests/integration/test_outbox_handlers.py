@@ -76,13 +76,17 @@ async def _seed(
 
 
 async def _outbox(
-    factory: async_sessionmaker[AsyncSession], event_id: str
+    factory: async_sessionmaker[AsyncSession],
+    event_id: str,
+    *,
+    destination: str = "evaluation",
 ) -> AgentRunEventOutbox:
     async with factory() as session:
         return (
             await session.execute(
                 select(AgentRunEventOutbox).where(
-                    AgentRunEventOutbox.event_id == event_id
+                    AgentRunEventOutbox.event_id == event_id,
+                    AgentRunEventOutbox.destination == destination,
                 )
             )
         ).scalar_one()
@@ -164,7 +168,9 @@ async def test_raising_handler_dead_letters_and_never_blocks_siblings(
     dead = await _outbox(factory, bad)
     assert dead.status == EventDeliveryStatus.FAILED.value
     assert "dead-lettered" in (dead.last_error or "")
-    assert (await _outbox(factory, good)).status == EventDeliveryStatus.DELIVERED.value
+    assert (await _outbox(factory, good, destination="redis")).status == (
+        EventDeliveryStatus.DELIVERED.value
+    )
 
 
 @pytest.mark.parametrize(
@@ -276,8 +282,12 @@ async def test_append_event_requests_evaluation_only_when_enabled(
             ).all()
         return sorted(r[0] for r in rows)
 
-    assert await destinations("a-off", False) == ["redis"]
-    assert await destinations("a-on", True) == ["evaluation", "redis"]
+    assert await destinations("a-off", False) == ["adaptive_outcome", "redis"]
+    assert await destinations("a-on", True) == [
+        "adaptive_outcome",
+        "evaluation",
+        "redis",
+    ]
 
 
 class _Flaky:

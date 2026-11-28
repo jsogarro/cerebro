@@ -22,8 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.contracts import RunEvent, RunEventCursor, delivery_idempotency_key
 from src.core.evaluation.events import (
+    ADAPTIVE_OUTCOME_DESTINATION,
     EVALUATION_DESTINATION,
     EVALUATION_TRIGGER_EVENT,
+    TERMINAL_RUN_EVENTS,
 )
 from src.models.db.run_event import AgentRunEvent, AgentRunEventOutbox
 from src.models.db.run_lifecycle import AgentRun
@@ -102,6 +104,11 @@ class RunEventRepository:
             and EVALUATION_DESTINATION not in destinations
         ):
             destinations = (*destinations, EVALUATION_DESTINATION)
+        if (
+            event_type in TERMINAL_RUN_EVENTS
+            and ADAPTIVE_OUTCOME_DESTINATION not in destinations
+        ):
+            destinations = (*destinations, ADAPTIVE_OUTCOME_DESTINATION)
 
         sequence = await self._allocate_sequence(run_id)
 

@@ -1044,17 +1044,22 @@ class MASRouter:
     async def record_routing_outcome(
         self, outcome: RoutingOutcome
     ) -> OutcomeApplicationResult:
-        """Idempotently apply a typed evaluator-qualified outcome."""
+        """Idempotently apply a typed evaluator-qualified outcome.
+
+        Recording runs in dark mode even while ``adaptive_routing_enabled`` is
+        false so bandit posteriors accumulate without affecting route choice.
+        Fixture-mode routers never update adaptive state.
+        """
 
         eligibility = self._outcome_eligibility_policy.assess(outcome)
         evaluated = outcome.with_eligibility(eligibility)
-        if not self.adaptive_routing_enabled or self._adaptive_engine is None:
+        if self.fixture_mode:
             self._observe_adaptive_effective_state()
             return OutcomeApplicationResult(
                 status=OutcomeApplicationStatus.INELIGIBLE_RECORDED,
                 outcome=evaluated,
                 learning_updated=False,
-                reason="adaptive_routing_disabled",
+                reason="fixture_mode_disabled",
             )
         async with self._adaptive_state_lock:
             return await self._record_routing_outcome_unlocked(evaluated)
