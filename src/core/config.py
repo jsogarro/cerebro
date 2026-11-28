@@ -211,6 +211,13 @@ class Settings(BaseSettings):
     LANGFUSE_SECRET_KEY: str | None = None
     LANGFUSE_HOST: str | None = None
 
+    # OpenTelemetry distributed tracing (off by default). Setting
+    # OTEL_EXPORTER_OTLP_ENDPOINT alone does not enable tracing unless
+    # ENABLE_TRACING is true.
+    ENABLE_TRACING: bool = False
+    OTEL_EXPORTER_OTLP_ENDPOINT: str | None = None
+    OTEL_SERVICE_NAME: str = "cerebro-api"
+
     # Foundation Model Providers Configuration
     MODEL_PROVIDERS_ENABLED: bool = True
 
