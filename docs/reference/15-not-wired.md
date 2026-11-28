@@ -116,7 +116,7 @@ A report without a `run_id` keeps its project or caller citations as supplied an
 
 ## Unbacked web pages
 
-The web workbench pages for runs, run detail and memory, and the run form on the workflows page, call API routes that are not mounted (`GET /api/v1/workflows` is). Its dashboard, QA, costs and benchmarks pages call no API and show a "not available" notice, and the memory page has no sidebar link. The page-by-page table is in [CLI and web clients](13-cli-and-web-clients.md).
+The web workbench pages for runs and run detail, and the run form on the workflows page, call API routes that are not mounted (`GET /api/v1/workflows` is). Its dashboard, memory, QA, costs and benchmarks pages call no API and show a "not available" notice, and the memory page has no sidebar link. The page-by-page table is in [CLI and web clients](13-cli-and-web-clients.md).
 
 ## MCP server
 

@@ -1,6 +1,6 @@
 # CLI and web clients
 
-Two clients talk to the HTTP API: the `research-cli` command-line tool in `src/cli/` and the React workbench in `cerebro/web/`. Both authenticate with a bearer token. The CLI takes it from `RESEARCH_AUTH_TOKEN`; the workbench has a `/login` page (linked from the landing page) and a sign-out button in the header. The login page posts to `POST /api/v1/auth/login` and stores the access token, and every `/app` route redirects to `/login` without one. The login page has no second-factor step, and the access token is not refreshed: a `401` clears it and returns the browser to `/login`. The workflows, runs, run detail and memory pages call routes the API does not mount.
+Two clients talk to the HTTP API: the `research-cli` command-line tool in `src/cli/` and the React workbench in `cerebro/web/`. Both authenticate with a bearer token. The CLI takes it from `RESEARCH_AUTH_TOKEN`; the workbench has a `/login` page (linked from the landing page) and a sign-out button in the header. The login page posts credentials and an optional authenticator or recovery code (`totp_code`) to `POST /api/v1/auth/login` and stores the access token, and every `/app` route redirects to `/login` without one. Signing out calls `POST /api/v1/auth/logout`, clears the stored token and query cache, and returns to `/login`. The access token is not refreshed: a `401` on any authenticated API call clears it and returns the browser to `/login`. The workflows, runs and run detail pages call routes the API does not mount.
 
 ## Summary
 
@@ -9,10 +9,10 @@ Two clients talk to the HTTP API: the `research-cli` command-line tool in `src/c
 | `research-cli` commands (`agents`, `projects`, `config`, `health`, `completion`) | Active | `research-cli` | `src/cli/main.py` (`cli`) |
 | Progress streaming over WebSocket | Active | `research-cli projects progress ID --stream` | `src/cli/websocket_client.py` (`CLIWebSocketClient`) |
 | `research-platform` script | Not wired | `research-platform` | `src/research_platform/__init__.py` (`main`) |
+| Web workbench: sign-in and sign-out | Active | `/login`, header sign-out | `cerebro/web/src/pages/Login.tsx`, `cerebro/web/src/api/session.ts` |
 | Web workbench: research projects, agents list | Active | `/app/research`, `/app/agents` | `cerebro/web/src/api/research.ts`, `cerebro/web/src/api/agents.ts` |
 | Web workbench: workflows, runs, run detail | Not wired | `/app/workflows`, `/app/runs`, `/app/runs/:id` | `cerebro/web/src/api/workflows.ts`, `cerebro/web/src/api/runs.ts` |
-| Web workbench: memory | Not wired | `/app/memory` | `cerebro/web/src/api/memory.ts` |
-| Web workbench: dashboard, QA, costs, benchmarks, settings | Not wired | `/app/dashboard`, `/app/qa`, `/app/costs`, `/app/benchmarks`, `/app/settings` | `cerebro/web/src/pages/` |
+| Web workbench: dashboard, memory, QA, costs, benchmarks, settings | Not wired | `/app/dashboard`, `/app/memory`, `/app/qa`, `/app/costs`, `/app/benchmarks`, `/app/settings` | `cerebro/web/src/pages/` |
 | Playwright end-to-end suite | Active | `npm run test:e2e` | `cerebro/web/tests/e2e/` |
 
 ## research-cli
@@ -143,11 +143,11 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 
 ### Authentication
 
-`cerebro/web/src/api/auth.ts` reads the access token from `localStorage` under the key `cerebro.access_token`. The axios client in `src/api/client.ts` uses base URL `/api/v1` and adds `Authorization: Bearer <token>` to every request when a token exists. The WebSocket manager in `src/api/websocket.ts` sends the token as a `token` query parameter. No code in `src/` calls `setAccessToken` and the workbench has no sign-in page, so the token has to be written to `localStorage` by hand. `tokenSubject` decodes the token's `sub` claim, and creating a research project refuses to proceed without a token. The `isAuthenticated` flag in `src/stores/authStore.ts` starts `true`, and no route reads it.
+`cerebro/web/src/api/auth.ts` reads and writes the access token in `localStorage` under `cerebro.access_token`. `src/pages/Login.tsx` and `src/api/session.ts` post `email`, `password`, and (when entered) `totp_code` to `POST /api/v1/auth/login` and store `tokens.access_token` via `setAccessToken`. Users with two-factor authentication enabled can enter a 6-digit TOTP or recovery code before submitting, or after a `401` MFA challenge while keeping their entered credentials intact. `src/components/common/RequireAuth.tsx` wraps `/app/*` and redirects unauthenticated visitors to `/login`, preserving path, query and hash. The header sign-out control (`src/components/layout/Header.tsx`) calls `signOut()` (`POST /api/v1/auth/logout` followed by `setAccessToken(null)`), clears the TanStack Query cache and navigates to `/login`. The axios client in `src/api/client.ts` uses base URL `/api/v1`, adds `Authorization: Bearer <token>` when a token exists, extracts messages from the API's `{"error": {"code", "message", "details"}}` envelope, and clears the token and redirects to `/login` on any `401` response outside `/auth/login` and `/auth/logout` (including requests with `handleErrorLocally: true`). The WebSocket manager in `src/api/websocket.ts` sends the token as a `token` query parameter. `tokenSubject` decodes the token's `sub` claim, and creating a research project refuses to proceed without a token.
 
 ### Pages
 
-> **Not wired.** The workflows, runs, run detail and memory pages call routes the API does not mount. The API mounts `GET /api/v1/workflows` (the catalogue listing) but no `/api/v1/runs` list, create or detail route, no `/api/v1/runs/{id}/cancel`, and no `/api/v1/memory/nodes`. The only run route it mounts is `GET /api/v1/runs/{run_id}/events`, which streams server-sent events rather than returning a JSON collection. The dashboard, QA, costs and benchmarks pages never call the API and show a "not available" notice instead of figures. The memory page stays reachable at `/app/memory` but has no sidebar link; the agents page has no log panel. The settings page has a switch with no handler.
+> **Not wired.** The workflows, runs and run detail pages call routes the API does not mount. The API mounts `GET /api/v1/workflows` (the catalogue listing) but no `/api/v1/runs` list, create or detail route and no `/api/v1/runs/{id}/cancel`. The only run route it mounts is `GET /api/v1/runs/{run_id}/events`, which streams server-sent events rather than returning a JSON collection. The dashboard, memory, QA, costs and benchmarks pages never call the API and show a "not available" notice instead of figures. The memory page stays reachable at `/app/memory` but has no sidebar link; the agents page has no log panel. The settings page has a switch with no handler.
 
 | Route | Page | Backend calls | Backed |
 |---|---|---|---|
@@ -160,7 +160,7 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 | `/app/dashboard` | `Dashboard` | none | not available notice |
 | `/app/research`, `/app/research/:id` | `Research` | `GET` and `POST /api/v1/research/projects`; `GET /api/v1/research/projects/{id}`; WebSocket `/ws` | Yes |
 | `/app/agents` | `Agents` | `GET /api/v1/agents` | Yes |
-| `/app/memory` | `Memory` | `GET /api/v1/memory/nodes` | No |
+| `/app/memory` | `Memory` | none | not available notice |
 | `/app/qa` | `QA` | none | not available notice |
 | `/app/costs` | `Costs` | none | not available notice |
 | `/app/benchmarks` | `Benchmarks` | none | not available notice |
@@ -168,7 +168,7 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 
 ### End-to-end tests
 
-`cerebro/web/tests/e2e/` holds Playwright specs written in TypeScript: accessibility (`a11y-axe`, `a11y-keyboard`, `dark-mode-axe`, `wave6-accessibility`), layout and theme (`responsive-walkthrough`, `theme-tokens`, `landing`) sign-in and the route guard (`sign-in`) and workbench behaviour (`runs`, `run-detail`, `workflows`, `workbench-ui`, `workbench-contracts`, `user-journey`, `api-contract`, `golden-run`). Run them from `cerebro/web` with `npm run test:e2e`. `playwright.config.ts` runs one Chromium project, starts `npm run dev` on `127.0.0.1:5173` (override with `PLAYWRIGHT_HOST` and `PLAYWRIGHT_PORT`), points the dev server at `PLAYWRIGHT_BACKEND_URL` (then `VITE_API_URL`, then `http://127.0.0.1:8000`), and retries twice when `CI` is set. The `user-journey`, `api-contract`, `wave6-accessibility` and `workbench-ui` specs intercept API calls with `page.route`. A global setup writes a signed-in browser state that every spec uses except `sign-in.spec.ts`, which starts signed out. `golden-run.spec.ts` skips itself unless `PLAYWRIGHT_REAL_BACKEND=1`.
+`cerebro/web/tests/e2e/` holds Playwright specs written in TypeScript: accessibility (`a11y-axe`, `a11y-keyboard`, `dark-mode-axe`, `wave6-accessibility`), layout and theme (`responsive-walkthrough`, `theme-tokens`, `landing`), sign-in and the route guard (`sign-in`), and workbench behaviour (`runs`, `run-detail`, `workflows`, `workbench-ui`, `workbench-contracts`, `user-journey`, `api-contract`, `golden-run`). Run them from `cerebro/web` with `npm run test:e2e`. `playwright.config.ts` runs one Chromium project, starts `npm run dev` on `127.0.0.1:5173` (override with `PLAYWRIGHT_HOST` and `PLAYWRIGHT_PORT`), points the dev server at `PLAYWRIGHT_BACKEND_URL` (then `VITE_API_URL`, then `http://127.0.0.1:8000`), and retries twice when `CI` is set. The `user-journey`, `api-contract`, `wave6-accessibility` and `workbench-ui` specs intercept API calls with `page.route`. A global setup writes a signed-in browser state used by the suite; the sign-in and route-guard block in `sign-in.spec.ts` overrides it to start signed out. `golden-run.spec.ts` skips itself unless `PLAYWRIGHT_REAL_BACKEND=1`.
 
 ## Source map
 
@@ -183,7 +183,7 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 - `.env.cli.example`: example CLI environment file
 - `src/research_platform/__init__.py`: the `research-platform` entry point stub
 - `cerebro/web/src/router/index.tsx`: route table
-- `cerebro/web/src/api/`: API clients (`client.ts`, `auth.ts`, `websocket.ts`, `research.ts`, `agents.ts`, `runs.ts`, `workflows.ts`, `workbench.ts` (run and workflow contract types), `session.ts` (login), `memory.ts`)
+- `cerebro/web/src/api/`: API clients (`client.ts`, `auth.ts`, `websocket.ts`, `research.ts`, `agents.ts`, `runs.ts`, `workflows.ts`, `workbench.ts` (run and workflow contract types), `session.ts` (login and logout))
 - `cerebro/web/src/pages/`: page components
 - `cerebro/web/tests/e2e/`, `cerebro/web/playwright.config.ts`: end-to-end suite
 - `cerebro/web/Dockerfile`, `cerebro/web/nginx.conf`: web image
