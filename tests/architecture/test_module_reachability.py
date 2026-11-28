@@ -36,10 +36,6 @@ KNOWN_UNREACHABLE: frozenset[str] = frozenset(
         "src.ai_brain.experimentation.eval",
         "src.ai_brain.experimentation.eval.adaptive_routing_eval",
         "src.ai_brain.experimentation.eval.adaptive_routing_promotion",
-        "src.core.claims.citation_binding",
-        "src.core.claims.citation_render",
-        "src.core.claims.citation_validation",
-        "src.core.contracts.citation",
         # Its production callers are the run-recovery and evaluator-lease owners
         # (P03-B, P10-A, P12); delete this line when the first one lands.
         "src.services.evaluation_regression",

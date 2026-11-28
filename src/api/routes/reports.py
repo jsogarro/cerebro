@@ -17,6 +17,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
 
+from src.core.claims.run_citations import MetadataSource, bind_run_citations
+from src.core.config import settings
+from src.core.evaluation.fixture_support import load_fixture_manifest
 from src.middleware.tenant_context import (
     TenantContext,
     get_tenant_context,
@@ -32,12 +35,14 @@ from src.models.report import (
     ReportType,
 )
 from src.repositories.report_repository import ReportFormatRepository, ReportRepository
+from src.repositories.tenant_scope import get_run_organization_id
 from src.services.report_config import create_report_settings
 from src.services.report_generator import ReportGenerator
 from src.services.report_source_projection import (
     ReportSourceRepository,
     ReportSourceUnavailableError,
     SourceKind,
+    run_citation_input,
 )
 from src.services.report_storage import (
     ReportStorageError,
@@ -62,6 +67,11 @@ class CreateReportRequest(BaseModel):
     domains: list[str] = Field(default_factory=list, description="Research domains")
     project_id: UUID | None = Field(None, description="Associated project ID")
     user_id: UUID | None = Field(None, description="User ID")
+    run_id: str | None = Field(
+        None,
+        max_length=255,
+        description="Run whose stored evidence the report's citations bind to",
+    )
 
     # Report configuration
     report_type: ReportType = Field(
@@ -113,6 +123,9 @@ class ReportResponse(BaseModel):
     quality_score: float | None = None
     confidence_score: float | None = None
     source_kind: str | None = None
+    citation_binding: str | None = None
+    citations: list[dict[str, Any]] = Field(default_factory=list)
+    citation_gaps: list[dict[str, Any]] = Field(default_factory=list)
     created_at: str
     generation_time_seconds: float | None = None
     download_urls: dict[str, str] = Field(default_factory=dict)
@@ -140,6 +153,9 @@ class ReportResponse(BaseModel):
             quality_score=report.quality_score,
             confidence_score=report.confidence_score,
             source_kind=(report.configuration or {}).get("source_kind"),
+            citation_binding=(report.configuration or {}).get("citation_binding"),
+            citations=(report.configuration or {}).get("citations") or [],
+            citation_gaps=(report.configuration or {}).get("citation_gaps") or [],
             created_at=report.created_at.isoformat(),
             generation_time_seconds=report.generation_time_seconds,
             download_urls=download_urls,
@@ -229,6 +245,53 @@ async def _validate_project_access(
     return project_id
 
 
+async def _validate_run_access(
+    session: AsyncSession, run_id: str | None, *, organization_id: UUID
+) -> str | None:
+    """A run of another tenant answers the same 404 as one that does not exist."""
+    if run_id is None:
+        return None
+    if await get_run_organization_id(session, run_id) != organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Run {run_id} not found"
+        )
+    return run_id
+
+
+_SUPPLIED_CONTENT = ("findings", "insights", "citations", "recommendations")
+
+
+def _refuse_supplied_content_for_run(request: CreateReportRequest) -> None:
+    """A run-bound report carries no findings or sources the run did not store.
+
+    Citations are bound to the run's evidence; letting a caller or project
+    supply the surrounding prose would print unrelated claims beside them.
+    """
+    supplied = request.workflow_data.get("aggregated_results") or {}
+    if request.project_id is not None or any(
+        supplied.get(k) for k in _SUPPLIED_CONTENT
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "run_bound_report_takes_no_supplied_content",
+                "message": "A report bound to a run takes no project or supplied findings",
+            },
+        )
+
+
+def _citation_metadata_source() -> MetadataSource | None:
+    try:
+        manifest = load_fixture_manifest(
+            settings.CLAIM_SUPPORT_FIXTURE_MANIFEST,
+            settings.CLAIM_SUPPORT_FIXTURE_MANIFEST_SHA256,
+        )
+    except (OSError, ValueError) as exc:
+        # The stored failure message must not carry a server path.
+        raise ReportStorageError("Claim-support manifest is unavailable") from exc
+    return manifest.metadata_candidates if manifest else None
+
+
 def _trusted_workflow_data(
     request: CreateReportRequest, project_id: UUID | None
 ) -> dict[str, Any]:
@@ -289,6 +352,11 @@ async def generate_report(
             user_id=authenticated_user_id,
             organization_id=organization_id,
         )
+        trusted_run_id = await _validate_run_access(
+            session, request.run_id, organization_id=organization_id
+        )
+        if trusted_run_id is not None:
+            _refuse_supplied_content_for_run(request)
         generator, _storage_service, report_repo, _format_repo = get_report_services(
             session
         )
@@ -311,6 +379,7 @@ async def generate_report(
         gen_request = ReportGenerationRequest(
             project_id=trusted_project_id,
             workflow_data=_trusted_workflow_data(request, trusted_project_id),
+            run_id=trusted_run_id,
             configuration=config,
             formats=request.formats,
             save_to_storage=request.save_to_storage,
@@ -808,6 +877,18 @@ async def _generate_report_task(
                 if projection is None:
                     raise ReportStorageError(f"Project {project_id} is not available")
             input_data = await generator._extract_input_data(request, projection)
+            if request.run_id is not None:
+                bound = await bind_run_citations(
+                    session,
+                    run_id=request.run_id,
+                    organization_id=organization_id,
+                    metadata_source=_citation_metadata_source(),
+                )
+                if bound is None:
+                    raise ReportStorageError(
+                        f"Run {request.run_id} has no verifiable final report"
+                    )
+                input_data = {**input_data, **run_citation_input(request.run_id, bound)}
             report = await generator._build_report_structure(
                 input_data,
                 request.configuration,

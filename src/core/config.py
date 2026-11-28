@@ -10,7 +10,7 @@ from ipaddress import ip_network
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.core.environment import load_environment
@@ -122,6 +122,14 @@ class Settings(BaseSettings):
     EVALUATION_DISPATCH_ENABLED: bool = False
     # Per-call bound on outbox handlers; keep it well under the 60 s claim lease.
     OUTBOX_HANDLER_TIMEOUT_SECONDS: float = 20.0
+    # A fixture deployment's expert-labelled claim-support manifest and its
+    # SHA-256. Unset, no claim-support pass runs; a mismatched hash refuses to start.
+    CLAIM_SUPPORT_FIXTURE_MANIFEST: str | None = None
+    CLAIM_SUPPORT_FIXTURE_MANIFEST_SHA256: str | None = None
+    # A pinned registry corpus for the citation checks, with its SHA-256.
+    # Unset, the citation checks are not registered.
+    CITATION_CORPUS: str | None = None
+    CITATION_CORPUS_SHA256: str | None = None
 
     # Context Compaction Settings (Dark Launch)
     ENABLE_CONSTRAINT_PINNING: bool = (
@@ -375,6 +383,17 @@ class Settings(BaseSettings):
         for entry in v:
             ip_network(entry, strict=False)
         return v
+
+    @model_validator(mode="after")
+    def pinned_hashes_need_their_files(self) -> "Settings":
+        """A hash with no file is a pin on nothing, so say so at startup."""
+        for path, digest in (
+            ("CLAIM_SUPPORT_FIXTURE_MANIFEST", "CLAIM_SUPPORT_FIXTURE_MANIFEST_SHA256"),
+            ("CITATION_CORPUS", "CITATION_CORPUS_SHA256"),
+        ):
+            if getattr(self, digest) and not getattr(self, path):
+                raise ValueError(f"{digest} is set but {path} is not")
+        return self
 
     @field_validator("SOURCE_SNAPSHOT_DIR")
     @classmethod
