@@ -13,6 +13,7 @@ here can authorize tools, edit the report, or change the run's state.
 import uuid
 from collections.abc import Callable, Collection
 from contextlib import AbstractAsyncContextManager
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -98,7 +99,12 @@ class EvaluationDispatcher:
                 if row.status != EvaluationStatus.ERROR.value
             }
             recorded = 0
-            for evaluator in self.registry.evaluators():
+            claims_stale = False
+            # Evaluators that read claim support run last, on a fresh read, so a
+            # pass appended earlier in this delivery is what they judge.
+            for evaluator in sorted(
+                self.registry.evaluators(), key=lambda e: e.reads_claim_support
+            ):
                 if (
                     evaluator_ids is not None
                     and evaluator.evaluator_id not in evaluator_ids
@@ -106,7 +112,17 @@ class EvaluationDispatcher:
                     continue
                 if (evaluator.evaluator_id, evaluator.evaluator_version) in done:
                     continue
-                recorded += await self._run_one(evaluator, ctx, repository)
+                if evaluator.reads_claim_support and claims_stale:
+                    ctx = replace(
+                        ctx,
+                        claims=await self._claims(
+                            session, run_id, organization, artifact_id
+                        ),
+                    )
+                    claims_stale = False
+                written = await self._run_one(evaluator, ctx, repository)
+                recorded += written
+                claims_stale = claims_stale or bool(written)
             return recorded
 
     @staticmethod

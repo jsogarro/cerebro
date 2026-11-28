@@ -8,6 +8,7 @@ import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,10 +103,46 @@ class EvaluatorRegistry:
 
 
 def build_default_registry() -> EvaluatorRegistry:
+    """Coverage always; the fixture support pass and citation checks only when
+    their pinned manifest or corpus is configured, so a deployment without one
+    records nothing it cannot stand behind."""
+    from src.core.config import settings
     from src.core.evaluation.coverage import ClaimsCoverageEvaluator
 
     registry = EvaluatorRegistry()
     registry.register(ClaimsCoverageEvaluator())
+
+    manifest = None
+    if settings.CLAIM_SUPPORT_FIXTURE_MANIFEST:
+        from src.api.services.claim_support_evaluation_service import (
+            ClaimSupportEvaluationService,
+        )
+        from src.core.acquisition.snapshots import FilesystemSnapshotStore
+        from src.core.evaluation.fixture_support import FixtureManifest
+
+        manifest = FixtureManifest.from_json(
+            Path(settings.CLAIM_SUPPORT_FIXTURE_MANIFEST).read_text(),
+            settings.CLAIM_SUPPORT_FIXTURE_MANIFEST_SHA256 or "",
+        )
+        registry.register(
+            ClaimSupportEvaluationService(
+                manifest,
+                FilesystemSnapshotStore(root=Path(settings.SOURCE_SNAPSHOT_DIR)),
+            )
+        )
+
+    if settings.CITATION_CORPUS:
+        from src.core.claims.citation_validation import FixtureCorpus
+        from src.core.evaluation.citation_checks import citation_check_evaluators
+
+        corpus = FixtureCorpus.from_json(
+            Path(settings.CITATION_CORPUS).read_text(),
+            settings.CITATION_CORPUS_SHA256 or "",
+        )
+        for evaluator in citation_check_evaluators(
+            corpus, manifest.metadata_candidates if manifest else None
+        ):
+            registry.register(evaluator)
     return registry
 
 

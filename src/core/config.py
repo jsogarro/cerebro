@@ -118,6 +118,14 @@ class Settings(BaseSettings):
     EVALUATION_DISPATCH_ENABLED: bool = False
     # Per-call bound on outbox handlers; keep it well under the 60 s claim lease.
     OUTBOX_HANDLER_TIMEOUT_SECONDS: float = 20.0
+    # A fixture deployment's expert-labelled claim-support manifest and its
+    # SHA-256. Unset, no claim-support pass runs; a mismatched hash refuses to start.
+    CLAIM_SUPPORT_FIXTURE_MANIFEST: str | None = None
+    CLAIM_SUPPORT_FIXTURE_MANIFEST_SHA256: str | None = None
+    # A pinned registry corpus for the citation checks, with its SHA-256.
+    # Unset, the citation checks are not registered.
+    CITATION_CORPUS: str | None = None
+    CITATION_CORPUS_SHA256: str | None = None
 
     # Context Compaction Settings (Dark Launch)
     ENABLE_CONSTRAINT_PINNING: bool = (
