@@ -17,7 +17,7 @@ This page lists code and settings present in the repository that no production p
 | Dead execution attributes | Not wired | none | `src/api/services/direct_execution_service.py`, `src/core/config.py` |
 | Settings with no effect | Not wired | none | `src/core/config.py` (`Settings`) |
 | Unbacked web pages | Not wired | none | `cerebro/web/src/api/` |
-| MCP server | Wired (default off) | `src/api/main.py` mount `/mcp` (`MCP_SERVER_ENABLED`) | `src/mcp/server.py` |
+| MCP server | Wired | `src/api/main.py` mount `/mcp` (`MCP_SERVER_ENABLED`) | `src/mcp/server.py` |
 | Row-level security for execution-service sessions | Not wired | none | `src/api/services/direct_execution_service.py` |
 | Model-call journal owner | Not wired | none | `src/repositories/model_call_reservation_repository.py`, `src/services/model_invocation.py` |
 
@@ -125,7 +125,7 @@ The web workbench pages for runs, run detail and memory, and the run form on the
 
 ## MCP server
 
-> **Wired, off by default.** `src/mcp/server.py::build_mcp_server` exposes read-only tools (`get_research_status`, `get_research_results`, `get_research_evidence`) over stateless Streamable HTTP, mounted at `/mcp` inside `src/api/main.py` when `MCP_SERVER_ENABLED=true` (default `false`). Requests pass through the API's authentication, rate-limiting, and audit middleware. See [tool boundary and evidence](09-tool-boundary-and-evidence.md#mcp-server).
+> **Wired.** `src/mcp/server.py::build_mcp_server` exposes read-only tools (`get_research_status`, `get_research_results`, `get_research_evidence`) over stateless Streamable HTTP, mounted at `/mcp` inside `src/api/main.py` and enabled in Kubernetes (`k8s/configmap.yaml`) and Docker Compose (`MCP_SERVER_ENABLED=true`). Requests pass through the API's authentication (including `/mcp`-scoped personal access tokens), rate-limiting, and audit middleware. See [tool boundary and evidence](09-tool-boundary-and-evidence.md#mcp-server).
 
 ## Model-call journal owner
 
