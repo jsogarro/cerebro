@@ -17,6 +17,7 @@ These documents describe the implemented system: the FastAPI application, the ex
 | [Tool boundary, capabilities and evidence](reference/09-tool-boundary-and-evidence.md) | `ToolBoundary`, capability grants, the budget ledger, source snapshots, evidence rows and claim support |
 | [LLM providers](reference/10-llm-providers.md) | `GeminiService`, the provider package, the model router and the optional multi-provider route |
 | [Reports](reference/11-reports.md) | Report generation, output formats, storage and the `/api/v1/reports` routes |
+| [Uploaded documents](reference/11a-documents.md) | Document upload routes, limits, retention and the dark-launch settings |
 | [Security, audit and observability](reference/12-security-audit-observability.md) | Audit trail, security headers, log redaction, Prometheus metrics and Langfuse tracing |
 | [CLI and web clients](reference/13-cli-and-web-clients.md) | The `research-cli` commands and the React workbench, including the pages that call routes the API does not mount |
 | [Data model and persistence](reference/14-data-model-and-persistence.md) | Tables, models, repositories, migrations and the tenant filter |

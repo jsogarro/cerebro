@@ -1,5 +1,8 @@
 """J5: manuscript upload, grammar findings, critique, upload as run evidence."""
 
+import asyncio
+import hashlib
+
 import pytest
 
 from tests.e2e.journeys.harness import require_path_containing
@@ -15,10 +18,6 @@ def _missing(packet: str, what: str) -> pytest.MarkDecorator:
     )
 
 
-@_missing(
-    "P12",
-    "POST /api/v1/documents is disabled (DOCUMENT_UPLOADS_ENABLED) in the default stack",
-)
 async def test_manuscript_upload_is_stored(client, new_account):
     alice = await new_account("alice")
     response = await client.post(
@@ -27,9 +26,10 @@ async def test_manuscript_upload_is_stored(client, new_account):
         files={"file": ("manuscript.txt", MANUSCRIPT, "text/plain")},
     )
     assert response.status_code == 201, response.status_code
-    pytest.fail(
-        "uploads landed: assert text_sha256 and char_count match the manuscript"
-    )
+    body = response.json()
+    assert body["text_sha256"] == hashlib.sha256(MANUSCRIPT).hexdigest()
+    assert body["char_count"] == len(MANUSCRIPT.decode())
+    assert "text" not in body
 
 
 @_missing("P22", "no grammar route is served")
@@ -38,23 +38,44 @@ async def test_grammar_findings_have_correct_slices(client, new_account):
     pytest.fail("grammar landed: assert each finding's slice equals the quoted text")
 
 
-@_missing(
-    "P12",
-    "a critique needs an uploaded document; uploads are disabled in the default stack",
-)
 async def test_critique_runs_on_a_fixture_model(client, new_account):
     alice = await new_account("alice")
-    await require_path_containing(client, alice, "critique")
-    response = await client.post(
+    config = (await client.get("/api/v1/critique-config", headers=alice.headers)).json()
+    uploaded = await client.post(
         "/api/v1/documents",
         headers=alice.headers,
         files={"file": ("manuscript.txt", MANUSCRIPT, "text/plain")},
     )
-    assert response.status_code == 201, response.status_code
-    pytest.fail(
-        "uploads landed: start a consented critique with a fixture model and "
-        "assert its findings quote located spans"
+    assert uploaded.status_code == 201, uploaded.text
+    document_id = uploaded.json()["id"]
+
+    consent = config["consents"][0]
+    started = await client.post(
+        f"/api/v1/documents/{document_id}/critiques",
+        headers=alice.headers,
+        json={
+            "model_id": config["model_id"],
+            "hosts": config["hosts"],
+            "consent_text_version": consent["version"],
+            "acknowledged": True,
+        },
     )
+    assert started.status_code == 202, started.text
+    critique_id = started.json()["id"]
+
+    critique = {}
+    for _ in range(60):
+        critique = (
+            await client.get(f"/api/v1/critiques/{critique_id}", headers=alice.headers)
+        ).json()
+        if critique["status"] not in ("queued", "running"):
+            break
+        await asyncio.sleep(0.5)
+    assert critique["status"] == "succeeded", critique
+    assert critique["findings"]
+    text = MANUSCRIPT.decode()
+    for finding in critique["findings"]:
+        assert text[finding["raw_start"] : finding["raw_end"]] == finding["quote"]
 
 
 @_missing("P12", "uploads cannot be attached to a run until the retention rule lands")
