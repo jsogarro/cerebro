@@ -112,9 +112,14 @@ class Citation(BaseModel):
     location: str | None = Field(None, description="Publication location")
     isbn: str | None = Field(None, description="ISBN for books")
     source_type: str = Field(default="journal", description="Type of source")
+    rendered: str | None = Field(
+        None, description="Text a run-bound binder rendered; printed as-is"
+    )
 
     def format_citation(self, style: CitationStyle) -> str:
         """Format the citation according to the specified style."""
+        if self.rendered is not None:
+            return self.rendered
         authors_str = ", ".join(self.authors) if self.authors else "Unknown"
         year_str = f"({self.year})" if self.year else "(n.d.)"
 
@@ -218,6 +223,34 @@ def source_label(source_kind: str | None) -> str | None:
     return _SOURCE_LABELS.get(source_kind or "")
 
 
+class BoundCitation(BaseModel):
+    """A minted citation and the stored evidence it was bound to."""
+
+    citation_id: str
+    claim_id: str
+    evidence_id: str
+    evidence_sha256: str
+    locator: str
+    source_uri: str
+    status: str
+    support: str | None
+    in_text: str
+    missing_fields: list[str] = Field(default_factory=list)
+    authors: list[str] = Field(default_factory=list)
+    year: str | None = None
+    doi: str | None = None
+
+
+class CitationGap(BaseModel):
+    """Why a claim has no minted citation; shown, never papered over."""
+
+    reason: str
+    claim_id: str | None = None
+    evidence_id: str | None = None
+    field: str | None = None
+    detail: str = ""
+
+
 class ReportMetadata(BaseModel):
     """Metadata for a research report."""
 
@@ -237,6 +270,12 @@ class ReportMetadata(BaseModel):
     evaluation_availability: str | None = Field(
         None, description="Whether claim/quality evaluation exists for the content"
     )
+    citation_binding: str | None = Field(
+        None, description="run_bound when citations come from a run's evidence"
+    )
+    citation_run_id: str | None = Field(None, description="Run the citations bind to")
+    bound_citations: list[BoundCitation] = Field(default_factory=list)
+    citation_gaps: list[CitationGap] = Field(default_factory=list)
     total_sources: int = Field(0, ge=0, description="Number of sources analyzed")
     total_citations: int = Field(0, ge=0, description="Number of citations")
     agents_used: list[str] = Field(default_factory=list, description="Agents involved")
@@ -347,6 +386,8 @@ class Report(BaseModel):
             confidence_score=None,
             source_kind=None,
             evaluation_availability=None,
+            citation_binding=None,
+            citation_run_id=None,
             total_sources=0,
             total_citations=0,
             generation_time_seconds=0.0,
@@ -441,6 +482,9 @@ class ReportGenerationRequest(BaseModel):
     )
     workflow_data: dict[str, Any] | None = Field(
         None, description="Direct workflow data if no project"
+    )
+    run_id: str | None = Field(
+        None, description="Run whose evidence the report's citations bind to"
     )
     configuration: ReportConfiguration = Field(
         default_factory=lambda: ReportConfiguration(

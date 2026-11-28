@@ -108,22 +108,21 @@ def build_default_registry() -> EvaluatorRegistry:
     records nothing it cannot stand behind."""
     from src.core.config import settings
     from src.core.evaluation.coverage import ClaimsCoverageEvaluator
+    from src.core.evaluation.fixture_support import load_fixture_manifest
 
     registry = EvaluatorRegistry()
     registry.register(ClaimsCoverageEvaluator())
 
-    manifest = None
-    if settings.CLAIM_SUPPORT_FIXTURE_MANIFEST:
+    manifest = load_fixture_manifest(
+        settings.CLAIM_SUPPORT_FIXTURE_MANIFEST,
+        settings.CLAIM_SUPPORT_FIXTURE_MANIFEST_SHA256,
+    )
+    if manifest:
         from src.api.services.claim_support_evaluation_service import (
             ClaimSupportEvaluationService,
         )
         from src.core.acquisition.snapshots import FilesystemSnapshotStore
-        from src.core.evaluation.fixture_support import FixtureManifest
 
-        manifest = FixtureManifest.from_json(
-            Path(settings.CLAIM_SUPPORT_FIXTURE_MANIFEST).read_text(),
-            settings.CLAIM_SUPPORT_FIXTURE_MANIFEST_SHA256 or "",
-        )
         registry.register(
             ClaimSupportEvaluationService(
                 manifest,

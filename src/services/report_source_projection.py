@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.claims.run_citations import RunCitations
 from src.models.db.research_project import ProjectStatus, ResearchProject
 from src.models.db.research_result import ResearchResult
 
@@ -57,6 +58,51 @@ class ReportSourceProjection:
             "source_kind": self.source_kind.value,
             "evaluation_availability": self.evaluation.value,
         }
+
+
+def run_citation_input(run_id: str, bound: RunCitations) -> dict[str, Any]:
+    """Report input for citations bound to a run: minted ones and every gap.
+
+    Records that were not minted are not citations; they appear as gaps so the
+    report can say why a claim carries none.
+    """
+    minted = []
+    for record in bound.minted:
+        evidence = bound.evidence[record.evidence_id or ""]
+        year = record.metadata.year.value if record.metadata.year else None
+        minted.append(
+            {
+                "citation_id": record.citation_id,
+                "claim_id": record.claim_id,
+                "evidence_id": evidence.evidence_id,
+                "evidence_sha256": evidence.content_sha256,
+                "locator": evidence.locator,
+                "source_uri": evidence.source_uri,
+                "status": record.status.value,
+                "support": record.support.value if record.support else None,
+                "in_text": record.in_text,
+                "missing_fields": list(record.missing_fields),
+                "authors": [a.value for a in record.metadata.authors],
+                "year": year,
+                "doi": record.metadata.doi.value if record.metadata.doi else None,
+            }
+        )
+    gaps = [
+        {
+            "reason": gap.reason.value,
+            "claim_id": gap.claim_id,
+            "evidence_id": gap.evidence_id,
+            "field": gap.field.value if gap.field else None,
+            "detail": gap.detail,
+        }
+        for gap in bound.result.gaps
+    ]
+    return {
+        "citation_binding": "run_bound",
+        "citation_run_id": run_id,
+        "bound_citations": minted,
+        "citation_gaps": gaps,
+    }
 
 
 def _finding_text(content: dict[str, Any]) -> str:

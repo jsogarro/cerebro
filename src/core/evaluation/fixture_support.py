@@ -18,6 +18,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Final
 
 from src.core.claims.resolution import ClaimVerdict
@@ -118,6 +119,15 @@ class FixtureManifest:
                         )
                 out.setdefault(evidence_id, []).extend(values)
         return out
+
+
+def load_fixture_manifest(
+    path: str | None, sha256: str | None
+) -> FixtureManifest | None:
+    """The pinned manifest at ``path``, or ``None`` when none is configured."""
+    if not path:
+        return None
+    return FixtureManifest.from_json(Path(path).read_text(), sha256 or "")
 
 
 @dataclass(frozen=True)
