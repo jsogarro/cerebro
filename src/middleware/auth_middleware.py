@@ -262,7 +262,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             logger.error("Authentication validation unavailable", error=str(exc))
             return _authentication_response(503, "Authentication service unavailable")
 
-        if metrics_route and not token_payload.has_permission(METRICS_PERMISSION):
+        if metrics_route and not (
+            isinstance(token_payload, TokenPayload)
+            and token_payload.has_permission(METRICS_PERMISSION)
+        ):
             audit_rejection(
                 request, AuditEventType.UNAUTHORIZED_ACCESS, "missing metrics scope"
             )

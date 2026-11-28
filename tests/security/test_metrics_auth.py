@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.auth.jwt_service import JWTService
+from src.auth.models import PAT_PREFIX
 from src.core.config import settings
 from src.middleware.auth_middleware import METRICS_AUDIENCE, get_jwt_service
 from tests.security.test_route_authentication_boundary import _override_audit_logger
@@ -196,3 +197,7 @@ async def test_minted_metrics_token_is_refused_on_the_api(
         "/api/v1/users/me", headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 401
+
+
+def test_a_personal_access_token_is_denied(client: TestClient) -> None:
+    assert _get(client, f"{PAT_PREFIX}anything") == 401
