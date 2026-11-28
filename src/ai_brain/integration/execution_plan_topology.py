@@ -38,6 +38,7 @@ from src.core.contracts import (
     FallbackMode,
     WorkerAssignment,
 )
+from src.core.otel import trace_run_span, trace_worker_span
 from src.services.model_invocation import (
     MODEL_INVOCATION_CONTEXT_KEY,
     ModelInvocationContext,
@@ -323,6 +324,18 @@ class ExecutionPlanTopologyExecutor:
         """Execute plan-local worker instances without consulting MASR or supervisors."""
 
         self.admit(plan)
+        run_id = str(
+            task.context.get("run_id") or plan.run_id or plan.execution_plan_id
+        )
+        with trace_run_span(run_id=run_id):
+            return await self._execute_admitted(plan, task, run_id)
+
+    async def _execute_admitted(
+        self,
+        plan: ExecutionPlan,
+        task: AgentTask,
+        run_id: str,
+    ) -> PlanExecutionResult:
         decision = plan.routing_decision
         # The run's own ledger when the caller supplies one, so a workflow
         # retry draws on the budget already spent instead of a fresh one.
@@ -413,7 +426,15 @@ class ExecutionPlanTopologyExecutor:
                     async with asyncio.timeout(min(remaining, task_limit)) as limit:
                         async with semaphore:
                             ledger.ensure_not_exceeded()
-                            result = await self._worker_executor(worker, worker_task)
+                            with trace_worker_span(
+                                agent_name=str(worker.worker_type),
+                                run_id=run_id,
+                                task_id=worker_task.id,
+                                worker_id=worker_id,
+                            ):
+                                result = await self._worker_executor(
+                                    worker, worker_task
+                                )
                 except Exception:
                     if not limit.expired():  # raised by the worker, not our limit
                         raise

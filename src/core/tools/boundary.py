@@ -84,6 +84,7 @@ from src.core.contracts.provenance import (
 )
 from src.core.contracts.redaction import SecretRef, boundary_digest, redact
 from src.core.contracts.trust import TrustClassification, propagate_trust
+from src.core.otel import traced_tool_invocation
 
 from .audit import (
     EVENT_COMPLETED,
@@ -355,6 +356,7 @@ class ToolBoundary:
     # invocation
     # ------------------------------------------------------------------
 
+    @traced_tool_invocation
     async def invoke(
         self,
         *,
