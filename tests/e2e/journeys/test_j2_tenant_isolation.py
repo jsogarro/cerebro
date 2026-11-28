@@ -202,12 +202,19 @@ async def test_a_tenant_user_cannot_read_global_audit_or_alerts(
         assert response.status_code == 403, (name, response.status_code)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="P12: document uploads are disabled (DOCUMENT_UPLOADS_ENABLED) in the default stack",
-)
 async def test_documents_listing_is_served(client, new_account):
-    alice = await new_account("alice")
-    response = await client.get("/api/v1/documents", headers=alice.headers)
-    assert response.status_code == 200, response.status_code
+    alice, bob = await new_account("alice"), await new_account("bob")
+    uploaded = await client.post(
+        "/api/v1/documents",
+        headers=alice.headers,
+        files={"file": ("mine.txt", b"Alice's own manuscript text.\n", "text/plain")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    own = await client.get("/api/v1/documents", headers=alice.headers)
+    assert own.status_code == 200, own.status_code
+    assert [d["id"] for d in own.json()] == [uploaded.json()["id"]]
+
+    foreign = await client.get("/api/v1/documents", headers=bob.headers)
+    assert foreign.status_code == 200, foreign.status_code
+    assert foreign.json() == []

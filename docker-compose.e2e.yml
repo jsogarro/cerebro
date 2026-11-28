@@ -1,0 +1,23 @@
+# Extends docker-compose.yml for the e2e suite only:
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d
+# Uploads and critiques are on, with a throwaway key and a fixture review
+# model (tests/e2e/stack_app.py), so no journey calls a provider.
+services:
+  api:
+    command:
+      [
+        "uvicorn",
+        "tests.e2e.stack_app:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+      ]
+    environment:
+      - DOCUMENT_UPLOADS_ENABLED=true
+      - DOCUMENT_CRITIQUE_ENABLED=true
+      - DOCUMENT_ENCRYPTION_KEY=ZTJlLW9ubHkta2V5LW5vdC1mb3ItcmVhbC11c2UtMDE=
+      - PROVIDER_TERMS_VERIFIED_ON=2026-01-01
+      # start_critique answers 503 provider_not_configured while this is blank,
+      # before it asks for the model; the fixture model means it is never sent.
+      - GEMINI_API_KEY=e2e-fixture-key-never-sent

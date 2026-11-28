@@ -194,7 +194,7 @@ See [LLM providers](10-llm-providers.md) for how workers choose a provider.
 
 > **Not wired.** These fields are declared on `Settings`, and some are copied into `get_ai_brain_config()`. No production code reads them (the only caller of `get_ai_brain_config` reads just its `providers` entries), so setting them changes nothing.
 
-The table lists 96 rows: 95 fields of `Settings` and `OTEL_EXPORTER_OTLP_ENDPOINT`, which `Settings` does not declare. Together with the 62 `Settings` rows above they account for 157 of the 168 fields of `Settings`; the ten `DOCUMENT_*` fields and `PROVIDER_TERMS_VERIFIED_ON` are not listed on this page.
+The table lists 96 rows: 95 fields of `Settings` and `OTEL_EXPORTER_OTLP_ENDPOINT`, which `Settings` does not declare. Together with the 62 `Settings` rows above they account for 157 of the 168 fields of `Settings`; the ten `DOCUMENT_*` fields are described in [uploaded documents](11a-documents.md) and `PROVIDER_TERMS_VERIFIED_ON` is not listed on this page.
 
 | Setting | Default | Family |
 |---|---|---|
