@@ -289,16 +289,13 @@ class TestStructuredRoutingFlagOn:
 class TestSwappedAgentCallSites:
     """Test that swapped agent call sites use new routing method."""
 
-    async def test_literature_review_code_path(self):
-        """LiteratureReviewAgent code uses _generate_structured_with_routing."""
-        # Verify the code path by reading source
+    async def test_literature_review_never_asks_a_model_for_sources(self):
+        """LiteratureReviewAgent has no structured-output call site at all."""
         with open("src/agents/literature_review_agent.py") as f:
             source = f.read()
 
-        # Should call _generate_structured_with_routing, not gemini.generate_structured_content
-        assert "_generate_structured_with_routing" in source
-        # The old direct call pattern should not appear in the new call sites
-        assert source.count("_generate_structured_with_routing(") >= 2
+        assert "_generate_structured_with_routing" not in source
+        assert "generate_structured_content" not in source
 
     async def test_citation_agent_code_path(self):
         """CitationAgent code uses _generate_structured_with_routing."""

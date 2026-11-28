@@ -243,15 +243,10 @@ class TestModelOutputHandlers:
             )
 
     @pytest.mark.asyncio
-    async def test_structured_source_search_failure_propagates(self):
+    async def test_the_agent_has_no_model_source_search(self):
         agent = LiteratureReviewAgent()
-        agent._generate_structured_with_routing = AsyncMock(
-            side_effect=RuntimeError("llm down")
-        )
-        with pytest.raises(RuntimeError):
-            await agent._search_sources_structured({"query": "q"})
-        with pytest.raises(RuntimeError):
-            await agent._analyze_sources_structured("q", SOURCES)
+        assert not hasattr(agent, "_search_sources_structured")
+        assert not hasattr(agent, "_analyze_sources_structured")
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

@@ -64,10 +64,24 @@ class TestResearchAgentsMigration:
     async def test_literature_review_routes_through_generate_with_routing(self):
         """LiteratureReviewAgent routes generation through _generate_with_routing."""
         agent = LiteratureReviewAgent()
-        agent.gemini_service = None  # Force fallback path
+        agent.gemini_service = None
+        agent.mcp_integration = Mock(
+            search_academic_sources=AsyncMock(
+                return_value={
+                    "success": True,
+                    "data_source": "mcp_tools",
+                    "sources": [{"title": "T", "abstract": "A", "doi": "10.1000/t"}],
+                }
+            ),
+            build_knowledge_graph=AsyncMock(return_value={}),
+            format_citations=AsyncMock(return_value={}),
+        )
+        analysis = (
+            '{"literature_analysis": {"key_findings": ["f"], "research_gaps": ["g"]}}'
+        )
 
         with patch.object(
-            agent, "_generate_with_routing", return_value=('{"sources": []}', 0.8)
+            agent, "_generate_with_routing", return_value=(analysis, 0.8)
         ) as mock_routing:
             task = AgentTask(
                 id="test",

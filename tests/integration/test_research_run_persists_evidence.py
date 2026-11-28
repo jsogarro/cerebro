@@ -296,6 +296,14 @@ async def test_a_plan_run_with_an_llm_persists_retrieved_evidence_by_default(
 async def test_a_failed_search_records_no_evidence_visibly(
     monkeypatch: pytest.MonkeyPatch, test_engine: AsyncEngine, tmp_path: Path
 ) -> None:
+    results: list[Any] = []
+    real_execute = LiteratureReviewAgent.execute
+
+    async def recording_execute(self: Any, task: Any) -> Any:
+        results.append(await real_execute(self, task))
+        return results[-1]
+
+    monkeypatch.setattr(LiteratureReviewAgent, "execute", recording_execute)
     service, execution_id, run_id, gemini, model_call = await _run_to_completion(
         monkeypatch,
         test_engine,
@@ -304,7 +312,11 @@ async def test_a_failed_search_records_no_evidence_visibly(
     )
 
     status = service.active_executions[execution_id]
-    assert status.status == "completed", status.errors
+    # No evidence fails the required worker, and the run with it.
+    assert status.status == "failed"
+    assert any("INSUFFICIENT_EVIDENCE" in error for error in status.errors), (
+        status.errors
+    )
     evidence_rows = await _rows(
         test_engine, "SELECT * FROM agent_evidence WHERE run_id = :r", r=run_id
     )
@@ -316,11 +328,18 @@ async def test_a_failed_search_records_no_evidence_visibly(
         t=TOOL_ACADEMIC_SEARCH,
     )
     assert search["status"] != "succeeded"
+    (run,) = await _rows(
+        test_engine, "SELECT status FROM agent_runs WHERE run_id = :r", r=run_id
+    )
+    assert run["status"] != "succeeded"
 
-    output = status.final_output[WORKER_ID]
-    assert output.get("data_source") == "no_evidence", output
-    assert output["sources_found"] == []
-    assert output["total_sources"] == 0
+    (worker_result,) = results
+    assert worker_result.status == "failed"
+    assert worker_result.output["error_code"] == "INSUFFICIENT_EVIDENCE"
+    assert worker_result.output["reason"] == "tool_error"
+    assert worker_result.output["data_source"] == "no_evidence"
+    assert worker_result.output["sources_found"] == []
+    assert worker_result.output["total_sources"] == 0
     # No silent substitute: no LLM-named sources and no analysis of nothing.
     gemini.generate_structured_content.assert_not_awaited()
     model_call.assert_not_awaited()
