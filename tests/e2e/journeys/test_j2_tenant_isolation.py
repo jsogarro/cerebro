@@ -186,16 +186,28 @@ async def test_read_route_exists_for_isolation_check(client, new_account, path):
 
 
 @pytest.mark.parametrize(
-    ("path", "alice_sees"),
+    ("path", "lists_rows"),
     [
-        ("/api/v1/runs", "items"),
-        ("/api/v1/runs/{run_id}/evidence", "items"),
-        ("/api/v1/runs/{run_id}/artifacts", "items"),
+        ("/api/v1/runs", True),
+        ("/api/v1/runs/{run_id}", False),
+        ("/api/v1/runs/{run_id}/tasks", True),
+        ("/api/v1/runs/{run_id}/evidence", True),
+        ("/api/v1/runs/{run_id}/artifacts", True),
+        ("/api/v1/runs/{run_id}/evaluations", False),
+        ("/api/v1/runs/{run_id}/event-history", False),
     ],
-    ids=["runs", "evidence", "artifacts"],
+    ids=[
+        "runs",
+        "detail",
+        "tasks",
+        "evidence",
+        "artifacts",
+        "evaluations",
+        "event-history",
+    ],
 )
 async def test_run_read_route_is_served_and_isolated(
-    client, db, new_account, path, alice_sees
+    client, db, new_account, path, lists_rows
 ):
     alice, bob = await new_account("alice"), await new_account("bob")
     run_id, evidence_id = await seed_run_with_evidence(db, alice.org_id)
@@ -204,15 +216,16 @@ async def test_run_read_route_is_served_and_isolated(
     url = path.format(run_id=run_id)
     own = await client.get(url, headers=alice.headers)
     assert own.status_code == 200, own.text
-    assert own.json()[alice_sees], own.text
-    assert run_id in own.text or evidence_id in own.text
+    if lists_rows:
+        assert own.json()["items"], own.text
+        assert run_id in own.text or evidence_id in own.text
 
     other = await client.get(url, headers=bob.headers)
     if "{run_id}" in path:
         assert other.status_code == 404, other.text
     else:
         assert other.status_code == 200, other.text
-        assert other.json()[alice_sees] == []
+        assert other.json()["items"] == []
     assert run_id not in other.text and evidence_id not in other.text
 
 

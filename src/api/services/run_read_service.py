@@ -27,6 +27,46 @@ from src.repositories.run_lifecycle_repository import RunLifecycleRepository
 
 MAX_PAGE = 200
 DEFAULT_PAGE = 50
+# ponytail: states are computed over at most this many canonical rows; a run
+# with more per-claim rows than this needs a SQL aggregate instead.
+MAX_STATE_ROWS = 5000
+
+# The writers record fixed reasons and, on one failure path, ``str(exception)``,
+# which can carry SQL, parameters and provider URLs. Only these fixed strings
+# leave the service; anything else reads as the generic failure.
+_PUBLIC_REASONS = frozenset(
+    {
+        "heartbeat crashed",
+        "renewal refused",
+        "lease unconfirmed",
+        "PROCESS_INTERRUPTED",
+        "interrupted by restart",
+        "Execution cancelled by request",
+        "worker outcomes did not satisfy the plan",
+        "execution failed",
+    }
+)
+_GENERIC_FAILURE = "execution failed"
+_FREE_TEXT_KEYS = frozenset({"error", "errors", "details", "detail", "exception"})
+
+
+def public_reason(reason: str | None) -> str | None:
+    if reason is None or reason in _PUBLIC_REASONS:
+        return reason
+    return _GENERIC_FAILURE
+
+
+def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: (
+            public_reason(value)
+            if key == "reason"
+            else _GENERIC_FAILURE
+            if key in _FREE_TEXT_KEYS
+            else value
+        )
+        for key, value in payload.items()
+    }
 
 
 class RunNotFoundError(LookupError):
@@ -72,6 +112,7 @@ class TaskView(BaseModel):
     run_id: str
     task_key: str
     task_type: str
+    phase: str
     objective: str
     dependency_ids: list[str]
     status: str
@@ -101,6 +142,9 @@ class ArtifactView(BaseModel):
     run_id: str
     task_id: str | None
     type: str
+    schema_version: str
+    workflow_id: str
+    workflow_version: str
     media_type: str
     content_sha256: str
     status: str
@@ -138,7 +182,7 @@ class EventView(BaseModel):
     run_id: str
     sequence: int
     event_type: str
-    event_type_version: str
+    version: str
     occurred_at: datetime
     payload: dict[str, Any]
 
@@ -161,8 +205,13 @@ class EvaluationCollection(Collection[EvaluationView]):
 
 
 class EventPage(BaseModel):
+    """``next_cursor`` is always the position after ``items``, so a client that
+    has read everything can resume from it; ``has_more`` says a further page
+    exists now."""
+
     items: list[EventView]
-    next_cursor: str | None
+    next_cursor: str
+    has_more: bool
 
 
 def _filter_binding(organization_id: uuid.UUID, **filters: str | None) -> str:
@@ -222,7 +271,7 @@ class RunReadService:
                 routing_policy_id=row.routing_policy_id,
                 routing_policy_version=row.routing_policy_version,
                 status=row.status,
-                status_reason=row.status_reason,
+                status_reason=public_reason(row.status_reason),
                 objective=objectives.get(row.run_id),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
@@ -265,19 +314,20 @@ class RunReadService:
     async def tasks(self, run_id: str, *, limit: int | None) -> Collection[TaskView]:
         await self._require_run(run_id)
         size = _limit(limit)
-        rows = await self._runs.get_tasks_for_run(
+        fetched = await self._runs.get_tasks_for_run(
             run_id, organization_id=self._org, limit=size + 1
         )
+        rows, more = fetched[:size], len(fetched) > size
         attempts: dict[str, list[AttemptView]] = {}
         for attempt in await self._runs.get_attempts_for_run(
-            run_id, organization_id=self._org
+            run_id, organization_id=self._org, task_ids=[t.task_id for t in rows]
         ):
             attempts.setdefault(attempt.task_id, []).append(
                 AttemptView(
                     attempt_id=attempt.attempt_id,
                     ordinal=attempt.ordinal,
                     status=attempt.status,
-                    status_reason=attempt.status_reason,
+                    status_reason=public_reason(attempt.status_reason),
                     started_at=attempt.started_at,
                     completed_at=attempt.completed_at,
                 )
@@ -289,17 +339,18 @@ class RunReadService:
                     run_id=task.run_id,
                     task_key=task.task_key,
                     task_type=task.task_type,
+                    phase=task.task_type,
                     objective=task.objective,
                     dependency_ids=list(task.dependency_ids),
                     status=task.status,
-                    status_reason=task.status_reason,
+                    status_reason=public_reason(task.status_reason),
                     started_at=task.started_at,
                     completed_at=task.completed_at,
                     attempts=attempts.get(task.task_id, []),
                 )
-                for task in rows[:size]
+                for task in rows
             ],
-            truncated=len(rows) > size,
+            truncated=more,
         )
 
     async def evidence(
@@ -334,7 +385,7 @@ class RunReadService:
     async def artifacts(
         self, run_id: str, *, limit: int | None
     ) -> Collection[ArtifactView]:
-        await self._require_run(run_id)
+        run = await self._require_run(run_id)
         size = _limit(limit)
         rows = await self._artifacts.list_artifacts_for_run(
             run_id, organization_id=self._org, limit=size + 1
@@ -346,6 +397,9 @@ class RunReadService:
                     run_id=row.run_id,
                     task_id=row.task_id,
                     type=row.kind,
+                    schema_version=row.contract_schema_version,
+                    workflow_id=run.workflow_definition_id,
+                    workflow_version=run.workflow_definition_version,
                     media_type=row.media_type,
                     content_sha256=row.content_sha256,
                     status=row.status,
@@ -363,10 +417,16 @@ class RunReadService:
     ) -> EvaluationCollection:
         await self._require_run(run_id)
         size = _limit(limit)
-        rows = await self._evaluations.list_evaluations_for_run(
-            run_id, organization_id=self._org, latest_only=True, limit=size + 1
+        # States come from every canonical row, not the page: a later failure
+        # beyond ``limit`` must still read as failed.
+        canonical = await self._evaluations.list_evaluations_for_run(
+            run_id,
+            organization_id=self._org,
+            latest_only=True,
+            limit=MAX_STATE_ROWS,
         )
-        states = evaluation_states(build_default_registry(), rows[:size])
+        rows = canonical[:size]
+        states = evaluation_states(build_default_registry(), canonical)
         return EvaluationCollection(
             items=[
                 EvaluationView(
@@ -385,9 +445,9 @@ class RunReadService:
                     trigger=row.trigger,
                     completed_at=row.completed_at,
                 )
-                for row in rows[:size]
+                for row in rows
             ],
-            truncated=len(rows) > size,
+            truncated=len(canonical) > size,
             evaluator_states=[
                 EvaluatorState(
                     evaluator_id=evaluator,
@@ -417,6 +477,7 @@ class RunReadService:
             run_id, after_sequence=after, limit=size + 1, organization_id=self._org
         )
         page = rows[:size]
+        last = page[-1].sequence if page else after
         return EventPage(
             items=[
                 EventView(
@@ -424,15 +485,12 @@ class RunReadService:
                     run_id=row.run_id,
                     sequence=row.sequence,
                     event_type=row.event_type,
-                    event_type_version=row.event_type_version,
+                    version=row.event_type_version,
                     occurred_at=row.occurred_at,
-                    payload=row.payload,
+                    payload=_public_payload(row.payload),
                 )
                 for row in page
             ],
-            next_cursor=(
-                RunEventCursor(run_id=run_id, last_sequence=page[-1].sequence).encode()
-                if len(rows) > size
-                else None
-            ),
+            next_cursor=RunEventCursor(run_id=run_id, last_sequence=last).encode(),
+            has_more=len(rows) > size,
         )

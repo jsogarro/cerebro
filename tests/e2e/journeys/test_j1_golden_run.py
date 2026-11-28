@@ -132,6 +132,11 @@ async def test_run_detail_routes_serve_tasks_and_stored_evidence(
         f"/api/v1/runs/{run_id}/evidence", headers=alice.headers
     )
     assert [e["evidence_id"] for e in evidence.json()["items"]] == [evidence_id]
+    history = await client.get(
+        f"/api/v1/runs/{run_id}/event-history", headers=alice.headers
+    )
+    assert history.status_code == 200, history.text
+    assert history.json()["items"] == [] and history.json()["has_more"] is False
 
 
 @_missing("P13", "verifier rounds are not recorded, so run detail cannot show them")

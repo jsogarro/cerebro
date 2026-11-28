@@ -314,26 +314,45 @@ class RunLifecycleRepository:
     async def first_task_objectives(
         self, run_ids: Sequence[str], *, organization_id: uuid.UUID | str
     ) -> dict[str, str]:
-        """Each run's first task objective: the run row stores no request text."""
-        query = scope_to_organization(
-            select(AgentRunTask)
-            .where(AgentRunTask.run_id.in_(run_ids))
-            .order_by(AgentRunTask.created_at, AgentRunTask.id),
+        """Each run's first task objective: the run row stores no request text.
+
+        "First" is ``(created_at, id)``, so the choice is stable, and the window
+        keeps it to one row per run however many tasks a run has.
+        """
+        first = (
+            func.row_number()
+            .over(
+                partition_by=AgentRunTask.run_id,
+                order_by=(AgentRunTask.created_at, AgentRunTask.id),
+            )
+            .label("position")
+        )
+        ranked = scope_to_organization(
+            select(AgentRunTask.run_id, AgentRunTask.objective, first).where(
+                AgentRunTask.run_id.in_(run_ids)
+            ),
             AgentRunTask.organization_id,
             normalize_organization_id(organization_id),
+        ).subquery()
+        rows = await self.session.execute(
+            select(ranked.c.run_id, ranked.c.objective).where(ranked.c.position == 1)
         )
-        objectives: dict[str, str] = {}
-        for task in (await self.session.execute(query)).scalars():
-            objectives.setdefault(task.run_id, task.objective)
-        return objectives
+        return dict(rows.all())
 
     async def get_attempts_for_run(
-        self, run_id: str, *, organization_id: uuid.UUID | str
+        self,
+        run_id: str,
+        *,
+        organization_id: uuid.UUID | str,
+        task_ids: Sequence[str],
     ) -> list[AgentTaskAttempt]:
-        """Every attempt of a run, by task then ordinal, in one query."""
+        """Attempts of the given tasks of a run, by task then ordinal."""
         query = scope_to_organization(
             select(AgentTaskAttempt)
-            .where(AgentTaskAttempt.run_id == run_id)
+            .where(
+                AgentTaskAttempt.run_id == run_id,
+                AgentTaskAttempt.task_id.in_(task_ids),
+            )
             .order_by(AgentTaskAttempt.task_id, AgentTaskAttempt.ordinal),
             AgentTaskAttempt.organization_id,
             normalize_organization_id(organization_id),
@@ -648,7 +667,7 @@ class RunLifecycleRepository:
         query = (
             select(AgentRunTask)
             .where(AgentRunTask.run_id == run_id)
-            .order_by(AgentRunTask.created_at)
+            .order_by(AgentRunTask.created_at, AgentRunTask.id)
         )
         if limit is not None:
             query = query.limit(limit)

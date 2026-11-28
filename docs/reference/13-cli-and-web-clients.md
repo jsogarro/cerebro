@@ -155,7 +155,7 @@ The compose `web` service builds `cerebro/web/Dockerfile` (a Node 20 build stage
 | `/app` | redirect to `/app/workflows` | none | static |
 | `/app/workflows` | `Workflows` | `GET /api/v1/workflows`; `POST /api/v1/runs` from the run form | Partly. `GET /api/v1/workflows` is mounted; `POST /api/v1/runs` is not, so the page cannot start a run. |
 | `/app/runs` | `Runs` | `GET /api/v1/runs`; `POST /api/v1/runs/{id}/cancel` | Partly. The list is mounted; cancel is not. |
-| `/app/runs/:id` | `RunDetail` | `GET /api/v1/runs/{id}`, `/tasks`, `/event-history`, `/evidence`, `/artifacts`, `/evaluations` | Reads are mounted. The adapters require fields the routes do not return (task `phase`, artifact `schema_version`, `workflow_id` and `workflow_version`, event `version` and `summary`, evaluation `explanation`), so those items render as malformed until the adapters and routes are reconciled. |
+| `/app/runs/:id` | `RunDetail` | `GET /api/v1/runs/{id}`, `/tasks`, `/event-history`, `/evidence`, `/artifacts`, `/evaluations` | Reads are mounted. The client pages `event-history` to the end with `next_cursor` and reads the other sub-resources as one page of up to 200 rows (the response's `truncated` is not surfaced). Where the API has no objective, event summary or evaluation explanation the adapters show a placeholder. |
 | `/app/dashboard` | `Dashboard` | none | static; fixed values in the component |
 | `/app/research`, `/app/research/:id` | `Research` | `GET` and `POST /api/v1/research/projects`; `GET /api/v1/research/projects/{id}`; WebSocket `/ws` | Yes |
 | `/app/agents` | `Agents` | `GET /api/v1/agents`; `GET /api/v1/agents/{id}/logs` | Partly: the list is mounted, the logs route is not |

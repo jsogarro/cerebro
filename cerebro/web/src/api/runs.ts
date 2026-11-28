@@ -243,7 +243,6 @@ export function adaptRun(value: unknown): ResourceContract<Run> {
     { canonical: 'run_id', aliases: ['id'] },
     { canonical: 'workflow_id' },
     { canonical: 'workflow_version' },
-    { canonical: 'objective' },
   ]);
   if (required.issues.length > 0) {
     return { value: null, presentation: presentation.malformed(required.issues) };
@@ -274,7 +273,9 @@ export function adaptRun(value: unknown): ResourceContract<Run> {
       id: required.values.run_id,
       workflowId: required.values.workflow_id,
       workflowVersion: required.values.workflow_version,
-      objective: required.values.objective,
+      // The run row stores no request text; the API sends the first task's
+      // objective and omits it before any task exists.
+      objective: readString(value, 'objective') ?? 'Objective not recorded',
       inputs: inputs ?? {},
       mode: mode.mode,
       rawMode: mode.raw,
@@ -431,7 +432,6 @@ export function adaptEvent(value: unknown): ResourceContract<Event> {
     { canonical: 'version' },
     { canonical: 'run_id' },
     { canonical: 'type', aliases: ['event_type'] },
-    { canonical: 'summary' },
   ]);
   if (required.issues.length > 0) {
     return { value: null, presentation: presentation.malformed(required.issues) };
@@ -451,7 +451,7 @@ export function adaptEvent(value: unknown): ResourceContract<Event> {
       newState: newState.state,
       rawNewState: newState.raw,
       occurredAt: optionalTimestamp(value, 'occurred_at') ?? optionalTimestamp(value, 'timestamp'),
-      summary: required.values.summary,
+      summary: readString(value, 'summary') ?? required.values.type,
       traceId: readString(value, 'trace_id'),
       metrics: adaptOperationalMetrics(value.measured_values ?? value.operational_metrics),
     },
@@ -556,7 +556,10 @@ export function adaptClaimSupport(value: unknown): ResourceContract<ClaimSupport
       rawStatus,
       verificationMethod: readString(value, 'verification_method'),
       score: adaptOriginValue<number>(value.score, 'number'),
-      explanation: required.values.explanation,
+      explanation:
+        readString(value, 'explanation') ??
+        readString(value, 'rationale') ??
+        'No explanation was recorded.',
       verifiedAt: optionalTimestamp(value, 'verified_at'),
     },
     presentation: presentation.ready(issues),
@@ -698,7 +701,6 @@ export function adaptEvaluation(value: unknown): ResourceContract<Evaluation> {
     { canonical: 'run_id' },
     { canonical: 'evaluator_id' },
     { canonical: 'evaluator_version' },
-    { canonical: 'explanation' },
   ]);
   if (required.issues.length > 0) {
     return { value: null, presentation: presentation.malformed(required.issues) };
@@ -814,17 +816,39 @@ export async function cancelRun(runId: string): Promise<ResourceContract<Run>> {
   return contract;
 }
 
+const COLLECTION_PAGE_LIMIT = 200;
+const MAX_COLLECTION_PAGES = 50;
+
+/**
+ * Reads a run sub-resource to the end. Cursor-paged resources (event-history)
+ * are followed while the server reports `has_more`; the others return one
+ * bounded page.
+ */
 async function fetchRunCollection<T>(
   runId: string,
   resource: string,
   adapter: (value: unknown) => CollectionContract<T>,
   signal?: AbortSignal,
 ): Promise<CollectionContract<T>> {
-  const { data } = await apiClient.get<unknown>(
-    `/runs/${encodeURIComponent(runId)}/${resource}`,
-    { handleErrorLocally: true, signal },
-  );
-  return adapter(data);
+  const items: unknown[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_COLLECTION_PAGES; page += 1) {
+    const { data } = await apiClient.get<unknown>(
+      `/runs/${encodeURIComponent(runId)}/${resource}`,
+      {
+        params: { limit: COLLECTION_PAGE_LIMIT, ...(cursor ? { cursor } : {}) },
+        handleErrorLocally: true,
+        signal,
+      },
+    );
+    if (!isRecord(data) || !Array.isArray(data.items)) return adapter(data);
+    items.push(...data.items);
+    if (data.has_more !== true || typeof data.next_cursor !== 'string') {
+      return adapter({ ...data, items });
+    }
+    cursor = data.next_cursor;
+  }
+  return adapter({ items });
 }
 
 export const fetchRunTasks = (runId: string, signal?: AbortSignal) =>
