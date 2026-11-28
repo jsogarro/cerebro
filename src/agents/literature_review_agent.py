@@ -6,34 +6,41 @@ searching academic sources, and identifying research gaps.
 """
 
 import hashlib
-from typing import Any
+from typing import Any, Final
 
 from structlog import get_logger
 
 from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.models import AgentResult, AgentTask
 from src.agents.tools.mediation import ToolCallIdentity
-from src.core.acquisition.resolution import locate
-from src.core.acquisition.search_result import source_text, source_uri
-from src.core.budget import BudgetExceededError
+from src.core.acquisition.search_result import (
+    DEFAULT_MAX_PROMPT_SOURCES,
+    BoundedSelectionResult,
+    SelectionReason,
+    select_bounded_sources,
+    source_ref,
+)
+from src.core.budget import (
+    BUDGET_LEDGER_CONTEXT_KEY,
+    MIN_WORKER_CALL_TOKENS,
+    BudgetExceededError,
+    estimate_prompt_tokens,
+)
 from src.core.constants import LONG_TERM_CACHE_TTL
+from src.core.observability import record_literature_selection
 from src.models.research_project import ResearchDepth
-from src.security.content_sanitizer import escape_for_delimited_prompt
 from src.services.parsers.json_parser import parse_json_response
 from src.services.prompts.agent_prompts import generate_literature_agent_prompt
 
 logger = get_logger()
 
+DEFAULT_CONTEXT_WINDOW_TOKENS: Final[int] = 100_000
+DEFAULT_OUTPUT_TOKEN_RESERVE: Final[int] = MIN_WORKER_CALL_TOKENS
+
 
 def _source_ref(source: dict[str, Any]) -> str | None:
     """A stable identity for a source with no recorded evidence."""
-    doi = str(source.get("doi") or "").strip()
-    if doi:
-        return f"doi:{doi}"
-    uri = source_uri(source)
-    if uri:
-        return f"url-sha256:{hashlib.sha256(uri.encode()).hexdigest()[:16]}"
-    return None
+    return source_ref(source)
 
 
 class LiteratureAnalysisError(Exception):
@@ -93,23 +100,55 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                         or "no_sources_retrieved"
                     ),
                 )
-            selected = self._select_sources(academic_sources)
+            selection = self._select_bounded_sources(
+                task.input_data, academic_sources, task
+            )
+            diagnostics = selection.diagnostics.as_dict()
+            selected = selection.eligible_sources
             if not selected:
+                reason = (
+                    "no_source_in_year_range"
+                    if (
+                        diagnostics["reason_counts"].get(
+                            SelectionReason.OUT_OF_YEAR_RANGE.value, 0
+                        )
+                        or diagnostics["reason_counts"].get(
+                            SelectionReason.UNKNOWN_YEAR.value, 0
+                        )
+                    )
+                    and not diagnostics["reason_counts"].get(
+                        SelectionReason.NOT_RECORDED.value, 0
+                    )
+                    else "no_source_became_evidence"
+                )
                 return self._failed_result(
                     task,
                     academic_sources,
                     "INSUFFICIENT_EVIDENCE",
-                    "no_source_became_evidence",
+                    reason,
+                    selection_diagnostics=diagnostics,
+                )
+            if not selection.prompt_entries:
+                return self._failed_result(
+                    task,
+                    academic_sources,
+                    "INSUFFICIENT_EVIDENCE",
+                    "context_budget_exhausted",
+                    selection_diagnostics=diagnostics,
                 )
             # Everything below sees only what the analysis was allowed to use.
             grounded = {**academic_sources, "sources": selected}
             try:
                 literature_analysis_dict = await self._analyze_literature_with_gemini(
-                    task.input_data, academic_sources, task
+                    task.input_data, academic_sources, task, selection=selection
                 )
             except LiteratureAnalysisError as error:
                 return self._failed_result(
-                    task, grounded, "ANALYSIS_FAILED", str(error)
+                    task,
+                    grounded,
+                    "ANALYSIS_FAILED",
+                    str(error),
+                    selection_diagnostics=diagnostics,
                 )
             from src.agents.schemas import LiteratureAnalysisSchema
 
@@ -133,9 +172,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             # Step 4: Format citations properly
             formatted_citations = await self._format_source_citations(grounded, task)
 
-            # Process and rank sources
-            sources_list = selected
-            ranked_sources = self._rank_sources_by_relevance(sources_list)
+            ranked_sources = selected
 
             # Analyze research gaps with enhanced analysis
             gaps = literature_analysis.research_gaps
@@ -169,6 +206,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 if "recorded" in (academic_sources.get("source_evidence") or {})
                 else "not_recorded",
                 "source_evidence": academic_sources.get("source_evidence", {}),
+                "selection_diagnostics": diagnostics,
                 # Reported by the tool boundary, not inferred here. The
                 # expression this replaces read `success` alone, and every
                 # fallback set `success: True` -- so a fabricated stand-in was
@@ -195,6 +233,8 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 metadata=self.build_execution_metadata(
                     sources_count=len(ranked_sources),
                     gaps_identified=len(gaps),
+                    selection_truncated=selection.diagnostics.truncated_count,
+                    selection_omitted=selection.diagnostics.omitted_count,
                 ),
             )
 
@@ -444,6 +484,8 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             task.input_data.get("query", ""),
             str(sorted(task.input_data.get("domains", []))),
             str(task.input_data.get("max_sources", 50)),
+            str(task.input_data.get("year_start") or ""),
+            str(task.input_data.get("year_end") or ""),
             # Another tenant's evidence must never answer this tenant's query.
             ToolCallIdentity.from_agent_task(task).organization_id or "",
         ]
@@ -511,27 +553,147 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             "error_code": reason,
         }
 
+    def _resolve_context_window(self, task: AgentTask | None) -> int:
+        configured = self.config.get("context_window")
+        if isinstance(configured, int) and configured > 0:
+            return configured
+
+        route = self._select_generation_route(task)
+        if route is not None:
+            primary = route.routing_decision.get("primary_model") or {}
+            provider_name = primary.get("provider")
+            model_name = primary.get("name") or ""
+            try:
+                provider = route.router.registry.providers.get(provider_name)
+                if provider is not None and hasattr(
+                    provider, "_get_model_context_window"
+                ):
+                    window = int(provider._get_model_context_window(model_name))
+                    if window > 0:
+                        return window
+            except (AttributeError, KeyError, TypeError, ValueError):
+                pass
+
+        for candidate in (
+            getattr(self.gemini_service, "context_window", None),
+            getattr(
+                getattr(self.gemini_service, "config", None), "context_window", None
+            ),
+        ):
+            if isinstance(candidate, int) and candidate > 0:
+                return candidate
+
+        return DEFAULT_CONTEXT_WINDOW_TOKENS
+
+    def _resolve_output_reserve(self) -> int:
+        configured = self.config.get("output_token_reserve")
+        if isinstance(configured, int) and configured > 0:
+            return configured
+        return DEFAULT_OUTPUT_TOKEN_RESERVE
+
+    def _resolve_evidence_budget(
+        self, input_data: dict[str, Any], task: AgentTask | None
+    ) -> tuple[int, int, int, int, int | None]:
+        """Compute ``(context_window, output_reserve, instruction_tokens, evidence_budget, budget_cap)``."""
+        context_window = self._resolve_context_window(task)
+        output_reserve = self._resolve_output_reserve()
+        # Render with a sentinel space so the <RETRIEVED_SOURCES> wrapper is counted too.
+        wrapper_prompt = self._with_brief(
+            generate_literature_agent_prompt({**input_data, "found_sources": " "}),
+            task,
+        )
+        instruction_tokens = estimate_prompt_tokens(wrapper_prompt)
+
+        ledger = None
+        if task is not None:
+            ctx = self._invocation_context(task)
+            ledger = (
+                ctx.ledger
+                if ctx is not None
+                else task.context.get(BUDGET_LEDGER_CONTEXT_KEY)
+            )
+        remaining = getattr(ledger, "remaining_tokens", None)
+        effective_window = context_window
+        budget_cap: int | None = None
+        # Leave an exhausted ledger (<= fixed overhead) to BudgetExceededError
+        # instead of relabelling it as INSUFFICIENT_EVIDENCE.
+        if (
+            isinstance(remaining, int)
+            and remaining > instruction_tokens + output_reserve
+            and remaining < context_window
+        ):
+            effective_window = remaining
+            budget_cap = remaining
+
+        evidence_budget = max(0, effective_window - output_reserve - instruction_tokens)
+        return (
+            context_window,
+            output_reserve,
+            instruction_tokens,
+            evidence_budget,
+            budget_cap,
+        )
+
+    def _select_bounded_sources(
+        self,
+        input_data: dict[str, Any],
+        academic_sources: dict[str, Any],
+        task: AgentTask | None,
+    ) -> BoundedSelectionResult:
+        (
+            context_window,
+            output_reserve,
+            instruction_tokens,
+            evidence_budget,
+            budget_cap,
+        ) = self._resolve_evidence_budget(input_data, task)
+        max_prompt_sources = int(
+            self.config.get("max_prompt_sources", DEFAULT_MAX_PROMPT_SOURCES)
+        )
+        result = select_bounded_sources(
+            academic_sources.get("sources") or [],
+            query=str(input_data.get("query") or ""),
+            evidence_budget_tokens=evidence_budget,
+            source_evidence=academic_sources.get("source_evidence"),
+            max_prompt_sources=max_prompt_sources,
+            year_start=input_data.get("year_start"),
+            year_end=input_data.get("year_end"),
+            context_window_tokens=context_window,
+            budget_cap_tokens=budget_cap,
+            output_reserve_tokens=output_reserve,
+            instruction_tokens=instruction_tokens,
+        )
+        diag = result.diagnostics
+        record_literature_selection(
+            retrieved_count=diag.retrieved_count,
+            eligible_count=diag.eligible_count,
+            deduped_count=diag.deduped_count,
+            selected_count=diag.selected_count,
+            truncated_count=diag.truncated_count,
+            omitted_count=diag.omitted_count,
+            context_window_tokens=diag.context_window_tokens,
+            budget_cap_tokens=diag.budget_cap_tokens,
+            output_reserve_tokens=diag.output_reserve_tokens,
+            instruction_tokens=diag.instruction_tokens,
+            evidence_budget_tokens=diag.evidence_budget_tokens,
+            evidence_tokens_used=diag.evidence_tokens_used,
+            reason_counts=diag.reason_counts,
+        )
+        return result
+
     async def _analyze_literature_with_gemini(
         self,
         input_data: dict[str, Any],
         academic_sources: dict[str, Any],
         task: AgentTask,
+        *,
+        selection: BoundedSelectionResult | None = None,
     ) -> dict[str, Any]:
-        """
-        Analyze literature using Gemini with real academic sources.
-
-        Args:
-            input_data: Original task input
-            academic_sources: Results from academic search
-            task: AgentTask for routing context
-
-        Returns:
-            Literature analysis from Gemini
-        """
+        """Analyze literature using Gemini with bounded, grounded academic sources."""
+        if selection is None:
+            selection = self._select_bounded_sources(input_data, academic_sources, task)
         enhanced_input = input_data.copy()
-        enhanced_input["found_sources"] = self._prepare_sources_for_analysis(
-            self._select_sources(academic_sources)
-        )
+        enhanced_input["found_sources"] = selection.rendered_sources
 
         prompt = generate_literature_agent_prompt(enhanced_input)
 
@@ -548,38 +710,13 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         return dict(result)
 
     def _select_sources(self, academic_sources: dict[str, Any]) -> list[dict[str, Any]]:
-        """Sources the analysis may use, each tagged with the ref it is cited by.
-
-        When the search recorded evidence, only sources that became evidence
-        qualify and the ref is the evidence id. Otherwise the ref is the
-        source's own identity (DOI, or a digest of its URL); a source with
-        neither cannot be cited and is dropped.
-        """
-        sources = academic_sources.get("sources") or []
-        recording = academic_sources.get("source_evidence") or {}
-        recorded = "recorded" in recording
-        evidence_by_index = {
-            outcome["index"]: outcome["evidence_id"]
-            for outcome in recording.get("sources", [])
-            if outcome.get("evidence_id")
-        }
-        selected = []
-        for index, source in enumerate(sources):
-            if recorded:
-                if index not in evidence_by_index:
-                    continue
-                length = len(source_text(source).encode())
-                selected.append(
-                    {
-                        **source,
-                        "ref": evidence_by_index[index],
-                        "evidence_id": evidence_by_index[index],
-                        "locator": locate("bytes", 0, length),
-                    }
-                )
-            elif ref := _source_ref(source):
-                selected.append({**source, "ref": ref})
-        return selected
+        """Eligible, deduplicated sources tagged with the ref each is cited by."""
+        return select_bounded_sources(
+            academic_sources.get("sources") or [],
+            query="",
+            evidence_budget_tokens=DEFAULT_CONTEXT_WINDOW_TOKENS,
+            source_evidence=academic_sources.get("source_evidence"),
+        ).eligible_sources
 
     def _failed_result(
         self,
@@ -587,6 +724,8 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         academic_sources: dict[str, Any],
         error_code: str,
         reason: str,
+        *,
+        selection_diagnostics: dict[str, Any] | None = None,
     ) -> AgentResult:
         """A failed result that carries what was retrieved and why it stopped."""
         self.log_warning(
@@ -595,28 +734,31 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         retrieved = (
             []
             if error_code == "INSUFFICIENT_EVIDENCE"
-            else self._rank_sources_by_relevance(academic_sources.get("sources", []))
+            else academic_sources.get("sources", [])
         )
+        output: dict[str, Any] = {
+            "error": f"{error_code}: {reason}",
+            "error_code": error_code,
+            "reason": reason,
+            "analysis_status": "no_evidence"
+            if error_code == "INSUFFICIENT_EVIDENCE"
+            else "analysis_failed",
+            "data_source": "no_evidence"
+            if error_code == "INSUFFICIENT_EVIDENCE"
+            else academic_sources.get("data_source"),
+            "sources_found": retrieved,
+            "total_sources": len(retrieved),
+            "key_findings": [],
+            "research_gaps": [],
+            "methodologies_used": [],
+            "source_evidence": academic_sources.get("source_evidence", {}),
+        }
+        if selection_diagnostics is not None:
+            output["selection_diagnostics"] = selection_diagnostics
         return AgentResult(
             task_id=task.id,
             status="failed",
-            output={
-                "error": f"{error_code}: {reason}",
-                "error_code": error_code,
-                "reason": reason,
-                "analysis_status": "no_evidence"
-                if error_code == "INSUFFICIENT_EVIDENCE"
-                else "analysis_failed",
-                "data_source": "no_evidence"
-                if error_code == "INSUFFICIENT_EVIDENCE"
-                else academic_sources.get("data_source"),
-                "sources_found": retrieved,
-                "total_sources": len(retrieved),
-                "key_findings": [],
-                "research_gaps": [],
-                "methodologies_used": [],
-                "source_evidence": academic_sources.get("source_evidence", {}),
-            },
+            output=output,
             confidence=0.0,
             execution_time=0.0,
             metadata=self.build_execution_metadata(task_type=task.agent_type),
@@ -731,38 +873,21 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         # Remove duplicates and return
         return list(set(databases))
 
-    def _prepare_sources_for_analysis(self, sources: list[dict[str, Any]]) -> str:
-        """Render sources as delimited blocks of escaped, single-line fields.
-
-        ponytail: whole abstracts, top 10 sources; fitting to a token budget is
-        the bounded-selection slice's job.
-        """
+    def _prepare_sources_for_analysis(
+        self,
+        sources: list[dict[str, Any]],
+        *,
+        query: str = "",
+        evidence_budget_tokens: int = DEFAULT_CONTEXT_WINDOW_TOKENS,
+    ) -> str:
+        """Render bounded, escaped source blocks with digests and byte locators."""
         if not sources:
             return "No sources found."
-
-        def field(value: Any) -> str:
-            # Collapsing whitespace stops a field forging a line of its own.
-            return escape_for_delimited_prompt(" ".join(str(value).split()))
-
-        blocks = []
-        for i, source in enumerate(sources[:10], 1):
-            lines = [f'<SOURCE index="{i}">']
-            lines.append(f"Title: {field(source.get('title', 'Unknown Title'))}")
-            if source.get("authors"):
-                lines.append(f"Authors: {field(', '.join(source['authors'][:3]))}")
-            if source.get("year"):
-                lines.append(f"Year: {field(source['year'])}")
-            lines.append(f"Ref: {field(source['ref'])}") if source.get("ref") else None
-            if source.get("evidence_id"):
-                lines.append(
-                    f"Evidence: {field(source['evidence_id'])} @ {field(source['locator'])}"
-                )
-            if source.get("abstract"):
-                lines.append(f"Abstract: {field(source['abstract'])}")
-            lines.append("</SOURCE>")
-            blocks.append("\n".join(lines))
-
-        return "\n\n".join(blocks)
+        return select_bounded_sources(
+            sources,
+            query=query,
+            evidence_budget_tokens=evidence_budget_tokens,
+        ).rendered_sources
 
     def _get_mcp_status(self) -> dict[str, Any]:
         """Get MCP integration status."""

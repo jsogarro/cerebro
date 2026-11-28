@@ -136,6 +136,11 @@ class BudgetLedger:
             "unknown_usage_calls": self.unknown_usage_calls,
         }
 
+    @property
+    def remaining_tokens(self) -> int:
+        """Unspent, unreserved token headroom left in this ledger."""
+        return max(0, self._max_tokens - self.tokens_used - self._reserved_tokens)
+
     def ensure_not_exceeded(self) -> None:
         if self.exceeded is not None:
             raise self.exceeded

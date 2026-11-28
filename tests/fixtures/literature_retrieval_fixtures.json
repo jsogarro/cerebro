@@ -1,0 +1,229 @@
+{
+  "version": "1.0.0",
+  "description": "Retrieval-only selection fixtures covering exact IDs, conceptual queries, duplicates, late answer spans, and year constraints.",
+  "cases": [
+    {
+      "id": "exact_id_doi_lookup",
+      "category": "exact_id",
+      "query": "Find results for 10.1038/s41586-024-07777-x on battery degradation",
+      "year_start": null,
+      "year_end": null,
+      "evidence_budget_tokens": 4000,
+      "max_prompt_sources": 10,
+      "sources": [
+        {
+          "id": "2401.99999",
+          "source": "arxiv",
+          "title": "Battery Degradation Survey Across Cathode Chemistries",
+          "abstract": "A broad overview of lithium battery degradation across multiple cathode materials and thermal cycles.",
+          "year": 2024,
+          "url": "https://arxiv.org/abs/2401.99999",
+          "doi": "10.48550/arXiv.2401.99999"
+        },
+        {
+          "id": "s2-target-1",
+          "source": "semantic_scholar",
+          "title": "Electrolyte Additive Screening",
+          "abstract": "Experimental cell longevity benchmark showing 4100 cycles before 80 percent capacity retention.",
+          "year": 2024,
+          "url": "https://www.semanticscholar.org/paper/s2-target-1",
+          "doi": "10.1038/S41586-024-07777-X"
+        }
+      ],
+      "expected": {
+        "top_ref": "doi:10.1038/s41586-024-07777-x",
+        "deduped_count": 2,
+        "selected_count": 2,
+        "must_survive_spans": ["4100 cycles before 80 percent capacity retention"]
+      }
+    },
+    {
+      "id": "conceptual_query_reranks_over_provider_order",
+      "category": "conceptual_query",
+      "query": "conformal prediction coverage under covariate shift",
+      "year_start": null,
+      "year_end": null,
+      "evidence_budget_tokens": 4000,
+      "max_prompt_sources": 10,
+      "sources": [
+        {
+          "id": "2401.00010",
+          "source": "arxiv",
+          "title": "General Neural Optimization Tricks",
+          "abstract": "We review momentum schedules and learning rate warmup for image classification tasks.",
+          "year": 2024,
+          "url": "https://arxiv.org/abs/2401.00010",
+          "doi": "10.1000/unrelated-1"
+        },
+        {
+          "id": "2402.00020",
+          "source": "arxiv",
+          "title": "Weighted Conformal Prediction Under Covariate Shift",
+          "abstract": "Likelihood-ratio weighting restores finite-sample marginal coverage guarantees for conformal prediction under covariate shift.",
+          "year": 2024,
+          "url": "https://arxiv.org/abs/2402.00020",
+          "doi": "10.1000/conformal-1"
+        },
+        {
+          "id": "2403.00030",
+          "source": "pubmed",
+          "title": "Clinical Prediction Intervals",
+          "abstract": "Prediction calibration in hospital triage cohorts with seasonal drift.",
+          "year": 2023,
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38000030/",
+          "doi": "10.1000/partial-1"
+        }
+      ],
+      "expected": {
+        "top_ref": "doi:10.1000/conformal-1",
+        "deduped_count": 3,
+        "selected_count": 3,
+        "must_survive_spans": ["finite-sample marginal coverage guarantees"]
+      }
+    },
+    {
+      "id": "cross_provider_duplicates_collapsed_with_provenance",
+      "category": "duplicates",
+      "query": "graph neural networks inflation forecasting",
+      "year_start": null,
+      "year_end": null,
+      "evidence_budget_tokens": 4000,
+      "max_prompt_sources": 10,
+      "sources": [
+        {
+          "id": "2401.00001v1",
+          "source": "arxiv",
+          "title": "Graph Neural Networks for Inflation Forecasting",
+          "abstract": "Short summary.",
+          "year": 2024,
+          "url": "http://arxiv.org/abs/2401.00001v1",
+          "doi": "https://doi.org/10.1000/GNN.INFLATION"
+        },
+        {
+          "id": "s2-gnn-1",
+          "source": "semantic_scholar",
+          "title": "Graph Neural Networks for Inflation Forecasting",
+          "abstract": "Graph neural networks reduce core inflation forecasting RMSE by 18.4 percent over autoregressive baselines.",
+          "year": 2024,
+          "url": "https://www.semanticscholar.org/paper/s2-gnn-1",
+          "doi": "10.1000/gnn.inflation"
+        },
+        {
+          "id": "2401.00001v2",
+          "source": "arxiv",
+          "title": "Graph Neural Networks for Inflation Forecasting",
+          "abstract": "Revised arXiv mirror.",
+          "year": 2024,
+          "url": "https://arxiv.org/abs/2401.00001v2"
+        },
+        {
+          "id": "pm-900",
+          "source": "pubmed",
+          "title": "Supply Chain Price Dynamics",
+          "abstract": "Empirical study of regional price transmission across logistics hubs.",
+          "year": 2023,
+          "url": "https://pubmed.ncbi.nlm.nih.gov/900/"
+        },
+        {
+          "id": "s2-pm-900",
+          "source": "semantic_scholar",
+          "title": "Supply Chain Price Dynamics",
+          "abstract": "Empirical study of regional price transmission across logistics hubs.",
+          "year": 2023,
+          "url": "https://pubmed.ncbi.nlm.nih.gov/900"
+        }
+      ],
+      "expected": {
+        "top_ref": "doi:10.1000/gnn.inflation",
+        "deduped_count": 2,
+        "selected_count": 2,
+        "duplicate_count": 3,
+        "must_survive_spans": ["RMSE by 18.4 percent over autoregressive baselines"]
+      }
+    },
+    {
+      "id": "late_answer_span_survives_under_tight_budget",
+      "category": "late_answer_span",
+      "query": "perovskite tandem efficiency stabilization threshold",
+      "year_start": null,
+      "year_end": null,
+      "evidence_budget_tokens": 160,
+      "max_prompt_sources": 10,
+      "sources": [
+        {
+          "id": "2405.11111",
+          "source": "arxiv",
+          "title": "Long-Term Durability in Silicon-Perovskite Modules",
+          "abstract": "Background motivation about solar adoption and manufacturing throughput across residential rooftops. Standard encapsulation materials vary widely across commercial suppliers and regional climates. Early laboratory prototypes often differed in substrate cleaning protocols and annealing chambers. Outdoor testing campaigns require consistent irradiance calibration over multiple seasons. After 1200 hours of damp-heat exposure, the perovskite tandem efficiency stabilization threshold reached 29.8 percent using fluorinated passivators.",
+          "year": 2024,
+          "url": "https://arxiv.org/abs/2405.11111",
+          "doi": "10.1000/perovskite-late"
+        }
+      ],
+      "expected": {
+        "top_ref": "doi:10.1000/perovskite-late",
+        "deduped_count": 1,
+        "selected_count": 1,
+        "truncated_count": 1,
+        "must_survive_spans": ["stabilization threshold reached 29.8 percent"]
+      }
+    },
+    {
+      "id": "year_constraints_filter_out_of_range_and_unknown_year",
+      "category": "year_constraints",
+      "query": "CRISPR prime editing off-target detection",
+      "year_start": 2022,
+      "year_end": 2024,
+      "evidence_budget_tokens": 4000,
+      "max_prompt_sources": 10,
+      "sources": [
+        {
+          "id": "pm-old",
+          "source": "pubmed",
+          "title": "Early CRISPR Off-Target Detection",
+          "abstract": "Legacy 2019 off-target profiling study.",
+          "year": 2019,
+          "url": "https://pubmed.ncbi.nlm.nih.gov/1001/",
+          "doi": "10.1000/crispr-2019"
+        },
+        {
+          "id": "pm-unknown",
+          "source": "pubmed",
+          "title": "Undated Prime Editing Note",
+          "abstract": "CRISPR prime editing off-target detection without publication year.",
+          "year": null,
+          "url": "https://pubmed.ncbi.nlm.nih.gov/1002/",
+          "doi": "10.1000/crispr-nd"
+        },
+        {
+          "id": "pm-inrange",
+          "source": "pubmed",
+          "title": "Genome-Wide Prime Editing Off-Target Detection",
+          "abstract": "Sensitive genome-wide CRISPR prime editing off-target detection with 0.02 percent false discovery rate.",
+          "year": 2023,
+          "url": "https://pubmed.ncbi.nlm.nih.gov/1003/",
+          "doi": "10.1000/crispr-2023"
+        },
+        {
+          "id": "pm-future",
+          "source": "pubmed",
+          "title": "2025 Prime Editing Follow-Up",
+          "abstract": "Out-of-upper-bound CRISPR prime editing off-target study.",
+          "year": 2025,
+          "url": "https://pubmed.ncbi.nlm.nih.gov/1004/",
+          "doi": "10.1000/crispr-2025"
+        }
+      ],
+      "expected": {
+        "top_ref": "doi:10.1000/crispr-2023",
+        "deduped_count": 1,
+        "selected_count": 1,
+        "omitted_reasons": {
+          "out_of_year_range": 2,
+          "unknown_year": 1
+        },
+        "must_survive_spans": ["0.02 percent false discovery rate"]
+      }
+    }
+  ]
+}
