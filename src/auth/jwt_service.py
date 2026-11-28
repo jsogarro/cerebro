@@ -259,6 +259,7 @@ class JWTService:
         device_id: str | None = None,
         organization_id: str | None = None,
         additional_claims: dict[str, Any] | None = None,
+        mfa_verified: bool = False,
     ) -> TokenPair:
         """
         Generate access and refresh token pair.
@@ -271,6 +272,8 @@ class JWTService:
             device_id: Device fingerprint
             organization_id: Tenant organization identifier
             additional_claims: Additional JWT claims
+            mfa_verified: Whether this session passed a second factor; carried
+                on both tokens so a refresh keeps it
 
         Returns:
             TokenPair with access and refresh tokens
@@ -291,6 +294,7 @@ class JWTService:
             "jti": jti,
             "iat": now,
             "device_id": device_id,
+            "mfa": mfa_verified,
         }
 
         if additional_claims:
@@ -319,6 +323,7 @@ class JWTService:
             "device_id": device_id,
             "organization_id": organization_id,
             "iat_ns": issued_at_ns,
+            "mfa": mfa_verified,
         }
 
         # Generate tokens
@@ -472,6 +477,7 @@ class JWTService:
                 iat=datetime.fromtimestamp(payload["iat"], tz=UTC),
                 exp=datetime.fromtimestamp(payload["exp"], tz=UTC),
                 device_id=payload.get("device_id"),
+                mfa=bool(payload.get("mfa", False)),
             )
 
         except JWTServiceUnavailableError:
@@ -538,6 +544,7 @@ class JWTService:
             permissions=identity.permissions,
             device_id=device_id or refresh_payload.device_id,
             organization_id=identity.organization_id,
+            mfa_verified=refresh_payload.mfa,
         )
 
     async def revoke_token(self, token: str) -> bool:

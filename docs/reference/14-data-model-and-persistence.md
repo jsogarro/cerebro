@@ -41,7 +41,7 @@ The persistence layer is SQLAlchemy 2.1 over an async engine (`asyncpg` on Postg
 
 `BaseModel` also provides `is_deleted`, `soft_delete()`, `restore()` and `to_dict()`.
 
-Fourteen tables extend `Base` directly and carry their own columns:
+Fifteen tables extend `Base` directly and carry their own columns:
 
 | Table | Primary key | Append-only |
 |---|---|---|
@@ -59,6 +59,7 @@ Fourteen tables extend `Base` directly and carry their own columns:
 | `similarity_matches` | `id`, `PortableUUID` | no |
 | `egress_events` | `id`, `PortableUUID` | no |
 | `agent_evaluation_results` | `id`, `PortableUUID` | yes |
+| `mfa_recovery_codes` | `id`, `PortableUUID` | no |
 
 The other 21 tables extend `BaseModel`, so they have soft deletion. `generated_reports` and `report_formats` redeclare `id` as `postgresql.UUID(as_uuid=True)` with `uuid4` as the default instead of `PortableUUID`.
 
@@ -66,11 +67,12 @@ The other 21 tables extend `BaseModel`, so they have soft deletion. `generated_r
 
 ## Tables
 
-The models declare 34 tables.
+The models declare 36 tables.
 
 | Table | Model class | Module | Tenant column | RLS policy | Append-only | Owner subsystem |
 |---|---|---|---|---|---|---|
 | `users` | `User` | `user.py` | `organization_id`, nullable | no | no | authentication |
+| `mfa_recovery_codes` | `MfaRecoveryCode` | `user.py` | none (cascades from `users`) | no | no | authentication (TOTP MFA) |
 | `oauth_accounts` | `OAuthAccount` | `oauth_account.py` | none | no | no | authentication |
 | `audit_logs` | `AuditLog` | `audit_log.py` | none | no | no | security and audit |
 | `security_alerts` | `SecurityAlert` | `security_alert.py` | none | no | no | security and audit |
@@ -234,6 +236,7 @@ Alembic scripts are in `alembic/versions/`; `alembic/env.py` reads `DATABASE_URL
 | `c4d7a2e9f1b6` | `model_call_reservations` with its CHECKs, unique call id per organization and tenant policy |
 | `f1c8a4d7e2b6` | `NULLIF` tenant policies, `FORCE ROW LEVEL SECURITY`, `cerebro_maint` policies and grants |
 | `d5a1c8e2b7f3` | `owner_instance_id`, `lease_expires_at` and `fencing_token` on `agent_runs`, with a non-negative token CHECK, a CHECK that owner and expiry are both set or both null, and an index on the expiry |
+| `c9d4a7e2b6f1` | `users.totp_secret_enc`, `totp_enabled`, `totp_last_step`; `mfa_recovery_codes` |
 
 Migrations that create row-level security or triggers do so inside an `_is_postgresql()` guard; on another dialect they create tables and indexes only.
 

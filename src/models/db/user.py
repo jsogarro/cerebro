@@ -9,11 +9,22 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from passlib.context import CryptContext
-from sqlalchemy import Boolean, DateTime, Index, Integer, String, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.db.base import UUID as DBUUID
-from src.models.db.base import BaseModel
+from src.models.db.base import Base, BaseModel
 
 if TYPE_CHECKING:
     pass
@@ -65,6 +76,16 @@ class User(BaseModel):
     is_superuser: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # TOTP second factor. The secret is Fernet-encrypted; ``totp_last_step`` is
+    # the newest accepted time step, which is what makes a code single use.
+    totp_secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    totp_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
+    totp_last_step: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     # Activity tracking
     last_login: Mapped[datetime | None] = mapped_column(
@@ -245,3 +266,27 @@ class User(BaseModel):
     def __repr__(self) -> str:
         """String representation."""
         return f"<User(id={self.id}, username='{self.username}', email='{self.email}')>"
+
+
+class MfaRecoveryCode(Base):
+    """One single-use recovery code; only its hash is stored."""
+
+    __tablename__ = "mfa_recovery_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        DBUUID(), primary_key=True, default=uuid.uuid4
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        DBUUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "code_hash", name="uq_mfa_recovery_user_code"),
+    )

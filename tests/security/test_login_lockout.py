@@ -33,6 +33,7 @@ class _User:
     is_active = True
     is_verified = True
     is_superuser = False
+    totp_enabled = False
     id = uuid.UUID("00000000-0000-0000-0000-000000000001")
     email = "real@example.com"
     username = "real"
