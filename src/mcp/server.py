@@ -98,25 +98,6 @@ class _AuditIdentity:
     organization_id: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class _CallerIdentity:
-    """Verified caller identity with a non-null tenant context."""
-
-    tenant: TenantContext
-    request: Any
-    pat_id: str | None
-    scopes: tuple[str, ...] = ()
-
-    def to_audit(self) -> _AuditIdentity:
-        return _AuditIdentity(
-            request=self.request,
-            pat_id=self.pat_id,
-            scopes=self.scopes,
-            user_id=self.tenant.user_id,
-            organization_id=self.tenant.organization_id,
-        )
-
-
 class _CallerAuthError(ToolError):
     """Auth/scope denial that retains resolved caller identity for audit."""
 
@@ -125,7 +106,7 @@ class _CallerAuthError(ToolError):
         self.audit_identity = audit_identity
 
 
-def _caller(*, required_scope: str) -> _CallerIdentity:
+def _caller(*, required_scope: str) -> tuple[TenantContext, _AuditIdentity]:
     """Resolve authenticated tenant context and enforce PAT scope.
 
     ``required_scope`` has no default so a tool cannot omit it and fail open.
@@ -165,11 +146,12 @@ def _caller(*, required_scope: str) -> _CallerIdentity:
         ) from exc
 
     tenant = TenantContext(user_id=payload.sub, organization_id=organization_id)
-    identity = _CallerIdentity(
-        tenant=tenant,
+    audit_identity = _AuditIdentity(
         request=request,
         pat_id=pat_id,
         scopes=scopes,
+        user_id=tenant.user_id,
+        organization_id=tenant.organization_id,
     )
 
     if isinstance(payload, PersonalAccessTokenPayload) and not payload.has_scope(
@@ -177,10 +159,10 @@ def _caller(*, required_scope: str) -> _CallerIdentity:
     ):
         raise _CallerAuthError(
             f"Personal access token missing required scope: {required_scope}",
-            audit_identity=identity.to_audit(),
+            audit_identity=audit_identity,
         )
 
-    return identity
+    return tenant, audit_identity
 
 
 def _resolve_authority_resolver(
@@ -250,12 +232,11 @@ def build_mcp_server(
         """Get the status and progress of a research execution."""
         audit_caller: _AuditIdentity | None = None
         try:
-            caller = _caller(required_scope=PAT_SCOPE_READ)
-            audit_caller = caller.to_audit()
+            tenant, audit_caller = _caller(required_scope=PAT_SCOPE_READ)
             exec_status = await get_kernel_execution_status(
                 kernel,
                 execution_id,
-                organization_id=caller.tenant.organization_id,
+                organization_id=tenant.organization_id,
             )
             if not exec_status:
                 raise ToolError(f"Execution {execution_id} not found")
@@ -287,12 +268,11 @@ def build_mcp_server(
         """Get completed research results with trust labels and claim verdicts."""
         audit_caller: _AuditIdentity | None = None
         try:
-            caller = _caller(required_scope=PAT_SCOPE_READ)
-            audit_caller = caller.to_audit()
+            tenant, audit_caller = _caller(required_scope=PAT_SCOPE_READ)
             payload = await build_research_results_payload(
                 kernel,
                 execution_id,
-                organization_id=caller.tenant.organization_id,
+                organization_id=tenant.organization_id,
                 session_factory=session_factory,
             )
             if payload is None:
@@ -328,15 +308,14 @@ def build_mcp_server(
         """List metadata-only evidence records for a research run."""
         audit_caller: _AuditIdentity | None = None
         try:
-            caller = _caller(required_scope=PAT_SCOPE_READ)
-            audit_caller = caller.to_audit()
+            tenant, audit_caller = _caller(required_scope=PAT_SCOPE_READ)
             if session_factory is None:
                 raise ToolError("Evidence storage is unavailable")
             try:
                 page = await list_run_evidence_with_factory(
                     session_factory,
                     run_id,
-                    organization_id=caller.tenant.organization_id,
+                    organization_id=tenant.organization_id,
                     cursor=cursor,
                     limit=limit,
                 )
@@ -396,8 +375,7 @@ def build_mcp_server(
             )
 
         try:
-            caller = _caller(required_scope=PAT_SCOPE_START)
-            audit_caller = caller.to_audit()
+            tenant, audit_caller = _caller(required_scope=PAT_SCOPE_START)
             try:
                 validated = StartResearchInput.model_validate(
                     {
@@ -417,8 +395,8 @@ def build_mcp_server(
                     authority_id=validated.template_authority_id,
                     authority_version=validated.template_authority_version,
                 ),
-                organization_id=caller.tenant.organization_id,
-                user_id=caller.tenant.user_id,
+                organization_id=tenant.organization_id,
+                user_id=tenant.user_id,
                 request_id=validated.request_id,
             )
             audit_extra["authority_id"] = minted.authority_id
@@ -426,7 +404,7 @@ def build_mcp_server(
 
             start_result = await start_intelligent_research(
                 kernel,
-                tenant=caller.tenant,
+                tenant=tenant,
                 query=validated.query,
                 domains=validated.domains,
                 authority_reference=ExecutionAuthorityReference(

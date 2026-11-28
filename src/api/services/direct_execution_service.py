@@ -2841,13 +2841,8 @@ class DirectExecutionService:
                 run_id, organization_id=binding.run.tenant_id
             )
             if execution_id is not None:
-                rehydrated = self.active_executions.get(execution_id)
-                if rehydrated is None:
-                    raise RunParamsConflictError(
-                        "replayed run parameters could not be verified"
-                    )
                 self._check_replay_params(
-                    rehydrated,
+                    self.active_executions.get(execution_id),
                     expected_query_sha256=expected_query_sha256,
                     expected_domains=expected_domains,
                 )
@@ -2874,13 +2869,13 @@ class DirectExecutionService:
 
     @staticmethod
     def _check_replay_params(
-        execution_status: ExecutionStatus,
+        execution_status: ExecutionStatus | None,
         *,
         expected_query_sha256: str,
         expected_domains: list[str],
     ) -> None:
         """Fail closed when a replay carries different query or domains."""
-        task = execution_status._task
+        task = execution_status._task if execution_status is not None else None
         if task is None or not isinstance(task.input, Mapping):
             raise RunParamsConflictError(
                 "replayed run parameters could not be verified"
@@ -3075,13 +3070,8 @@ class DirectExecutionService:
             # was started for it here — no task row, no attempt row, no
             # background workflow task — so there is nothing to unwind;
             # verify the winning run's parameters match before coalescing.
-            winner = self.active_executions.get(exc.execution_id)
-            if winner is None:
-                raise RunParamsConflictError(
-                    "replayed run parameters could not be verified"
-                ) from exc
             self._check_replay_params(
-                winner,
+                self.active_executions.get(exc.execution_id),
                 expected_query_sha256=research_query_sha256(project.query.text),
                 expected_domains=normalize_research_domains(project.query.domains),
             )

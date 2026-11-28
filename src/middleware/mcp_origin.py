@@ -55,20 +55,9 @@ def is_allowed_mcp_origin(origin: str, cors_origins: Sequence[str]) -> bool:
     parsed = _parse_origin(origin)
     if parsed is None:
         return False
-    scheme, host, _port = parsed
-    if scheme in _DEFAULT_PORTS and host in _LOOPBACK_HOSTS:
+    if parsed[1] in _LOOPBACK_HOSTS:
         return True
-    for configured in cors_origins:
-        if configured == "*":
-            continue
-        allowed = _parse_origin(configured)
-        if allowed is not None and allowed == parsed:
-            return True
-    return False
-
-
-def _is_mcp_path(path: str) -> bool:
-    return path == "/mcp" or path.startswith("/mcp/")
+    return any(_parse_origin(c) == parsed for c in cors_origins)
 
 
 class McpOriginMiddleware(BaseHTTPMiddleware):
@@ -79,7 +68,8 @@ class McpOriginMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        if _is_mcp_path(request.url.path):
+        path = request.url.path
+        if path == "/mcp" or path.startswith("/mcp/"):
             origins = request.headers.getlist("origin")
             if len(origins) > 1 or (
                 len(origins) == 1
