@@ -79,6 +79,24 @@ outbox_dead_lettered_total = Counter(
     "Outbox rows that exhausted their delivery attempts",
 )
 
+literature_selection_sources_total = Counter(
+    "cerebro_literature_selection_sources_total",
+    "Literature sources processed by selection outcome",
+    ["outcome"],
+)
+
+literature_selection_reasons_total = Counter(
+    "cerebro_literature_selection_reasons_total",
+    "Low-cardinality reasons for literature source omission, dedupe, or truncation",
+    ["reason"],
+)
+
+literature_selection_tokens_total = Counter(
+    "cerebro_literature_selection_tokens_total",
+    "Estimated prompt tokens allocated during literature selection",
+    ["category"],
+)
+
 
 @dataclass(frozen=True)
 class LLMCallMetrics:
@@ -228,4 +246,59 @@ def record_llm_call(metrics: LLMCallMetrics) -> None:
         cost_usd=metrics.cost_usd,
         request_id=metrics.request_id,
         success=metrics.success,
+    )
+
+
+def record_literature_selection(
+    *,
+    retrieved_count: int,
+    eligible_count: int,
+    deduped_count: int,
+    selected_count: int,
+    truncated_count: int,
+    omitted_count: int,
+    context_window_tokens: int,
+    output_reserve_tokens: int,
+    instruction_tokens: int,
+    evidence_budget_tokens: int,
+    evidence_tokens_used: int,
+    reason_counts: dict[str, int],
+) -> None:
+    """Record body-free literature selection counters and structured diagnostics."""
+    for outcome, count in (
+        ("retrieved", retrieved_count),
+        ("deduped", deduped_count),
+        ("included", selected_count),
+        ("truncated", truncated_count),
+        ("omitted", omitted_count),
+    ):
+        if count > 0:
+            literature_selection_sources_total.labels(outcome=outcome).inc(count)
+
+    for reason, count in reason_counts.items():
+        if count > 0:
+            literature_selection_reasons_total.labels(reason=reason).inc(count)
+
+    for category, tokens in (
+        ("instructions", instruction_tokens),
+        ("evidence", evidence_tokens_used),
+        ("budget", evidence_budget_tokens),
+    ):
+        if tokens > 0:
+            literature_selection_tokens_total.labels(category=category).inc(tokens)
+
+    logger.info(
+        "literature_selection_completed",
+        retrieved_count=retrieved_count,
+        eligible_count=eligible_count,
+        deduped_count=deduped_count,
+        selected_count=selected_count,
+        truncated_count=truncated_count,
+        omitted_count=omitted_count,
+        context_window_tokens=context_window_tokens,
+        output_reserve_tokens=output_reserve_tokens,
+        instruction_tokens=instruction_tokens,
+        evidence_budget_tokens=evidence_budget_tokens,
+        evidence_tokens_used=evidence_tokens_used,
+        reason_counts=dict(reason_counts),
     )
