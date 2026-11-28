@@ -624,29 +624,6 @@ class DirectExecutionService:
             "concurrent_executions": 0,
         }
 
-    @asynccontextmanager
-    async def _tenant_session(
-        self, organization_id: str | uuid.UUID | None
-    ) -> AsyncIterator[Any]:
-        """Open a session whose every transaction sets Postgres RLS tenant context.
-
-        Delegates to ``src.models.db.session.tenant_session`` so multi-transaction
-        sessions (such as lease renewal followed by cancellation polling) retain
-        ``app.current_org_id`` after each commit. Falls back to the raw session
-        when ``organization_id`` is ``None`` or a test mock lacks ``sync_session``.
-        """
-        assert self.session_factory is not None
-        async with self.session_factory() as session:
-            if organization_id is None or not hasattr(session, "sync_session"):
-                yield session
-                return
-
-            def _borrow() -> Any:
-                return nullcontext(session)
-
-            async with tenant_session(_borrow, organization_id) as scoped:
-                yield scoped
-
     @property
     def supervisor_registry(self) -> TypedRegistry:
         """Retain the legacy name as a read-only view of the kernel catalog."""
