@@ -13,9 +13,10 @@ import re
 import secrets
 import time
 from datetime import UTC, datetime
+from typing import Any, cast
 
 import pyotp
-from sqlalchemy import select, update
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
@@ -128,7 +129,7 @@ async def consume_totp(db: AsyncSession, user: User, code: str) -> bool:
         .where((User.totp_last_step.is_(None)) | (User.totp_last_step < step))
         .values(totp_last_step=step)
     )
-    return claimed.rowcount == 1
+    return cast(CursorResult[Any], claimed).rowcount == 1
 
 
 async def consume_recovery_code(db: AsyncSession, user: User, code: str) -> bool:
@@ -139,7 +140,7 @@ async def consume_recovery_code(db: AsyncSession, user: User, code: str) -> bool
         .where(MfaRecoveryCode.used_at.is_(None))
         .values(used_at=datetime.now(UTC))
     )
-    return claimed.rowcount == 1
+    return cast(CursorResult[Any], claimed).rowcount == 1
 
 
 async def verify_second_factor(db: AsyncSession, user: User, code: str) -> bool:
