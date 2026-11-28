@@ -65,6 +65,7 @@ from src.repositories.evidence_repository import EvidenceRepository
 from src.repositories.tenant_scope import normalize_organization_id
 
 from .fetch_tool import SOURCE_FETCH_TOOL, SourceFetchOutput
+from .pdf_text import ExtractedText, PageSpan, build_extracted_text_artifact
 from .resolution import locate, resolve
 from .snapshots import SnapshotIntegrityError, SnapshotNotFoundError, SnapshotStore
 from .sources import SourceType, trust_for_source
@@ -165,6 +166,7 @@ class AcquisitionOutcome:
     status: AcquisitionStatus
     invocation: ToolInvocation
     artifact: Artifact | None = None
+    extracted_text_artifact: Artifact | None = None
     evidence: tuple[Evidence, ...] = ()
     absent_evidence_reason: AbsentEvidenceReason | None = None
     detail: str | None = None
@@ -185,7 +187,12 @@ class AcquisitionOutcome:
                 "an unavailable outcome names why, so a claim resting on it can "
                 "cite a typed reason rather than an absence"
             )
-        if self.artifact is not None or self.evidence or self.excerpts:
+        if (
+            self.artifact is not None
+            or self.extracted_text_artifact is not None
+            or self.evidence
+            or self.excerpts
+        ):
             raise ValueError(
                 "an unavailable outcome carries no artifact, evidence, or "
                 "excerpt; a failure with a body is how a fabricated source "
@@ -419,6 +426,58 @@ class SourceAcquisitionService:
             )
 
         now = self._clock()
+        extracted_text_artifact: Artifact | None = None
+        if (
+            handle.extracted_text_storage_uri is not None
+            and handle.extracted_text_sha256 is not None
+        ):
+            try:
+                extracted_bytes = self._store.get(handle.extracted_text_storage_uri)
+            except (SnapshotNotFoundError, SnapshotIntegrityError) as error:
+                return _unavailable(
+                    outcome,
+                    reason=AbsentEvidenceReason.SOURCE_INACCESSIBLE,
+                    detail=str(error),
+                )
+            if snapshot_digest(extracted_bytes) != handle.extracted_text_sha256:
+                return _unavailable(
+                    outcome,
+                    reason=AbsentEvidenceReason.SOURCE_INACCESSIBLE,
+                    detail=(
+                        "the acquisition tool reported an extracted text digest the "
+                        "snapshot store does not hold"
+                    ),
+                )
+            extracted_text = extracted_bytes.decode("utf-8")
+            raw_pages = handle.extracted_pages or [
+                {"page": 1, "start": 0, "end": len(extracted_text)}
+            ]
+            pages = tuple(
+                PageSpan(
+                    page=int(entry["page"]),
+                    start=int(entry["start"]),
+                    end=int(entry["end"]),
+                )
+                for entry in raw_pages
+            )
+            extracted_text_artifact = build_extracted_text_artifact(
+                ExtractedText(
+                    text=extracted_text,
+                    pages=pages,
+                    text_sha256=handle.extracted_text_sha256,
+                    source_sha256=handle.content_sha256,
+                ),
+                store=self._store,
+                artifact_id=self._id_factory(),
+                run_id=run_id,
+                task_id=task_id,
+                attempt_id=attempt_id,
+                created_at=now,
+                content_kind=handle.content_kind or "full_text",
+                source_uri=handle.final_uri,
+                locator=handle.extracted_text_locator,
+            )
+
         artifact = Artifact(
             artifact_id=self._id_factory(),
             run_id=run_id,
@@ -445,6 +504,10 @@ class SourceAcquisitionService:
             ),
         )
         await self._artifacts.create_artifact(artifact, organization_id=organization_id)
+        if extracted_text_artifact is not None:
+            await self._artifacts.create_artifact(
+                extracted_text_artifact, organization_id=organization_id
+            )
 
         recorded: list[Evidence] = []
         for locator, _ in located:
@@ -494,6 +557,7 @@ class SourceAcquisitionService:
             status=AcquisitionStatus.ACQUIRED,
             invocation=outcome.invocation,
             artifact=artifact,
+            extracted_text_artifact=extracted_text_artifact,
             evidence=tuple(recorded),
             excerpts=tuple(excerpt for _, excerpt in located),
         )
@@ -699,6 +763,12 @@ class SourceAcquisitionService:
             "tool_name": invocation.tool_name,
             "tool_version": invocation.tool_version,
         }
+        if handle.content_kind is not None:
+            raw["content_kind"] = handle.content_kind
+        if handle.extracted_text_sha256 is not None:
+            raw["extracted_text_sha256"] = handle.extracted_text_sha256
+        if handle.extracted_text_locator is not None:
+            raw["extracted_text_locator"] = handle.extracted_text_locator
         return _redacted_metadata(raw, self._secret_provider)
 
 

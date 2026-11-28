@@ -1,4 +1,4 @@
-"""The acquisition tool, and why raw source bytes never cross the boundary.
+"""The acquisition tool, SSRF-hardened HTTP fetcher, and PDF full-text extraction.
 
 There is a genuine tension between two frozen rules, and this module is where
 it is resolved. ``snapshot_digest`` must hash **verbatim, unredacted** bytes,
@@ -18,36 +18,170 @@ then reads the bytes back out of the store and re-checks them against the
 digest the tool reported, so a handler that lies about what it stored is caught
 by the next step rather than trusted.
 
-This also keeps the whole call under the boundary's guarantees — capability
-authorization, deadline, cancellation, circuit breaking, idempotency, and a
-durable audit record written before anything is published — which is the
-requirement that all acquisition go through one mediated path.
+When the fetched content is a PDF (``application/pdf`` or ``%PDF-`` header),
+the handler extracts full text through the sandboxed PDF extractor, stores the
+normalized text via :func:`~src.core.acquisition.pdf_text.build_extracted_text_artifact`
+tagged as ``full_text``, and includes its digest, storage URI, and canonical
+locator on the returned handle.
 """
 
-from collections.abc import Awaitable, Callable
+from __future__ import annotations
+
+import asyncio
+import ipaddress
+import socket
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Final, cast, final
 
-from pydantic import BaseModel, Field
+import httpx
+from pydantic import BaseModel, ConfigDict, Field
 
+from src.core.acquisition.pdf_text import (
+    ExtractedText,
+    build_extracted_text_artifact,
+)
+from src.core.acquisition.resolution import locate
 from src.core.contracts.capabilities import SensitivityClass
 from src.core.contracts.redaction import SecretRef, snapshot_digest
+from src.core.tools.outbound import (
+    SOURCE_FETCH_OUTBOUND_HOSTS,
+    OutboundHostNotAllowedError,
+    require_allowed_outbound_host,
+)
 from src.core.tools.spec import ToolCallContext, ToolSpec
 
 from .snapshots import SnapshotStore
 from .sources import LicenseDeclaration, SourceLicense, SourceType
 
 __all__ = [
+    "DEFAULT_MAX_FETCH_BYTES",
+    "DEFAULT_MAX_REDIRECTS",
     "SOURCE_FETCH_TOOL",
+    "DnsResolver",
     "FetchedSource",
+    "HardenedHttpFetcher",
+    "PdfExtractor",
+    "SSRFBlockedError",
     "SourceFetchInput",
     "SourceFetchOutput",
     "SourceFetcher",
+    "hardened_source_fetch_tool",
+    "is_disallowed_ip",
     "snapshot_fetch_tool",
+    "validate_fetch_target",
 ]
 
 SOURCE_FETCH_TOOL: Final[str] = "source.fetch"
 """The registered name of the acquisition tool."""
+
+DEFAULT_MAX_REDIRECTS: Final[int] = 5
+DEFAULT_MAX_FETCH_BYTES: Final[int] = 25 * 1024 * 1024
+_REDIRECT_STATUS_CODES: Final[frozenset[int]] = frozenset({301, 302, 303, 307, 308})
+_METADATA_NETWORKS: Final[tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]] = (
+    ipaddress.ip_network("169.254.169.254/32"),
+    ipaddress.ip_network("fd00:ec2::254/128"),
+    ipaddress.ip_network("100.100.100.200/32"),
+)
+
+
+class SSRFBlockedError(OutboundHostNotAllowedError):
+    """Raised when a fetch target violates SSRF, IP, redirect, or host policy."""
+
+
+DnsResolver = Callable[[str, int], Awaitable[Sequence[str]]]
+PdfExtractor = Callable[[bytes], Awaitable[tuple[ExtractedText, int]]]
+
+
+def is_disallowed_ip(address: str) -> bool:
+    """Return True if ``address`` is private, loopback, link-local, metadata, or non-global."""
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError:
+        return True
+    if isinstance(parsed, ipaddress.IPv6Address) and parsed.ipv4_mapped is not None:
+        parsed = parsed.ipv4_mapped
+    if (
+        parsed.is_private
+        or parsed.is_loopback
+        or parsed.is_link_local
+        or parsed.is_multicast
+        or parsed.is_reserved
+        or parsed.is_unspecified
+        or not parsed.is_global
+    ):
+        return True
+    return any(parsed in network for network in _METADATA_NETWORKS)
+
+
+async def _default_dns_resolver(host: str, port: int) -> list[str]:
+    loop = asyncio.get_running_loop()
+    infos = await loop.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    return [str(info[4][0]) for info in infos]
+
+
+def _is_ip_literal(host: str) -> bool:
+    candidate = host.strip("[]")
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        return False
+    return True
+
+
+async def validate_fetch_target(
+    url: str,
+    *,
+    declared_hosts: Collection[str],
+    allowed_hosts: Collection[str] | None,
+    dns_resolver: DnsResolver,
+) -> httpx.URL:
+    """Validate URL scheme, host allowlist, and resolved IPs before connecting."""
+    try:
+        parsed = httpx.URL(url)
+    except httpx.InvalidURL as exc:
+        raise SSRFBlockedError(f"invalid fetch URL {url!r}") from exc
+
+    hostname = parsed.host.lower()
+    if not hostname or _is_ip_literal(hostname):
+        raise SSRFBlockedError(f"IP literal or empty host refused: {hostname!r}")
+
+    try:
+        require_allowed_outbound_host(
+            url,
+            declared_hosts=declared_hosts,
+            allowed_hosts=allowed_hosts,
+        )
+    except OutboundHostNotAllowedError as exc:
+        raise SSRFBlockedError(str(exc)) from exc
+
+    try:
+        resolved_ips = list(await dns_resolver(hostname, 443))
+    except OSError as exc:
+        raise SSRFBlockedError(f"DNS resolution failed for {hostname!r}") from exc
+
+    if not resolved_ips:
+        raise SSRFBlockedError(f"DNS returned no addresses for {hostname!r}")
+
+    for ip_str in resolved_ips:
+        if is_disallowed_ip(ip_str):
+            raise SSRFBlockedError(
+                f"host {hostname!r} resolved to disallowed IP {ip_str!r}"
+            )
+
+    return parsed
+
+
+def _is_pdf_content(media_type: str, content: bytes) -> bool:
+    mime = media_type.partition(";")[0].strip().lower()
+    return mime == "application/pdf" or b"%PDF-" in content[:1024]
+
+
+async def _default_pdf_extractor(data: bytes) -> tuple[ExtractedText, int]:
+    from src.services.document_ingestion import extract_pdf_sandboxed
+
+    return await extract_pdf_sandboxed(data)
 
 
 class SourceFetchInput(BaseModel):
@@ -60,6 +194,8 @@ class SourceFetchInput(BaseModel):
     tool obeying it.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     source_uri: str = Field(min_length=1)
     source_type: SourceType
     credential: SecretRef | None = None
@@ -71,22 +207,6 @@ class SourceFetchOutput(BaseModel):
     Everything here survives redaction intact and identifies the snapshot
     without reproducing it. ``content_sha256`` is the claim the acquisition
     service checks the store against; it is not taken on trust.
-
-    **``storage_uri`` must be credential-free — scheme and path, never a
-    presigned URL or a token-bearing query string.** This handle *does* cross
-    the boundary, so it is redacted like every other output, and redaction
-    mangles exactly the two shapes a credentialed URI takes:
-
-    ``https://KEYID:SECRET@bucket/obj`` becomes ``[REDACTED]bucket/obj`` (the
-    userinfo pattern), and ``https://store/obj?token=ghp_...`` becomes
-    ``...?token=[REDACTED]``. Both come back **unusable, silently**, because a
-    redacted string is still a string and nothing downstream can tell it was
-    altered — the snapshot would simply not be found. A store needing
-    credentials resolves them at read time through the secret provider.
-
-    ``test_the_acquisition_handle_survives_redaction_unchanged`` pins this as a
-    property of the seam, so swapping in a presigned store fails a test rather
-    than being rediscovered in production.
     """
 
     content_sha256: str = Field(min_length=64, max_length=64)
@@ -97,6 +217,15 @@ class SourceFetchOutput(BaseModel):
     license_identifier: str | None = None
     license_declared_by: LicenseDeclaration
     license_statement: str | None = None
+    content_kind: str | None = None
+    extracted_text_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
+    extracted_text_storage_uri: str | None = Field(default=None, min_length=1)
+    extracted_text_locator: str | None = Field(default=None, min_length=1)
+    extracted_text_byte_length: int | None = Field(default=None, gt=0)
+    extracted_page_count: int | None = Field(default=None, gt=0)
+    extracted_pages: list[dict[str, int]] | None = None
 
     def license(self) -> SourceLicense:
         """Rebuild the license statement this output carries."""
@@ -122,17 +251,121 @@ class FetchedSource:
     media_type: str
     final_uri: str
     license: SourceLicense = field(default_factory=SourceLicense.undeclared)
-    """Defaults to *undeclared*, never to a permissive license.
-
-    A fetcher that does not look for a license statement records that the
-    source declared none, which is the restrictive reading. Defaulting the
-    other way would let an omission in a fetcher read, downstream, as
-    permission the source never gave.
-    """
+    """Defaults to *undeclared*, never to a permissive license."""
 
 
 SourceFetcher = Callable[[SourceFetchInput, ToolCallContext], Awaitable[FetchedSource]]
 """Performs the actual retrieval. Owns transport; owns nothing evidential."""
+
+
+class HardenedHttpFetcher:
+    """SSRF-hardened HTTPS fetcher with host allowlists, DNS IP checks, and bounded redirects."""
+
+    def __init__(
+        self,
+        *,
+        declared_hosts: Sequence[str] = SOURCE_FETCH_OUTBOUND_HOSTS,
+        max_redirects: int = DEFAULT_MAX_REDIRECTS,
+        max_bytes: int = DEFAULT_MAX_FETCH_BYTES,
+        timeout_seconds: float = 30.0,
+        client: httpx.AsyncClient | None = None,
+        dns_resolver: DnsResolver | None = None,
+    ) -> None:
+        if max_redirects < 0:
+            raise ValueError("max_redirects must be non-negative")
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
+        self._declared_hosts = tuple(declared_hosts)
+        self._max_redirects = max_redirects
+        self._max_bytes = max_bytes
+        self._timeout_seconds = timeout_seconds
+        self._client = client
+        self._dns_resolver = dns_resolver or _default_dns_resolver
+
+    async def __call__(
+        self, request: SourceFetchInput, context: ToolCallContext
+    ) -> FetchedSource:
+        allowed_hosts = context.allowed_hosts
+        if self._client is not None:
+            return await self._fetch_with_client(
+                self._client, request.source_uri, allowed_hosts=allowed_hosts
+            )
+        async with httpx.AsyncClient(
+            follow_redirects=False,
+            trust_env=False,
+            timeout=httpx.Timeout(self._timeout_seconds),
+        ) as owned_client:
+            return await self._fetch_with_client(
+                owned_client, request.source_uri, allowed_hosts=allowed_hosts
+            )
+
+    async def _fetch_with_client(
+        self,
+        client: httpx.AsyncClient,
+        start_url: str,
+        *,
+        allowed_hosts: tuple[str, ...],
+    ) -> FetchedSource:
+        current_url = start_url
+        hops = 0
+        while True:
+            parsed = await validate_fetch_target(
+                current_url,
+                declared_hosts=self._declared_hosts,
+                allowed_hosts=allowed_hosts,
+                dns_resolver=self._dns_resolver,
+            )
+            response = await client.get(str(parsed), follow_redirects=False)
+            if response.status_code in _REDIRECT_STATUS_CODES:
+                location = response.headers.get("location")
+                if not location:
+                    raise SSRFBlockedError("redirect response missing Location header")
+                if hops >= self._max_redirects:
+                    raise SSRFBlockedError(
+                        f"exceeded max redirects ({self._max_redirects})"
+                    )
+                hops += 1
+                current_url = str(parsed.join(location))
+                continue
+
+            response.raise_for_status()
+            body = response.content
+            if not body:
+                raise ValueError("fetched source returned an empty body")
+            if len(body) > self._max_bytes:
+                raise ValueError(
+                    f"fetched source exceeded {self._max_bytes} byte limit"
+                )
+            media_type = (
+                response.headers.get("content-type", "application/octet-stream")
+                .partition(";")[0]
+                .strip()
+                or "application/octet-stream"
+            )
+            return FetchedSource(
+                content=body,
+                media_type=media_type,
+                final_uri=str(parsed),
+            )
+
+
+def _target_hosts_resolver(
+    declared_hosts: tuple[str, ...],
+) -> Callable[[BaseModel], tuple[str, ...]]:
+    declared_set = frozenset(h.lower() for h in declared_hosts)
+
+    def resolve_hosts(params: BaseModel) -> tuple[str, ...]:
+        assert isinstance(params, SourceFetchInput)
+        try:
+            parsed = httpx.URL(params.source_uri)
+        except httpx.InvalidURL:
+            return ()
+        host = parsed.host.lower()
+        if parsed.scheme == "https" and host in declared_set:
+            return (host,)
+        return ()
+
+    return resolve_hosts
 
 
 def snapshot_fetch_tool(
@@ -144,38 +377,24 @@ def snapshot_fetch_tool(
     version: str = "1.0.0",
     sensitivity: SensitivityClass = SensitivityClass.READ_ONLY,
     classify_error: Callable[[BaseException], Any] | None = None,
+    outbound_hosts: tuple[str, ...] = (),
+    resolve_target_hosts: Callable[[BaseModel], tuple[str, ...]] | None = None,
+    pdf_extractor: PdfExtractor | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> ToolSpec:
-    """Build the boundary specification for an acquisition tool.
+    """Build the boundary specification for an acquisition tool."""
 
-    Args:
-        store: The quarantined snapshot store the handler writes into.
-        fetcher: Performs the retrieval. Everything evidential — hashing,
-            storing, and the handle that comes back — happens around it rather
-            than inside it, so a new transport cannot accidentally change what
-            a snapshot means.
-        timeout_seconds: The deadline. No default, per the boundary's rule that
-            every tool has a deadline somebody chose.
-        name: The registered tool name.
-        version: The tool version a capability grant authorizes.
-        sensitivity: What the call can do outside the run. Reading a public
-            source is ``read_only``; a fetcher that can reach a tenant's own
-            systems is not, and says so here.
-        classify_error: Optional retry classification, defaulting to terminal.
+    extract_pdf = pdf_extractor or _default_pdf_extractor
+    now_fn = clock or (lambda: datetime.now(UTC))
 
-    Returns:
-        The specification to register with the boundary.
-    """
-
-    async def handler(
-        payload: Any, context: ToolCallContext
-    ) -> dict[str, str | int | None]:
+    async def handler(payload: Any, context: ToolCallContext) -> dict[str, Any]:
         request = cast(SourceFetchInput, payload)
         fetched = await fetcher(request, context)
         # Stored before anything is returned: the digest the boundary records
         # is only meaningful if the bytes it names are already durable.
         storage_uri = store.put(fetched.content)
         licence = fetched.license
-        return {
+        result: dict[str, Any] = {
             "content_sha256": snapshot_digest(fetched.content),
             "storage_uri": storage_uri,
             "media_type": fetched.media_type,
@@ -185,6 +404,37 @@ def snapshot_fetch_tool(
             "license_declared_by": licence.declared_by.value,
             "license_statement": licence.statement,
         }
+        if _is_pdf_content(fetched.media_type, fetched.content):
+            extracted, _removed = await extract_pdf(fetched.content)
+            text_bytes = extracted.text.encode("utf-8")
+            text_locator = locate("bytes", 0, len(text_bytes))
+            artifact = build_extracted_text_artifact(
+                extracted,
+                store=store,
+                artifact_id=f"extracted-{extracted.text_sha256[:40]}",
+                run_id=context.run_id,
+                task_id=context.task_id,
+                attempt_id=context.attempt_id,
+                created_at=now_fn(),
+                content_kind="full_text",
+                source_uri=fetched.final_uri,
+                locator=text_locator,
+            )
+            result.update(
+                {
+                    "content_kind": "full_text",
+                    "extracted_text_sha256": artifact.content_sha256,
+                    "extracted_text_storage_uri": artifact.storage_uri,
+                    "extracted_text_locator": text_locator,
+                    "extracted_text_byte_length": len(text_bytes),
+                    "extracted_page_count": len(extracted.pages),
+                    "extracted_pages": [
+                        {"page": span.page, "start": span.start, "end": span.end}
+                        for span in extracted.pages
+                    ],
+                }
+            )
+        return result
 
     return ToolSpec(
         name=name,
@@ -195,4 +445,36 @@ def snapshot_fetch_tool(
         timeout_seconds=timeout_seconds,
         handler=handler,
         classify_error=classify_error,
+        outbound_hosts=outbound_hosts,
+        resolve_target_hosts=resolve_target_hosts,
+    )
+
+
+def hardened_source_fetch_tool(
+    *,
+    store: SnapshotStore,
+    timeout_seconds: float,
+    fetcher: SourceFetcher | None = None,
+    declared_hosts: tuple[str, ...] = SOURCE_FETCH_OUTBOUND_HOSTS,
+    name: str = SOURCE_FETCH_TOOL,
+    version: str = "1.0.0",
+    pdf_extractor: PdfExtractor | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> ToolSpec:
+    """Build the SSRF-hardened ``source.fetch`` specification with ``EXTERNAL_READ`` policy."""
+    active_fetcher = fetcher or HardenedHttpFetcher(
+        declared_hosts=declared_hosts,
+        timeout_seconds=timeout_seconds,
+    )
+    return snapshot_fetch_tool(
+        store=store,
+        fetcher=active_fetcher,
+        timeout_seconds=timeout_seconds,
+        name=name,
+        version=version,
+        sensitivity=SensitivityClass.EXTERNAL_READ,
+        outbound_hosts=declared_hosts,
+        resolve_target_hosts=_target_hosts_resolver(declared_hosts),
+        pdf_extractor=pdf_extractor,
+        clock=clock,
     )
