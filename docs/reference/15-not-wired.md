@@ -70,7 +70,11 @@ Tests that exercise it: `tests/test_prompt_safety.py`, `tests/test_cache_ttl_exp
 > **Not wired.** The `DelegationContract` brief that `LLMWorkerAgentBase` appends to a plan worker's model prompt is not covered by recorded prompt identity: worker prompts are not pinned today, and the brief is added after the agent builds its prompt. See [research execution](05-research-execution.md).
 ## Literature analysis output
 
-> **Not wired.** The literature prompt asks the model to cite each finding by evidence id, but `LiteratureReviewAgent` does not check the model's output against the ids it sent. An unknown or missing source label is not rejected, and the output's bibliography counts are not tied to evidence coverage.
+> **Not wired.** The literature prompt asks the model to cite each finding by the ref it was shown, but `LiteratureReviewAgent` does not check the model's output against the refs it sent. An unknown or missing source label is not rejected, and the output's bibliography counts are not tied to evidence coverage.
+
+> **Not wired.** The rendered literature prompt is not pinned or hashed at admission: `prompt_version` (1.1.0) in the result metadata is a label only, so editing the template changes a run's prompt without changing anything the run recorded.
+
+> **Always fails.** The talkhier, agents-execute and supervisor-pool paths construct `LiteratureReviewAgent` with no MCP integration, so they have no search tool and every call ends `failed` with `INSUFFICIENT_EVIDENCE` (reason `search_unavailable`).
 
 ## Stub packages
 

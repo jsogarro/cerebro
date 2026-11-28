@@ -32,7 +32,10 @@ def _mock_gemini_two_call(
         return_value={
             "success": True,
             "data_source": "mcp_tools",
-            "sources": [s.model_dump() for s in sources],
+            "sources": [
+                {**s.model_dump(), "url": f"https://example.org/{i}"}
+                for i, s in enumerate(sources)
+            ],
             "total_found": len(sources),
         }
     )

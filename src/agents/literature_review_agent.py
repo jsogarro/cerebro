@@ -14,13 +14,26 @@ from src.agents.llm_worker_base import LLMWorkerAgentBase
 from src.agents.models import AgentResult, AgentTask
 from src.agents.tools.mediation import ToolCallIdentity
 from src.core.acquisition.resolution import locate
-from src.core.acquisition.search_result import source_text
+from src.core.acquisition.search_result import source_text, source_uri
+from src.core.budget import BudgetExceededError
 from src.core.constants import LONG_TERM_CACHE_TTL
 from src.models.research_project import ResearchDepth
+from src.security.content_sanitizer import escape_for_delimited_prompt
 from src.services.parsers.json_parser import parse_json_response
 from src.services.prompts.agent_prompts import generate_literature_agent_prompt
 
 logger = get_logger()
+
+
+def _source_ref(source: dict[str, Any]) -> str | None:
+    """A stable identity for a source with no recorded evidence."""
+    doi = str(source.get("doi") or "").strip()
+    if doi:
+        return f"doi:{doi}"
+    uri = source_uri(source)
+    if uri:
+        return f"url-sha256:{hashlib.sha256(uri.encode()).hexdigest()[:16]}"
+    return None
 
 
 class LiteratureAnalysisError(Exception):
@@ -80,20 +93,23 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                         or "no_sources_retrieved"
                     ),
                 )
-            if not self._select_sources(academic_sources):
+            selected = self._select_sources(academic_sources)
+            if not selected:
                 return self._failed_result(
                     task,
                     academic_sources,
                     "INSUFFICIENT_EVIDENCE",
                     "no_source_became_evidence",
                 )
+            # Everything below sees only what the analysis was allowed to use.
+            grounded = {**academic_sources, "sources": selected}
             try:
                 literature_analysis_dict = await self._analyze_literature_with_gemini(
                     task.input_data, academic_sources, task
                 )
             except LiteratureAnalysisError as error:
                 return self._failed_result(
-                    task, academic_sources, "ANALYSIS_FAILED", str(error)
+                    task, grounded, "ANALYSIS_FAILED", str(error)
                 )
             from src.agents.schemas import LiteratureAnalysisSchema
 
@@ -111,16 +127,14 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
             # Step 3: Build knowledge graph of relationships
             knowledge_graph = await self._build_literature_knowledge_graph(
-                academic_sources, literature_analysis.model_dump(), task
+                grounded, literature_analysis.model_dump(), task
             )
 
             # Step 4: Format citations properly
-            formatted_citations = await self._format_source_citations(
-                academic_sources, task
-            )
+            formatted_citations = await self._format_source_citations(grounded, task)
 
             # Process and rank sources
-            sources_list = academic_sources.get("sources", [])
+            sources_list = selected
             ranked_sources = self._rank_sources_by_relevance(sources_list)
 
             # Analyze research gaps with enhanced analysis
@@ -151,6 +165,9 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 "formatted_citations": formatted_citations,
                 "knowledge_graph": knowledge_graph,
                 "analysis_status": "grounded",
+                "evidence_status": "recorded"
+                if "recorded" in (academic_sources.get("source_evidence") or {})
+                else "not_recorded",
                 "source_evidence": academic_sources.get("source_evidence", {}),
                 # Reported by the tool boundary, not inferred here. The
                 # expression this replaces read `success` alone, and every
@@ -188,6 +205,8 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
             return result
 
+        except BudgetExceededError:
+            raise
         except Exception as e:
             self.log_error(f"Literature review failed: {e!s}")
             return self.handle_error(task, e)
@@ -425,6 +444,8 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             task.input_data.get("query", ""),
             str(sorted(task.input_data.get("domains", []))),
             str(task.input_data.get("max_sources", 50)),
+            # Another tenant's evidence must never answer this tenant's query.
+            ToolCallIdentity.from_agent_task(task).organization_id or "",
         ]
         key_string = "|".join(key_parts)
         return hashlib.md5(key_string.encode()).hexdigest()
@@ -527,15 +548,16 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         return dict(result)
 
     def _select_sources(self, academic_sources: dict[str, Any]) -> list[dict[str, Any]]:
-        """Sources the analysis may use, each tagged with its evidence id and locator.
+        """Sources the analysis may use, each tagged with the ref it is cited by.
 
         When the search recorded evidence, only sources that became evidence
-        qualify, so every conclusion can cite something durable.
+        qualify and the ref is the evidence id. Otherwise the ref is the
+        source's own identity (DOI, or a digest of its URL); a source with
+        neither cannot be cited and is dropped.
         """
         sources = academic_sources.get("sources") or []
         recording = academic_sources.get("source_evidence") or {}
-        if "recorded" not in recording:
-            return list(sources)
+        recorded = "recorded" in recording
         evidence_by_index = {
             outcome["index"]: outcome["evidence_id"]
             for outcome in recording.get("sources", [])
@@ -543,16 +565,20 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         }
         selected = []
         for index, source in enumerate(sources):
-            if index not in evidence_by_index:
-                continue
-            length = len(source_text(source).encode())
-            selected.append(
-                {
-                    **source,
-                    "evidence_id": evidence_by_index[index],
-                    "locator": locate("bytes", 0, length),
-                }
-            )
+            if recorded:
+                if index not in evidence_by_index:
+                    continue
+                length = len(source_text(source).encode())
+                selected.append(
+                    {
+                        **source,
+                        "ref": evidence_by_index[index],
+                        "evidence_id": evidence_by_index[index],
+                        "locator": locate("bytes", 0, length),
+                    }
+                )
+            elif ref := _source_ref(source):
+                selected.append({**source, "ref": ref})
         return selected
 
     def _failed_result(
@@ -706,7 +732,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         return list(set(databases))
 
     def _prepare_sources_for_analysis(self, sources: list[dict[str, Any]]) -> str:
-        """Render sources for the prompt with their evidence ids and locators.
+        """Render sources as delimited blocks of escaped, single-line fields.
 
         ponytail: whole abstracts, top 10 sources; fitting to a token budget is
         the bounded-selection slice's job.
@@ -714,18 +740,27 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
         if not sources:
             return "No sources found."
 
+        def field(value: Any) -> str:
+            # Collapsing whitespace stops a field forging a line of its own.
+            return escape_for_delimited_prompt(" ".join(str(value).split()))
+
         blocks = []
         for i, source in enumerate(sources[:10], 1):
-            line = f"{i}. {source.get('title', 'Unknown Title')}"
+            lines = [f'<SOURCE index="{i}">']
+            lines.append(f"Title: {field(source.get('title', 'Unknown Title'))}")
             if source.get("authors"):
-                line += f" by {', '.join(source['authors'][:3])}"
+                lines.append(f"Authors: {field(', '.join(source['authors'][:3]))}")
             if source.get("year"):
-                line += f" ({source['year']})"
+                lines.append(f"Year: {field(source['year'])}")
+            lines.append(f"Ref: {field(source['ref'])}") if source.get("ref") else None
             if source.get("evidence_id"):
-                line += f"\nEvidence: {source['evidence_id']} @ {source['locator']}"
+                lines.append(
+                    f"Evidence: {field(source['evidence_id'])} @ {field(source['locator'])}"
+                )
             if source.get("abstract"):
-                line += f"\nAbstract: {source['abstract']}"
-            blocks.append(line)
+                lines.append(f"Abstract: {field(source['abstract'])}")
+            lines.append("</SOURCE>")
+            blocks.append("\n".join(lines))
 
         return "\n\n".join(blocks)
 

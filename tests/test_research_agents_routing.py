@@ -70,7 +70,7 @@ class TestResearchAgentsMigration:
                 return_value={
                     "success": True,
                     "data_source": "mcp_tools",
-                    "sources": [{"title": "T", "abstract": "A"}],
+                    "sources": [{"title": "T", "abstract": "A", "doi": "10.1000/t"}],
                 }
             ),
             build_knowledge_graph=AsyncMock(return_value={}),

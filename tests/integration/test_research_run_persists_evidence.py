@@ -296,6 +296,16 @@ async def test_a_plan_run_with_an_llm_persists_retrieved_evidence_by_default(
 async def test_a_failed_search_records_no_evidence_visibly(
     monkeypatch: pytest.MonkeyPatch, test_engine: AsyncEngine, tmp_path: Path
 ) -> None:
+    # The run records only a generic WORKER_FAILED (classify_worker_result lives
+    # in execution_plan_topology.py), so the worker's own verdict is captured here.
+    results: list[Any] = []
+    real_execute = LiteratureReviewAgent.execute
+
+    async def recording_execute(self: Any, task: Any) -> Any:
+        results.append(await real_execute(self, task))
+        return results[-1]
+
+    monkeypatch.setattr(LiteratureReviewAgent, "execute", recording_execute)
     service, execution_id, run_id, gemini, model_call = await _run_to_completion(
         monkeypatch,
         test_engine,
@@ -322,6 +332,14 @@ async def test_a_failed_search_records_no_evidence_visibly(
         test_engine, "SELECT status FROM agent_runs WHERE run_id = :r", r=run_id
     )
     assert run["status"] != "succeeded"
+
+    (worker_result,) = results
+    assert worker_result.status == "failed"
+    assert worker_result.output["error_code"] == "INSUFFICIENT_EVIDENCE"
+    assert worker_result.output["reason"] == "tool_error"
+    assert worker_result.output["data_source"] == "no_evidence"
+    assert worker_result.output["sources_found"] == []
+    assert worker_result.output["total_sources"] == 0
     # No silent substitute: no LLM-named sources and no analysis of nothing.
     gemini.generate_structured_content.assert_not_awaited()
     model_call.assert_not_awaited()
