@@ -1,7 +1,7 @@
 """Default the audit timestamps of the durable run and tool tables.
 
 Revision ID: a9c3e5f7b1d2
-Revises: c9d4a7e2b6f1
+Revises: d4e8f1a3b7c2
 Create Date: 2026-11-27
 
 The ORM declares ``server_default=now()`` on ``created_at`` and ``updated_at``
@@ -21,7 +21,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a9c3e5f7b1d2"
-down_revision: str | Sequence[str] | None = "c9d4a7e2b6f1"
+down_revision: str | Sequence[str] | None = "d4e8f1a3b7c2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
