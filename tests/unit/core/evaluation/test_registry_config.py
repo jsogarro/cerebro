@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import settings
+from src.core.config import Settings, settings
 from src.core.evaluation.fixture_support import FixtureManifestError
 from src.core.evaluation.registry import build_default_registry
 
@@ -54,3 +54,8 @@ def test_a_manifest_that_does_not_match_its_pinned_hash_stops_startup(
 
     with pytest.raises(FixtureManifestError):
         build_default_registry()
+
+
+def test_a_pinned_hash_without_its_path_is_a_configuration_error() -> None:
+    with pytest.raises(ValueError, match="CLAIM_SUPPORT_FIXTURE_MANIFEST"):
+        Settings(CLAIM_SUPPORT_FIXTURE_MANIFEST_SHA256="a" * 64)

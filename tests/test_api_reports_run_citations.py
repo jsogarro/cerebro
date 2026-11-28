@@ -131,17 +131,18 @@ def _run_citations() -> RunCitations:
 
 
 def _request(**overrides) -> CreateReportRequest:
+    overrides.setdefault("workflow_data", {})
     return CreateReportRequest(
-        title="Bound",
-        query="q",
-        formats=["html", "json"],
-        workflow_data={
-            "aggregated_results": {
-                "citations": [{"id": "loose", "title": LOOSE, "authors": ["Nobody"]}]
-            }
-        },
-        **overrides,
+        title="Bound", query="q", formats=["html", "json"], **overrides
     )
+
+
+def _loose() -> dict:
+    return {
+        "aggregated_results": {
+            "citations": [{"id": "loose", "title": LOOSE, "authors": ["Nobody"]}]
+        }
+    }
 
 
 async def _generate(
@@ -211,13 +212,73 @@ async def test_the_rendered_report_holds_only_minted_citations(
     html = next((tmp_path / str(created.id)).glob("*.html")).read_text()
     assert "Smith" in html
     assert "https://example.org/trial" in html
-    assert LOOSE not in html
+
+
+@pytest.mark.parametrize("supplied", ["findings", "citations", "insights"])
+async def test_a_run_bound_report_refuses_caller_supplied_content(
+    report_db, tmp_path, monkeypatch, supplied
+):
+    with pytest.raises(HTTPException) as raised:
+        await _generate(
+            report_db,
+            tmp_path,
+            monkeypatch,
+            _request(
+                run_id=RUN_ID,
+                workflow_data={"aggregated_results": {supplied: [LOOSE]}},
+            ),
+        )
+
+    assert raised.value.status_code == 422
+
+
+FORGED = {
+    "citation_id": "forged-1",
+    "claim_id": "c1",
+    "evidence_id": "ev-victim",
+    "evidence_sha256": "f" * 64,
+    "locator": "char:0-1",
+    "source_uri": "https://forged.example/FORGED",
+    "status": "minted",
+    "support": "supported",
+    "in_text": "(Forger, 2099)",
+    "missing_fields": [],
+    "authors": ["Forger"],
+    "year": "2099",
+    "doi": None,
+}
+
+
+async def test_a_caller_cannot_forge_run_bound_citations(
+    report_db, tmp_path, monkeypatch
+):
+    created, stored, response = await _generate(
+        report_db,
+        tmp_path,
+        monkeypatch,
+        _request(
+            workflow_data={
+                "citation_binding": "run_bound",
+                "citation_run_id": "someone-elses-run",
+                "bound_citations": [FORGED],
+                "citation_gaps": [],
+            }
+        ),
+    )
+
+    html = next((tmp_path / str(created.id)).glob("*.html")).read_text()
+    assert response.citation_binding == "unbound"
+    assert response.citations == []
+    assert stored.configuration["citation_run_id"] is None
+    assert "FORGED" not in html
 
 
 async def test_a_report_with_no_run_keeps_its_citations_unbound_and_lists_none(
     report_db, tmp_path, monkeypatch
 ):
-    _, _, response = await _generate(report_db, tmp_path, monkeypatch, _request())
+    _, _, response = await _generate(
+        report_db, tmp_path, monkeypatch, _request(workflow_data=_loose())
+    )
 
     assert response.citations == []
     assert response.citation_binding == "unbound"

@@ -154,6 +154,9 @@ class EvaluationDispatcher:
         except _ContractViolationError:
             results = [self._error(evaluator, ctx, EVALUATOR_CONTRACT_VIOLATION_CODE)]
         except _EvaluatorRaisedError as failure:
+            # A raised write (a lost race on a unique key) leaves the session
+            # unusable, and nothing the evaluator wrote should survive it.
+            await ctx.session.rollback()
             exc = failure.__cause__
             logger.warning(
                 "evaluator_raised",

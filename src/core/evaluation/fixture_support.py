@@ -52,6 +52,38 @@ class FixtureEntry:
     doi: str | None = None
 
 
+def _text(item: Mapping[str, object], key: str, *, required: bool = True) -> str:
+    value = item.get(key)
+    if value is None and not required:
+        return ""
+    if not isinstance(value, str) or (required and not value.strip()):
+        raise FixtureManifestError(f"fixture entry {key!r} must be a non-empty string")
+    return value
+
+
+def _entry(item: Mapping[str, object]) -> FixtureEntry:
+    authors = item.get("authors", [])
+    if not isinstance(authors, list) or not all(
+        isinstance(a, str) and a.strip() for a in authors
+    ):
+        raise FixtureManifestError("fixture entry 'authors' must be a list of strings")
+    digest = _text(item, "evidence_sha256")
+    if len(digest) != 64:
+        raise FixtureManifestError(
+            "fixture entry 'evidence_sha256' must be 64 hex digits"
+        )
+    return FixtureEntry(
+        claim_text=_text(item, "claim_text"),
+        status=ClaimSupportStatus(_text(item, "status")),
+        evidence_sha256=digest,
+        quote=_text(item, "quote"),
+        explanation=_text(item, "explanation"),
+        authors=tuple(authors),
+        year=_text(item, "year", required=False) or None,
+        doi=_text(item, "doi", required=False) or None,
+    )
+
+
 @dataclass(frozen=True)
 class FixtureManifest:
     manifest_id: str
@@ -63,24 +95,22 @@ class FixtureManifest:
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         if digest != expected_sha256:
             raise FixtureManifestError("claim-support fixture manifest hash mismatch")
-        raw = json.loads(text)
-        entries: dict[str, FixtureEntry] = {}
-        for item in raw["entries"]:
-            entry = FixtureEntry(
-                claim_text=item["claim_text"],
-                status=ClaimSupportStatus(item["status"]),
-                evidence_sha256=item["evidence_sha256"],
-                quote=item["quote"],
-                explanation=item["explanation"],
-                authors=tuple(item.get("authors", ())),
-                year=item.get("year"),
-                doi=item.get("doi"),
-            )
-            if entry.claim_text in entries:
-                raise FixtureManifestError(
-                    f"duplicate fixture claim {entry.claim_text!r}"
-                )
-            entries[entry.claim_text] = entry
+        try:
+            raw = json.loads(text)
+            entries: dict[str, FixtureEntry] = {}
+            for item in raw["entries"]:
+                entry = _entry(item)
+                if entry.claim_text in entries:
+                    raise FixtureManifestError(
+                        f"duplicate fixture claim {entry.claim_text!r}"
+                    )
+                entries[entry.claim_text] = entry
+            if not isinstance(raw["manifest_id"], str) or not raw["manifest_id"]:
+                raise FixtureManifestError("manifest_id must be a non-empty string")
+        except (KeyError, TypeError, ValueError) as exc:
+            if isinstance(exc, FixtureManifestError):
+                raise
+            raise FixtureManifestError(f"malformed fixture manifest: {exc!r}") from exc
         return cls(manifest_id=raw["manifest_id"], sha256=digest, entries=entries)
 
     def metadata_candidates(

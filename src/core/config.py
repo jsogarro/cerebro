@@ -10,7 +10,7 @@ from ipaddress import ip_network
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.core.environment import load_environment
@@ -379,6 +379,17 @@ class Settings(BaseSettings):
         for entry in v:
             ip_network(entry, strict=False)
         return v
+
+    @model_validator(mode="after")
+    def pinned_hashes_need_their_files(self) -> "Settings":
+        """A hash with no file is a pin on nothing, so say so at startup."""
+        for path, digest in (
+            ("CLAIM_SUPPORT_FIXTURE_MANIFEST", "CLAIM_SUPPORT_FIXTURE_MANIFEST_SHA256"),
+            ("CITATION_CORPUS", "CITATION_CORPUS_SHA256"),
+        ):
+            if getattr(self, digest) and not getattr(self, path):
+                raise ValueError(f"{digest} is set but {path} is not")
+        return self
 
     @field_validator("SOURCE_SNAPSHOT_DIR")
     @classmethod

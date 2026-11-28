@@ -1,5 +1,6 @@
 """Post-terminal containment verdicts, appended through the evaluation dispatcher."""
 
+import asyncio
 import hashlib
 import json
 import uuid
@@ -311,3 +312,84 @@ async def test_citation_checks_run_after_the_support_pass_in_one_delivery(
     by_dimension = {r.dimension: r.status for r in rows}
     assert by_dimension["citation.reference_resolution"] == "passed"
     assert by_dimension["citation.retraction_status"] == "passed"
+
+
+async def _overwrite_snapshot(env, data: bytes) -> None:
+    digest = snapshot_digest(SNAPSHOT)
+    path = env[1]._root / digest[:2] / digest
+    path.chmod(0o644)
+    path.write_bytes(data)
+
+
+async def test_a_tampered_snapshot_gives_a_verdict_not_a_retry_loop(env) -> None:
+    await _overwrite_snapshot(env, b"Aspirin did not reduce anything.")
+    dispatcher = _dispatcher(env, QUOTE)
+
+    await _run(dispatcher)
+    count = len(await _supports(env))
+    assert await _run(dispatcher) == 0
+
+    assert len(await _supports(env)) == count
+    async with env[0]() as session:
+        (row,) = await EvaluationResultRepository(session).list_evaluations_for_run(
+            "run-1", organization_id=ORG, dimension="claims.support"
+        )
+    assert (row.status, row.error_code) == ("failed", "fixture_evidence_integrity")
+    latest = await _latest(env)
+    assert latest["Aspirin redu"] == ClaimSupportStatus.UNSUPPORTED.value
+
+
+async def test_racing_deliveries_record_one_pass_and_neither_raises(env) -> None:
+    before = len(await _supports(env))
+
+    results = await asyncio.gather(
+        _run(_dispatcher(env, QUOTE)),
+        _run(_dispatcher(env, QUOTE)),
+        return_exceptions=True,
+    )
+
+    assert not [r for r in results if isinstance(r, Exception)]
+    assert len(await _supports(env)) == before * 2
+
+
+async def test_a_report_of_another_run_is_not_bound(env) -> None:
+    async with env[0]() as session:
+        bound = await bind_run_citations(
+            session,
+            run_id="some-other-run",
+            organization_id=ORG,
+            artifact_id="report-1",
+        )
+
+    assert bound is None
+
+
+async def test_a_report_whose_text_does_not_match_its_digest_is_not_bound(env) -> None:
+    async with env[0]() as session:
+        await ArtifactRepository(session).create_artifact(
+            Artifact(
+                artifact_id="report-bad",
+                run_id="run-1",
+                kind="research_report",
+                media_type="application/json",
+                storage_uri="inline://report-bad",
+                content_sha256="0" * 64,
+                status=ArtifactStatus.FINAL,
+                trust=TrustClassification.DERIVED_UNTRUSTED,
+                producer="direct_execution_service",
+                producer_kind=ProducerKind.SYSTEM,
+                created_at=NOW,
+                metadata={"content": REPORT},
+            ),
+            organization_id=ORG,
+        )
+        await session.commit()
+    async with env[0]() as session:
+        bound = await bind_run_citations(
+            session,
+            run_id="run-1",
+            organization_id=ORG,
+            artifact_id="report-bad",
+        )
+
+    assert bound is None

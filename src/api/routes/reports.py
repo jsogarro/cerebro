@@ -258,11 +258,37 @@ async def _validate_run_access(
     return run_id
 
 
+_SUPPLIED_CONTENT = ("findings", "insights", "citations", "recommendations")
+
+
+def _refuse_supplied_content_for_run(request: CreateReportRequest) -> None:
+    """A run-bound report carries no findings or sources the run did not store.
+
+    Citations are bound to the run's evidence; letting a caller or project
+    supply the surrounding prose would print unrelated claims beside them.
+    """
+    supplied = request.workflow_data.get("aggregated_results") or {}
+    if request.project_id is not None or any(
+        supplied.get(k) for k in _SUPPLIED_CONTENT
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "run_bound_report_takes_no_supplied_content",
+                "message": "A report bound to a run takes no project or supplied findings",
+            },
+        )
+
+
 def _citation_metadata_source() -> MetadataSource | None:
-    manifest = load_fixture_manifest(
-        settings.CLAIM_SUPPORT_FIXTURE_MANIFEST,
-        settings.CLAIM_SUPPORT_FIXTURE_MANIFEST_SHA256,
-    )
+    try:
+        manifest = load_fixture_manifest(
+            settings.CLAIM_SUPPORT_FIXTURE_MANIFEST,
+            settings.CLAIM_SUPPORT_FIXTURE_MANIFEST_SHA256,
+        )
+    except (OSError, ValueError) as exc:
+        # The stored failure message must not carry a server path.
+        raise ReportStorageError("Claim-support manifest is unavailable") from exc
     return manifest.metadata_candidates if manifest else None
 
 
@@ -329,6 +355,8 @@ async def generate_report(
         trusted_run_id = await _validate_run_access(
             session, request.run_id, organization_id=organization_id
         )
+        if trusted_run_id is not None:
+            _refuse_supplied_content_for_run(request)
         generator, _storage_service, report_repo, _format_repo = get_report_services(
             session
         )

@@ -15,13 +15,12 @@ import hashlib
 from collections.abc import Sequence
 from typing import Final
 
-from src.core.acquisition.resolution import UnresolvableLocatorError, resolve
+from src.core.acquisition.resolution import resolve
 from src.core.acquisition.snapshots import SnapshotStore
 from src.core.claims.materiality import build_inventory
 from src.core.claims.recording import ClaimSupportRecorder
 from src.core.claims.resolution import ClaimSupportResolver
 from src.core.contracts import EvaluationResult, EvaluationStatus
-from src.core.contracts.locators import InvalidLocatorError
 from src.core.contracts.redaction import snapshot_digest
 from src.core.evaluation.fixture_support import (
     FIXTURE_EVALUATOR_ID,
@@ -153,7 +152,8 @@ class ClaimSupportEvaluationService:
             if snapshot_digest(data) != row.content_sha256:
                 return None
             return resolve(row.locator, data).decode("utf-8", errors="replace")
-        except (OSError, LookupError, InvalidLocatorError, UnresolvableLocatorError):
+        # SnapshotIntegrityError and the locator errors are all ValueErrors.
+        except (OSError, LookupError, ValueError):
             return None
 
     def _result(

@@ -87,11 +87,11 @@ Tests that exercise it: `tests/test_prompt_safety.py`, `tests/test_cache_ttl_exp
 
 ## Evaluation dispatch and results
 
-> **Dark by default; no reader.** With `EVALUATION_DISPATCH_ENABLED` false (the default) no `evaluation` outbox row is written and no handler is registered, so no `agent_evaluation_results` row exists. When it is true, `ClaimsCoverageEvaluator` is registered, plus the fixture claim-support pass when `CLAIM_SUPPORT_FIXTURE_MANIFEST` is set and the four citation checks when `CITATION_CORPUS` is set. With neither configured, no claim ever leaves `not_attempted`. Nothing in production reads the stored evaluation rows: `evaluation_states` (`src/core/evaluation/registry.py`) is called only by tests, and `EvaluationResultRepository.list_evaluations_for_run` only by the dispatcher, the handler and tests. No route lists them; a report shows only the citations and gaps bound from the claim-support rows.
+> **Dark by default; no reader.** With `EVALUATION_DISPATCH_ENABLED` false (the default) no `evaluation` outbox row is written and no handler is registered, so no `agent_evaluation_results` row exists. When it is true, `ClaimsCoverageEvaluator` is registered, plus the fixture claim-support pass when `CLAIM_SUPPORT_FIXTURE_MANIFEST` is set and the four citation checks when `CITATION_CORPUS` is set. With neither configured, no claim ever leaves `not_attempted`. Nothing in production reads the stored evaluation rows: `evaluation_states` (`src/core/evaluation/registry.py`) is called only by tests, and `EvaluationResultRepository.list_evaluations_for_run` only by the dispatcher, the handler and tests. No route lists the evaluation rows. A run-bound report reads only the latest claim-support rows (not the evaluation rows) to bind its citations.
 
 The claim-support pass is fixture containment, not a model judge: a verdict stands only when an authored label's quote is contained in the evidence excerpt, and no live semantic judge exists. The derived cited report is not stored as an artifact; the minted citations and gaps are stored in the report row's `configuration`.
 
-A report with no `run_id` keeps its project or caller citations as supplied, labelled `citation_binding: unbound`; only a run-bound report renders just minted citations.
+A report without a `run_id` keeps its project or caller citations as supplied and is labelled `citation_binding: unbound`. A report with a `run_id` takes no project and no supplied findings, insights, citations or recommendations (422), so its body is its title and query plus the run's minted citations; building the body from the run's own report is not done.
 
 ## Orphan modules
 

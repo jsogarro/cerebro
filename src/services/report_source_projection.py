@@ -17,6 +17,12 @@ from src.core.claims.run_citations import RunCitations
 from src.models.db.research_project import ProjectStatus, ResearchProject
 from src.models.db.research_result import ResearchResult
 
+# Only ``run_citation_input`` may set these; whatever a caller or a project row
+# carries under them is dropped, or a report could claim a run it never bound to.
+RUN_CITATION_KEYS = frozenset(
+    {"citation_binding", "citation_run_id", "bound_citations", "citation_gaps"}
+)
+
 
 class SourceKind(StrEnum):
     PROJECT_RESULTS = "project_results"
@@ -54,7 +60,7 @@ class ReportSourceProjection:
 
     def as_input_data(self) -> dict[str, Any]:
         return {
-            **self.input_data,
+            **{k: v for k, v in self.input_data.items() if k not in RUN_CITATION_KEYS},
             "source_kind": self.source_kind.value,
             "evaluation_availability": self.evaluation.value,
         }

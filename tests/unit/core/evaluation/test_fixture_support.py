@@ -95,3 +95,66 @@ def test_a_negative_label_is_recorded_unsupported() -> None:
 def test_a_manifest_with_the_wrong_hash_is_refused() -> None:
     with pytest.raises(FixtureManifestError):
         FixtureManifest.from_json("{}", "0" * 64)
+
+
+def test_unreadable_evidence_spares_claims_resting_on_good_evidence() -> None:
+    other = "Zinc shortened colds in the trial."
+    other_digest = hashlib.sha256(other.encode()).hexdigest()
+    text = json.dumps(
+        {
+            "manifest_id": "m",
+            "entries": [
+                {
+                    "claim_text": CLAIM,
+                    "status": "supported",
+                    "evidence_sha256": DIGEST,
+                    "quote": "reduced the risk of stroke",
+                    "explanation": "x",
+                },
+                {
+                    "claim_text": "Zinc shortened colds.",
+                    "status": "supported",
+                    "evidence_sha256": other_digest,
+                    "quote": "shortened colds",
+                    "explanation": "x",
+                },
+            ],
+        }
+    )
+    manifest = FixtureManifest.from_json(
+        text, hashlib.sha256(text.encode()).hexdigest()
+    )
+    evidence = [
+        EvidenceExcerpt("ev-1", DIGEST, None),
+        EvidenceExcerpt("ev-2", other_digest, other),
+    ]
+
+    result = judge(
+        manifest,
+        [("c1", CLAIM), ("c2", "Zinc shortened colds.")],
+        evidence,
+        evaluated_at=NOW,
+    )
+
+    assert [v.status for v in result.verdicts] == [
+        ClaimSupportStatus.UNSUPPORTED,
+        ClaimSupportStatus.SUPPORTED,
+    ]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"year": 2020}, {"authors": "Smith"}, {"doi": 5}, {"quote": ""}],
+)
+def test_a_manifest_entry_of_the_wrong_shape_is_refused_at_load(bad: dict) -> None:
+    base = {
+        "claim_text": CLAIM,
+        "status": "supported",
+        "evidence_sha256": DIGEST,
+        "quote": "q",
+        "explanation": "e",
+    }
+    text = json.dumps({"manifest_id": "m", "entries": [{**base, **bad}]})
+
+    with pytest.raises(FixtureManifestError):
+        FixtureManifest.from_json(text, hashlib.sha256(text.encode()).hexdigest())
