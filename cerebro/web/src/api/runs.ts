@@ -571,10 +571,7 @@ export function adaptClaimSupport(value: unknown): ResourceContract<ClaimSupport
       rawStatus,
       verificationMethod: readString(value, 'verification_method'),
       score: adaptOriginValue<number>(value.score, 'number'),
-      explanation:
-        readString(value, 'explanation') ??
-        readString(value, 'rationale') ??
-        'No explanation was recorded.',
+      explanation: required.values.explanation,
       verifiedAt: optionalTimestamp(value, 'verified_at'),
     },
     presentation: presentation.ready(issues),
@@ -748,7 +745,10 @@ export function adaptEvaluation(value: unknown): ResourceContract<Evaluation> {
       rawStatus: status.raw,
       severity: severity.severity,
       rawSeverity: severity.raw,
-      explanation: required.values.explanation,
+      explanation:
+        readString(value, 'explanation') ??
+        readString(value, 'rationale') ??
+        'No evaluation explanation provided.',
       artifactIds: referenceIds(value.artifact_ids),
       evidenceIds: referenceIds(value.evidence_ids),
       metrics: adaptEvaluationMetrics(value.metrics),
@@ -835,9 +835,9 @@ const COLLECTION_PAGE_LIMIT = 200;
 const MAX_COLLECTION_PAGES = 50;
 
 /**
- * Reads a run sub-resource to the end. Cursor-paged resources (event-history)
- * are followed while the server reports `has_more`; the others return one
- * bounded page.
+ * Reads a run sub-resource to the end. Cursor-paged resources (`event-history`,
+ * `evidence`) are followed while the server reports `has_more`; the others
+ * return one bounded page.
  */
 async function fetchRunCollection<T>(
   runId: string,
@@ -847,6 +847,7 @@ async function fetchRunCollection<T>(
 ): Promise<CollectionContract<T>> {
   const items: unknown[] = [];
   let cursor: string | undefined;
+  let lastData: Record<string, unknown> = {};
   for (let page = 0; page < MAX_COLLECTION_PAGES; page += 1) {
     const { data } = await apiClient.get<unknown>(
       `/runs/${encodeURIComponent(runId)}/${resource}`,
@@ -857,13 +858,14 @@ async function fetchRunCollection<T>(
       },
     );
     if (!isRecord(data) || !Array.isArray(data.items)) return adapter(data);
+    lastData = data;
     items.push(...data.items);
     if (data.has_more !== true || typeof data.next_cursor !== 'string') {
       return adapter({ ...data, items });
     }
     cursor = data.next_cursor;
   }
-  return adapter({ items });
+  return adapter({ ...lastData, items });
 }
 
 export const fetchRunTasks = (runId: string, signal?: AbortSignal) =>

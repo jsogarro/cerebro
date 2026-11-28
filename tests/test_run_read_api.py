@@ -297,6 +297,33 @@ async def test_a_run_list_cursor_is_bound_to_its_filter_and_organization(
         assert "r1" not in rejected.text and "rb" not in rejected.text
 
 
+async def test_a_run_list_cursor_with_a_naive_timestamp_is_rejected(seeded) -> None:
+    import base64
+    import json
+
+    client, factory = seeded
+    async with factory() as db:
+        for minute, run_id in enumerate(("r1", "r2")):
+            await _seed_run(db, ORG_A, run_id, minutes=minute)
+
+    cursor = (await client.get("/api/v1/runs?limit=1", headers=_as(ORG_A))).json()[
+        "next_cursor"
+    ]
+    decoded = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")))
+    naive_ts = datetime.fromisoformat(decoded["t"]).replace(tzinfo=None).isoformat()
+    forged_naive = base64.urlsafe_b64encode(
+        json.dumps({"t": naive_ts, "r": decoded["r"], "f": decoded["f"]}).encode()
+    ).decode("ascii")
+    forged_list = base64.urlsafe_b64encode(b"[]").decode("ascii")
+
+    for bad_cursor in (forged_naive, forged_list):
+        rejected = await client.get(
+            f"/api/v1/runs?limit=1&cursor={bad_cursor}", headers=_as(ORG_A)
+        )
+        assert rejected.status_code == 400, rejected.text
+        assert "r1" not in rejected.text and "r2" not in rejected.text
+
+
 async def test_event_history_pages_in_sequence_and_rejects_another_runs_cursor(
     seeded,
 ) -> None:

@@ -11,7 +11,7 @@ import binascii
 import hashlib
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
@@ -204,20 +204,30 @@ def _filter_binding(organization_id: uuid.UUID, **filters: str | None) -> str:
 
 
 def _encode_run_cursor(created_at: datetime, run_id: str, binding: str) -> str:
-    raw = json.dumps({"t": created_at.isoformat(), "r": run_id, "f": binding})
+    # SQLite returns naive datetimes even for timezone-aware columns; stamp UTC
+    # so every issued cursor carries an offset and passes _decode_run_cursor.
+    timestamp = (
+        created_at if created_at.tzinfo is not None else created_at.replace(tzinfo=UTC)
+    )
+    raw = json.dumps({"t": timestamp.isoformat(), "r": run_id, "f": binding})
     return base64.urlsafe_b64encode(raw.encode()).decode("ascii")
 
 
 def _decode_run_cursor(token: str, binding: str) -> tuple[datetime, str]:
     try:
         raw = json.loads(base64.urlsafe_b64decode(token.encode("ascii")))
-        position = (datetime.fromisoformat(raw["t"]), str(raw["r"]))
+        if not isinstance(raw, dict) or not isinstance(raw.get("t"), str):
+            raise ValueError("cursor payload is malformed")
+        created_at = datetime.fromisoformat(raw["t"])
+        run_id = raw["r"]
         issued_for = raw["f"]
     except (binascii.Error, ValueError, KeyError, TypeError) as error:
         raise InvalidCursorError("cursor is not valid") from error
+    if created_at.tzinfo is None or not isinstance(run_id, str):
+        raise InvalidCursorError("cursor is not valid")
     if issued_for != binding:
         raise InvalidCursorError("cursor does not belong to this request")
-    return position
+    return (created_at, run_id)
 
 
 def _limit(limit: int | None) -> int:
