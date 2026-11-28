@@ -1,6 +1,6 @@
 # Security, audit and observability
 
-The API records an audit trail of requests, sets browser security headers on every response except genuine CORS preflights, which `CORSMiddleware` answers itself, redacts personal data from log lines and traces and exports Prometheus metrics. Langfuse tracing and context-compaction telemetry are off by default. Authentication, rate limiting and tenancy are covered in [authentication and tenancy](04-authentication-and-tenancy.md) and the [HTTP API](03-http-api.md).
+The API records an audit trail of requests, sets browser security headers on every response except genuine CORS preflights, which `CORSMiddleware` answers itself, redacts personal data from log lines and traces and exports Prometheus metrics. OpenTelemetry tracing, Langfuse tracing and context-compaction telemetry are off by default. Authentication, rate limiting and tenancy are covered in [authentication and tenancy](04-authentication-and-tenancy.md) and the [HTTP API](03-http-api.md).
 
 ## Summary
 
@@ -22,7 +22,7 @@ The API records an audit trail of requests, sets browser security headers on eve
 | Health probes | Active | `/health`, `/live`, `/ready`, `/ws/health` | `src/api/routes/health.py`, `src/api/routes/websocket.py` |
 | Langfuse tracing | Off by default | `LANGFUSE_ENABLED` | `src/core/tracing.py` |
 | Context-compaction telemetry | Off by default | `ENABLE_CONTEXT_COMPACTION_TELEMETRY` | `src/core/telemetry.py` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Not wired | none | `src/core/config.py` (`Settings`) |
+| OpenTelemetry tracing | Off by default | `ENABLE_TRACING`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` | `src/core/otel.py`, `src/api/main.py` |
 | Tracing verification script | Active | `invoke_model` also opens a `model_call` generation per real provider attempt under a caller-supplied trace id (`ModelInvocationContext.trace_parent`) through `start_model_attempt` and `end_model_attempt`. It records metadata and usage, never prompt, response or error text, and a failing backend changes no result or cost. No production owner supplies a trace id yet ([not wired](15-not-wired.md#model-call-journal-owner)).
 
 `python scripts/verify_tracing.py` | `scripts/verify_tracing.py` |
@@ -170,7 +170,7 @@ All four probes are in the public-route allowlist.
 
 > **Off by default.** Context-compaction telemetry logs token counts: `DirectExecutionService` logs `domain_output_token_measurement` events, and `BaseSupervisor`, `WorkingMemoryManager` and `MultiTierMemorySystem` each measure token counts behind the same flag, `ENABLE_CONTEXT_COMPACTION_TELEMETRY=true`. Counting needs `tiktoken`; without it the count is 0.
 
-> **Not wired.** `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4317`) is declared in `Settings` and read by no code under `src/`. Setting it changes nothing. See [configuration](02-configuration.md).
+> **Off by default.** With `ENABLE_TRACING=true` (and `OTEL_SDK_DISABLED` unset or false), `src/core/otel.py` initializes a single private OpenTelemetry `TracerProvider` in the API `lifespan` without modifying OpenTelemetry's global provider. Setting `OTEL_EXPORTER_OTLP_ENDPOINT` alone does not activate tracing while `ENABLE_TRACING` is false; when disabled, no provider is installed and no instrumentors attach. When enabled, FastAPI requests, SQLAlchemy cursor executions, outbound `httpx` requests, plan workflow runs (`invoke_workflow`), worker executions (`invoke_agent`), governed model calls (`chat`) and mediated tool invocations (`execute_tool`) emit linked spans on that provider. When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, spans export over OTLP/HTTP (supporting standard collectors and Langfuse's OTLP endpoint); otherwise spans remain in-process with no network export. Every exported span passes through `SanitizingSpanProcessor`, which drops prompts, completions, source text, raw tool arguments, SQL statements, query strings, HTTP headers and user IDs, and redacts credential patterns, configured secrets and PII from remaining attributes, events and status descriptions. Exporter failures are isolated so telemetry errors never change request or workload outcomes, and lifespan teardown uninstruments all hooks and flushes with a bounded timeout. See [configuration](02-configuration.md).
 
 ## Security probe script
 
@@ -193,6 +193,7 @@ All four probes are in the public-route allowlist.
 - `src/core/observability.py`: LLM metrics and request cost tracking
 - `src/api/middleware/cost_drift.py`: `LLMCostDriftMiddleware`
 - `src/ai_brain/router/routing_observability.py`, `src/ai_brain/integration/execution_plan_observability.py`: routing and plan-admission metrics
+- `src/core/otel.py`: private OpenTelemetry `TracerProvider`, FastAPI/SQLAlchemy/httpx instrumentors, `SanitizingSpanProcessor` and GenAI span helpers
 - `src/core/tracing.py`: Langfuse client and trace context managers
 - `src/core/telemetry.py`: compaction telemetry helpers
 - `src/api/routes/health.py`: `/health`, `/ready`, `/live`; `src/api/routes/websocket.py`: `/ws/health`

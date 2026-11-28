@@ -107,7 +107,7 @@ A report without a `run_id` keeps its project or caller citations as supplied an
 > **Not wired.** Three names in the execution path and the settings are defined and never read. The live execution path is described in [research execution](05-research-execution.md).
 
 - `DirectExecutionService._fast_path_provider` is initialised to `None`, never assigned a provider and only closed and reset in `close`.
-- `Settings.TEMPORAL_HOST` and `Settings.OTEL_EXPORTER_OTLP_ENDPOINT` have no reader under `src/` outside `get_ai_brain_config` (tracked in #297; `config/production.py` and `config/staging.py` read their own copies).
+- `Settings.TEMPORAL_HOST` has no reader under `src/` outside `get_ai_brain_config`.
 - `Settings.MULTI_DOMAIN_MERGE_STRATEGY` (default `concat`) and `Settings.MULTI_DOMAIN_MERGE_PER_DOMAIN_CHAR_LIMIT` (default 4000) are read by no code under `src/`.
 
 ## Settings with no effect
