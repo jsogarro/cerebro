@@ -21,7 +21,6 @@ from src.core.contracts import RunEventCursor
 from src.core.evaluation.registry import build_default_registry, evaluation_states
 from src.repositories.artifact_repository import ArtifactRepository
 from src.repositories.evaluation_result_repository import EvaluationResultRepository
-from src.repositories.evidence_repository import EvidenceRepository
 from src.repositories.run_event_repository import RunEventRepository
 from src.repositories.run_lifecycle_repository import RunLifecycleRepository
 
@@ -120,21 +119,6 @@ class TaskView(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     attempts: list[AttemptView]
-
-
-class EvidenceView(BaseModel):
-    evidence_id: str
-    run_id: str
-    task_id: str
-    source_type: str
-    source_uri: str
-    snapshot_artifact_id: str
-    content_sha256: str
-    locator: str
-    locator_scheme: str
-    trust: str
-    producer_kind: str
-    acquired_at: datetime
 
 
 class ArtifactView(BaseModel):
@@ -244,7 +228,6 @@ class RunReadService:
     def __init__(self, session: AsyncSession, organization_id: str) -> None:
         self._org = uuid.UUID(organization_id)
         self._runs = RunLifecycleRepository(session)
-        self._evidence = EvidenceRepository(session)
         self._artifacts = ArtifactRepository(session)
         self._evaluations = EvaluationResultRepository(session)
         self._events = RunEventRepository(session)
@@ -351,35 +334,6 @@ class RunReadService:
                 for task in rows
             ],
             truncated=more,
-        )
-
-    async def evidence(
-        self, run_id: str, *, limit: int | None
-    ) -> Collection[EvidenceView]:
-        await self._require_run(run_id)
-        size = _limit(limit)
-        rows = await self._evidence.list_evidence_for_run(
-            run_id, organization_id=self._org, limit=size + 1
-        )
-        return Collection(
-            items=[
-                EvidenceView(
-                    evidence_id=row.evidence_id,
-                    run_id=row.run_id,
-                    task_id=row.task_id,
-                    source_type=row.source_type,
-                    source_uri=row.source_uri,
-                    snapshot_artifact_id=row.snapshot_artifact_id,
-                    content_sha256=row.content_sha256,
-                    locator=row.locator,
-                    locator_scheme=row.locator_scheme,
-                    trust=row.trust,
-                    producer_kind=row.producer_kind,
-                    acquired_at=row.acquired_at,
-                )
-                for row in rows[:size]
-            ],
-            truncated=len(rows) > size,
         )
 
     async def artifacts(

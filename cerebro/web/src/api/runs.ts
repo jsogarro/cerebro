@@ -492,8 +492,9 @@ export function adaptEvidence(value: unknown): ResourceContract<Evidence> {
       locator: required.values.locator,
       title: readString(value, 'title'),
       publisher: readString(value, 'publisher') ?? readString(value, 'author'),
-      retrievedAt: optionalTimestamp(value, 'retrieved_at'),
-      contentHash: readString(value, 'content_hash'),
+      retrievedAt:
+        optionalTimestamp(value, 'retrieved_at') ?? optionalTimestamp(value, 'acquired_at'),
+      contentHash: readString(value, 'content_hash') ?? readString(value, 'content_sha256'),
       fixtureReference: readString(value, 'fixture_reference'),
       excerpt: readString(value, 'excerpt'),
       structuredValue: value.structured_value ?? null,
@@ -510,6 +511,20 @@ export function adaptEvidence(value: unknown): ResourceContract<Evidence> {
 }
 
 export function adaptEvidenceCollection(value: unknown): CollectionContract<Evidence> {
+  if (isRecord(value) && typeof value.run_id === 'string' && Array.isArray(value.items)) {
+    const runId = value.run_id;
+    return adaptCollection(
+      {
+        ...value,
+        items: value.items.map((item) =>
+          isRecord(item) && item.run_id === undefined ? { run_id: runId, ...item } : item,
+        ),
+      },
+      ['items', 'evidence', 'results'],
+      'Evidence',
+      adaptEvidence,
+    );
+  }
   return adaptCollection(value, ['items', 'evidence', 'results'], 'Evidence', adaptEvidence);
 }
 

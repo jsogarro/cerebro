@@ -16,7 +16,6 @@ from src.api.services.run_read_service import (
     Collection,
     EvaluationCollection,
     EventPage,
-    EvidenceView,
     InvalidCursorError,
     RunNotFoundError,
     RunPage,
@@ -26,7 +25,7 @@ from src.api.services.run_read_service import (
 )
 from src.core.contracts.states import RunStatus
 from src.middleware.tenant_context import TenantContext, get_tenant_context
-from src.models.db.session import get_session
+from src.models.db.session import SessionDep
 
 router = APIRouter(prefix="/runs")
 
@@ -36,7 +35,7 @@ Limit = Annotated[int | None, Query(ge=1, le=MAX_PAGE)]
 
 def _service(
     tenant_context: TenantContext = Depends(get_tenant_context),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
 ) -> RunReadService:
     return RunReadService(session, tenant_context.organization_id)
 
@@ -80,13 +79,6 @@ async def run_tasks(
     run_id: str, limit: Limit = None, service: RunReadService = Depends(_service)
 ) -> Collection[TaskView]:
     return await _read(lambda: service.tasks(run_id, limit=limit))
-
-
-@router.get("/{run_id}/evidence", response_model=Collection[EvidenceView])
-async def run_evidence(
-    run_id: str, limit: Limit = None, service: RunReadService = Depends(_service)
-) -> Collection[EvidenceView]:
-    return await _read(lambda: service.evidence(run_id, limit=limit))
 
 
 @router.get("/{run_id}/artifacts", response_model=Collection[ArtifactView])

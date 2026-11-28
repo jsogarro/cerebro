@@ -677,14 +677,19 @@ async def test_each_response_carries_the_fields_the_web_adapters_require(
         await _seed_run(db, ORG_A, "run-a", events=1, evaluate="passed")
 
     adapters = _required_adapter_fields()
+    evidence_page = (
+        await client.get("/api/v1/runs/run-a/evidence", headers=_as(ORG_A))
+    ).json()
+    assert evidence_page["run_id"] == "run-a"
     served = {
         "adaptRun": (await client.get("/api/v1/runs/run-a", headers=_as(ORG_A))).json(),
         "adaptTask": _first(
             await client.get("/api/v1/runs/run-a/tasks", headers=_as(ORG_A))
         ),
-        "adaptEvidence": _first(
-            await client.get("/api/v1/runs/run-a/evidence", headers=_as(ORG_A))
-        ),
+        "adaptEvidence": {
+            "run_id": evidence_page["run_id"],
+            **evidence_page["items"][0],
+        },
         "adaptArtifact": _first(
             await client.get("/api/v1/runs/run-a/artifacts", headers=_as(ORG_A))
         ),
