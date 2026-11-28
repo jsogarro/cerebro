@@ -23,7 +23,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.api.client_ip import client_ip
-from src.models.db.audit_log import AuditEventType, AuditLog, AuditSeverity
+from src.models.db.audit_log import (
+    AuditEventType as AuditEventType,
+)
+from src.models.db.audit_log import (
+    AuditLog,
+    AuditSeverity,
+)
 from src.models.db.security_alert import AlertSeverity, AlertType, SecurityAlert
 from src.models.db.user import User
 from src.services.cache.cache_manager import CacheManager

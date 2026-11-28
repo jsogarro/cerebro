@@ -62,9 +62,8 @@ FROM base as builder
 COPY pyproject.toml uv.lock README.md ./
 COPY scripts/install-locked.sh ./scripts/
 
-# Install production dependencies (stats extra provides scipy/numpy used by
-# MASR and StatisticsTool)
-RUN scripts/install-locked.sh --extra stats
+# Install production dependencies (stats provides scipy/numpy; mcp provides fastmcp)
+RUN scripts/install-locked.sh --extra stats --extra mcp
 
 # Copy application code
 COPY src/ ./src/

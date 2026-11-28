@@ -168,6 +168,16 @@ Trust labels (`TrustClassification`) are ordered `trusted_control`, `application
 
 The four tool classes in `src/mcp/tools/` are `AcademicSearchTool`, `CitationTool`, `StatisticsTool` and `KnowledgeGraphTool`. `src/agents/integrations/mcp_tool_specs.py` binds each one to its boundary `ToolSpec` (`mcp.academic_search`, `mcp.format_citations`, `mcp.analyze_statistics`, `mcp.build_knowledge_graph`), enforcing closed input schemas, capability checks, deadlines, redaction, and audit logging.
 
+## MCP server
+
+When `MCP_SERVER_ENABLED=true` (default `false`), `src/api/main.py` mounts a stateless Streamable HTTP FastMCP server (`src/mcp/server.py::build_mcp_server`) at `/mcp`. Requests inherit `AuthMiddleware`, `RateLimitMiddleware`, `AuditTrailMiddleware`, CORS, and security headers, and every tool call resolves caller identity from `request.state.token_payload` (failing closed outside HTTP or when `organization_id` is absent) and writes an audit event with action `mcp.tool:<name>`.
+
+Read-only tools:
+
+- `get_research_status(execution_id)` — returns the same status payload as `GET /api/v1/query/execution/{execution_id}/status` (including `run_id`).
+- `get_research_results(execution_id)` — returns `run_id`, results with externally sourced items labelled `external_untrusted`, and per-claim verdict summaries from `agent_claim_supports` (or an explicit `unverified` marker when none exist).
+- `get_research_evidence(run_id, cursor, limit)` — calls the same `list_run_evidence` service as `GET /api/v1/runs/{run_id}/evidence` (metadata only: source URI, locator, SHA-256, trust label; keyset pagination on `(acquired_at, id)`, default 100, cap 500; foreign or unknown run returns not found).
+
 ## Source map
 
 - `src/core/tools/boundary.py`: `ToolBoundary`, `CancellationToken`

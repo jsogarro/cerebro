@@ -54,7 +54,7 @@ vector = [
     "sentence-transformers>=2.5.0",
 ]
 mcp = [
-    "fastmcp>=2.0.0",
+    "fastmcp>=4.2,<5",
 ]
 stats = [
     "scipy>=1.13.0",

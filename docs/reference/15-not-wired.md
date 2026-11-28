@@ -17,6 +17,7 @@ This page lists code and settings present in the repository that no production p
 | Dead execution attributes | Not wired | none | `src/api/services/direct_execution_service.py`, `src/core/config.py` |
 | Settings with no effect | Not wired | none | `src/core/config.py` (`Settings`) |
 | Unbacked web pages | Not wired | none | `cerebro/web/src/api/` |
+| MCP server | Wired (default off) | `src/api/main.py` mount `/mcp` (`MCP_SERVER_ENABLED`) | `src/mcp/server.py` |
 | Row-level security for execution-service sessions | Not wired | none | `src/api/services/direct_execution_service.py` |
 | Model-call journal owner | Not wired | none | `src/repositories/model_call_reservation_repository.py`, `src/services/model_invocation.py` |
 
@@ -107,6 +108,10 @@ Tests that exercise them live in `tests/unit/core/claims/`. `src/core/acquisitio
 ## Unbacked web pages
 
 The web workbench pages for runs, run detail and memory, and the run form on the workflows page, call API routes that are not mounted (`GET /api/v1/workflows` is) and its dashboard, QA, costs and benchmarks pages show fixed values. The page-by-page table is in [CLI and web clients](13-cli-and-web-clients.md).
+
+## MCP server
+
+> **Wired, off by default.** `src/mcp/server.py::build_mcp_server` exposes read-only tools (`get_research_status`, `get_research_results`, `get_research_evidence`) over stateless Streamable HTTP, mounted at `/mcp` inside `src/api/main.py` when `MCP_SERVER_ENABLED=true` (default `false`). Requests pass through the API's authentication, rate-limiting, and audit middleware. See [tool boundary and evidence](09-tool-boundary-and-evidence.md#mcp-server).
 
 ## Model-call journal owner
 

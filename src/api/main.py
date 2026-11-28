@@ -15,6 +15,7 @@ from prometheus_client import make_asgi_app
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
+from starlette.routing import Route
 from structlog import get_logger
 
 from src.ai_brain.router.factory import MASRRuntime
@@ -45,6 +46,7 @@ from src.api.routes import (
     query_api,
     reports,
     research,
+    run_evidence,
     run_stream,
     similarity_checks,
     supervisor_api,
@@ -492,6 +494,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await _asyncio.to_thread(_get_lf_client)
             logger.info("Langfuse client pre-initialized")
 
+        if settings.MCP_SERVER_ENABLED:
+            from src.mcp.server import build_mcp_server
+
+            mcp_server = build_mcp_server(
+                kernel=research_kernel,
+                audit_logger=audit_logger,
+                session_factory=durable_session_factory,
+            )
+            mcp_app = mcp_server.http_app(
+                path="/mcp",
+                stateless_http=True,
+                json_response=True,
+            )
+            await resources.enter_async_context(mcp_app.lifespan(app))
+            mcp_route = Route(
+                "/mcp",
+                endpoint=mcp_app,
+                methods=["GET", "POST", "DELETE"],
+                include_in_schema=False,
+            )
+            app.router.routes.append(mcp_route)
+            resources.callback(app.router.routes.remove, mcp_route)
+            logger.info("MCP server mounted at /mcp")
+
         try:
             yield
         finally:
@@ -602,6 +628,7 @@ app.include_router(
 )  # Supervisor coordination
 app.include_router(talkhier_api.router, tags=["talkhier"])
 app.include_router(websocket.router, tags=["websocket"])
+app.include_router(run_evidence.router, prefix="/api/v1", tags=["run-evidence"])
 app.include_router(run_stream.router, prefix="/api/v1", tags=["run-stream"])
 
 

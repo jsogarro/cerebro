@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Annotated, Any, Protocol, TypeAlias, cast
 from uuid import UUID
 
@@ -15,6 +17,7 @@ from src.api.services.agent_execution_service import (
 from src.api.services.direct_execution_service import (
     get_application_direct_execution_service,
 )
+from src.core.contracts.trust import TrustClassification
 from src.core.kernel import (
     ResearchKernel,
     TypedRegistry,
@@ -437,12 +440,168 @@ async def resume_kernel_execution(
     )
 
 
+def _recorded_plan_summary(exec_status: Any) -> dict[str, Any] | None:
+    """Expose opaque identifiers and numeric budgets for plan-backed runs."""
+    plan = getattr(exec_status, "execution_plan", None)
+    if plan is None:
+        return None
+    decision = plan.routing_decision
+    budget = decision.budget
+    return {
+        "execution_plan_id": str(plan.execution_plan_id),
+        "plan_version": plan.plan_version,
+        "collaboration_mode": decision.collaboration_mode.value,
+        "primary_provider": str(decision.provider_model_policy.primary.provider),
+        "primary_model": str(decision.provider_model_policy.primary.model),
+        "budget": {
+            "max_cost_usd": float(budget.max_cost_usd),
+            "max_total_tokens": budget.max_total_tokens,
+            "max_tool_invocations": budget.max_tool_invocations,
+            "max_parallel_tasks": budget.max_parallel_tasks,
+            "max_attempts_per_task": budget.max_attempts_per_task,
+            "task_timeout_seconds": budget.task_timeout_seconds,
+        },
+    }
+
+
+def execution_status_payload(
+    execution_id: str,
+    exec_status: Any,
+) -> dict[str, Any]:
+    """Build the shared status payload served by both REST and MCP."""
+    return {
+        "execution_id": execution_id,
+        "run_id": getattr(exec_status, "run_id", None),
+        "status": exec_status.status,
+        "progress_percentage": exec_status.progress_percentage,
+        "current_phase": exec_status.current_phase,
+        "supervisor_type": exec_status.supervisor_type,
+        "workers_used": exec_status.workers_used,
+        "routing_decision": exec_status.routing_decision,
+        "execution_plan": _recorded_plan_summary(exec_status),
+        "execution_time_seconds": exec_status.execution_time_seconds,
+        "errors": exec_status.errors,
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+
+
+def _label_external_content(value: Any) -> Any:
+    """Mark retrieved source objects with ``external_untrusted`` without mutating inputs."""
+    trust_value = TrustClassification.EXTERNAL_UNTRUSTED.value
+    if isinstance(value, dict):
+        labeled: dict[str, Any] = {}
+        for key, item in value.items():
+            if key == "sources" and isinstance(item, list):
+                labeled[key] = [
+                    {**_label_external_content(src), "trust": trust_value}
+                    if isinstance(src, dict)
+                    else _label_external_content(src)
+                    for src in item
+                ]
+            else:
+                labeled[key] = _label_external_content(item)
+        return labeled
+    if isinstance(value, list):
+        return [_label_external_content(item) for item in value]
+    return deepcopy(value)
+
+
+def _summarize_claim_verdicts(rows: list[Any]) -> dict[str, Any]:
+    counts = {
+        "supported": 0,
+        "partially_supported": 0,
+        "disputed": 0,
+        "unsupported": 0,
+    }
+    if not rows:
+        return {
+            "verified": False,
+            "status": "unverified",
+            "reason": "no_claim_support_records",
+            "counts": counts,
+            "claims": [],
+        }
+
+    claims: list[dict[str, Any]] = []
+    for row in rows:
+        row_status = str(row.status)
+        if row_status in counts:
+            counts[row_status] += 1
+        claims.append(
+            {
+                "claim_id": row.claim_id,
+                "claim_text": row.claim_text,
+                "status": row_status,
+                "absent_evidence_reason": row.absent_evidence_reason,
+                "evidence_count": int(row.evidence_count),
+            }
+        )
+    verified = (counts["supported"] + counts["partially_supported"]) > 0
+    return {
+        "verified": verified,
+        "status": "verified" if verified else "unverified",
+        "counts": counts,
+        "claims": claims,
+    }
+
+
+async def build_research_results_payload(
+    kernel: ApplicationResearchKernel,
+    execution_id: str,
+    *,
+    organization_id: str,
+    session_factory: Callable[[], Any] | None = None,
+) -> dict[str, Any] | None:
+    """Build the tenant-scoped results payload with run_id, trust labels, and claim verdicts."""
+    if not organization_id:
+        raise ValueError("organization_id is required")
+
+    results = await get_kernel_execution_results(
+        kernel, execution_id, organization_id=organization_id
+    )
+    if results is None:
+        return None
+
+    exec_status = await get_kernel_execution_status(
+        kernel, execution_id, organization_id=organization_id
+    )
+    run_id: str | None = (
+        getattr(exec_status, "run_id", None) if exec_status is not None else None
+    )
+
+    claim_rows: list[Any] = []
+    if session_factory is not None and run_id:
+        from src.models.db.session import tenant_session
+        from src.repositories.claim_support_repository import ClaimSupportRepository
+        from src.repositories.tenant_scope import normalize_organization_id
+
+        normalized_org = normalize_organization_id(organization_id)
+        async with tenant_session(session_factory, normalized_org) as session:
+            claim_rows = await ClaimSupportRepository(
+                session
+            ).list_claim_supports_for_run(
+                run_id,
+                organization_id=normalized_org,
+                latest_per_claim=True,
+            )
+
+    return {
+        "execution_id": execution_id,
+        "run_id": run_id,
+        "content_trust": TrustClassification.EXTERNAL_UNTRUSTED.value,
+        "results": _label_external_content(results),
+        "claim_verdicts": _summarize_claim_verdicts(claim_rows),
+    }
+
+
 __all__ = [
     "AgentExecutionBackend",
     "AgentKernelOperations",
     "ApplicationResearchKernel",
     "ResearchExecutionBackend",
+    "build_research_results_payload",
     "compose_application_research_kernel",
+    "execution_status_payload",
     "get_application_agent_research_kernel",
     "get_application_research_kernel",
     "get_kernel_agent_operations",
