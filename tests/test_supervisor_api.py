@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.supervisor_api_models import (
@@ -459,7 +460,7 @@ def test_execute_event_reaches_only_the_callers_organization() -> None:
     overrides = {
         supervisor_api.get_application_supervisor_coordination_service: lambda: service,
         get_jwt_service: _OrgJWTService,
-        get_session: lambda: Mock(),
+        get_session: lambda: Mock(sync_session=Session()),
     }
     tracker = supervisor_api.connection_manager
     own, foreign = subscriber("org-a"), subscriber("org-b")

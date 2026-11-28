@@ -62,6 +62,11 @@ run_reconciliation_failures_total = Counter(
     "Expired-owner runs whose reconciliation did not commit",
 )
 
+run_recovery_skipped_total = Counter(
+    "cerebro_run_recovery_skipped_total",
+    "Interrupted runs recovery could not take over because they have no organization",
+)
+
 run_cancellation_delay_seconds = Histogram(
     "cerebro_run_cancellation_delay_seconds",
     "Seconds from a cancellation request to the run's terminal cancellation",

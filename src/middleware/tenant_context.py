@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.models import PersonalAccessTokenPayload, TokenPayload
 from src.middleware.auth_middleware import get_current_token
-from src.models.db.session import SessionDep
+from src.models.db.session import SessionDep, scope_to_organization
 
 
 @dataclass(frozen=True)
@@ -108,6 +108,9 @@ async def get_tenant_context(
     """Resolve authenticated tenant context and set DB session context."""
     organization_id = require_organization_id(token_payload)
     await set_postgres_tenant_context(session, organization_id)
+    # The setting dies with this transaction; a handler that commits and goes on
+    # would otherwise read nothing from the next one.
+    scope_to_organization(session, organization_id)
     return TenantContext(
         user_id=token_payload.sub,
         organization_id=organization_id,

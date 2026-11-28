@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.budget import BudgetDimension, BudgetExceededError
 from src.models.db.model_call_reservation import OWNER_KINDS, ModelCallReservation
+from src.models.db.session import tenant_session
 from src.repositories.tenant_scope import normalize_organization_id
 
 _OPEN = "open"
@@ -117,7 +118,7 @@ class ModelCallReservationRepository:
         if session is not None:
             yield session
             return
-        async with self._factory() as own, own.begin():
+        async with tenant_session(self._factory, self._org) as own, own.begin():
             yield own
 
     def _scope(self) -> tuple[ColumnElement[bool], ...]:

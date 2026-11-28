@@ -7,7 +7,7 @@ This guide covers the deployment artifacts that exist in this repository: one Do
 | Artifact | Path | Purpose |
 |---|---|---|
 | Image definition | `Dockerfile` | Four stages: `base`, `development`, `builder`, `production` |
-| Container entrypoint | `docker/entrypoint.sh` | Runs `alembic upgrade head`, then starts the command |
+| Container entrypoint | `docker/entrypoint.sh` | Runs the roles script and `alembic upgrade head` unless `SKIP_MIGRATIONS=1`, then starts the command |
 | Database init script | `docker/init.sql` | Extensions, schemas and types for a fresh Postgres container |
 | Reverse proxy config | `docker/nginx/nginx.conf` | Routes `/api/` and `/ws` to the API and `/` to the web container; answers `/health` itself |
 | Development stack | `docker-compose.yml` | API, Postgres, Redis, nginx, web, optional tools |
@@ -31,7 +31,7 @@ This guide covers the deployment artifacts that exist in this repository: one Do
 
 The `production` stage declares a healthcheck that runs `curl -f http://localhost:8000/health` every 30 seconds (timeout 3 seconds, start period 40 seconds, 3 retries).
 
-Both runnable stages use `docker/entrypoint.sh` as the entrypoint. It runs `alembic upgrade head` and, if that fails, prints the exit status and exits with it, so the container never starts the application against an unmigrated schema. It exits with status 64 when no command is supplied. Otherwise it `exec`s the command.
+Both runnable stages use `docker/entrypoint.sh` as the entrypoint. Unless `SKIP_MIGRATIONS=1` (set on `api` in both compose files, where the `db-roles` and `migrate` one-shot services do this work), it runs `alembic upgrade head` and, if that fails, prints the exit status and exits with it, so the container never starts the application against an unmigrated schema. It exits with status 64 when no command is supplied. Otherwise it `exec`s the command.
 
 Build locally with `docker compose build` (development stage, `docker-compose.yml`) or `make prod-build` (production stage). The `build-image` job of `cd.yml` pushes the API image to `gcr.io`.
 

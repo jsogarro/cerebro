@@ -332,6 +332,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             masr_router=masr_runtime.router,
             component_registry=component_registry,
             session_factory=durable_session_factory,
+            maintenance_session_factory=maintenance_session_factory,
             event_publisher=event_publisher,
         )
         # Tests may explicitly place a trusted resolver on application state

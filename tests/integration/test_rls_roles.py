@@ -64,6 +64,8 @@ NO_MAINTENANCE = frozenset(
         "similarity_matches",
         "agent_evaluation_results",
         "model_call_reservations",
+        "agent_run_tasks",
+        "agent_task_attempts",
     }
 )
 ORG_A = uuid.uuid4()
@@ -379,12 +381,16 @@ async def test_maintenance_role_reads_every_tenants_runs_and_authorities(
     assert await _count(maint_engine, "agent_runs") == 2
     assert await _count(maint_engine, "agent_execution_authorities") == 2
     # Granted and policy-admitted even when empty.
-    for table in (
-        "agent_run_tasks",
-        "agent_task_attempts",
-        "agent_run_config_snapshots",
-    ):
-        await _count(maint_engine, table)
+    await _count(maint_engine, "agent_run_config_snapshots")
+
+
+async def test_maintenance_role_cannot_read_tasks_or_attempts(
+    maint_engine: AsyncEngine,
+) -> None:
+    # Recovery lists runs and rebuilds each one under its own tenant.
+    for table in ("agent_run_tasks", "agent_task_attempts"):
+        with pytest.raises(DBAPIError, match="permission denied"):
+            await _count(maint_engine, table)
 
 
 async def test_maintenance_role_sees_nothing_it_has_no_policy_for(

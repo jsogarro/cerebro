@@ -6,6 +6,7 @@ from typing import Any, cast
 import pytest
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from src.auth.models import TokenPayload
 from src.middleware.tenant_context import (
@@ -47,6 +48,8 @@ class _CapturingSession:
     def __init__(self, dialect_name: str = "postgresql") -> None:
         self.executed: list[tuple[Any, dict[str, str]]] = []
         self._bind = _FakeBind(dialect_name)
+        # ``get_tenant_context`` attaches its re-scoping listener to this.
+        self.sync_session = Session()
 
     def get_bind(self) -> _FakeBind:
         return self._bind

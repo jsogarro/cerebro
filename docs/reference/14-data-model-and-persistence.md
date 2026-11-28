@@ -150,7 +150,7 @@ Columns: `workflow_id`, `project_id` (foreign key to `research_projects.id`), `r
 
 Twenty-three tables carry an `organization_id` column: `users`, `research_projects`, `generated_reports`, the thirteen `agent_*` run, capability, invocation, artifact, evidence, claim and execution-authority tables, and the seven document tables (`uploaded_documents`, `usage_ledger`, `document_critiques`, `critique_findings`, `similarity_checks`, `similarity_matches`, `egress_events`). `generated_reports.organization_id` and the `organization_id` of `agent_execution_authorities` and the seven document tables are not null; every other tenant column is nullable.
 
-**Row-level security.** Migrations `b7a9c2d4e8f1`, `c3f5a1d7b209`, `5d04cec6c232`, `e4b7c1a9d6f2`, `a7d2e9c4b1f8`, `b5e1c8d3a9f7` and `b8e3f1a5c7d9` enable row-level security and create a policy `tenant_isolation_<table>` on twenty-one tables. `f1c8a4d7e2b6` adds the same policy to `generated_reports`, drops the `purge_expired_*` policies, rewrites each predicate to `organization_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid`, runs `FORCE ROW LEVEL SECURITY` on all twenty-two, and adds `maintenance_<command>_<table>` policies `TO cerebro_maint` on `agent_runs`, `agent_run_tasks`, `agent_task_attempts`, `agent_run_config_snapshots`, `agent_execution_authorities` (select), `agent_run_event_outbox` (select, update), `uploaded_documents` (select, delete where expired) and `egress_events` (select, delete where older than a day). Policies exist on PostgreSQL only. The setting is written by `set_postgres_tenant_context` and by `tenant_session` (`src/models/db/session.py`); execution-service sessions set neither, so for them the repository filter below is the effective boundary (see [not wired](15-not-wired.md#row-level-security-for-execution-service-sessions)).
+**Row-level security.** Migrations `b7a9c2d4e8f1`, `c3f5a1d7b209`, `5d04cec6c232`, `e4b7c1a9d6f2`, `a7d2e9c4b1f8`, `b5e1c8d3a9f7` and `b8e3f1a5c7d9` enable row-level security and create a policy `tenant_isolation_<table>` on twenty-one tables. `f1c8a4d7e2b6` adds the same policy to `generated_reports`, drops the `purge_expired_*` policies, rewrites each predicate to `organization_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid`, runs `FORCE ROW LEVEL SECURITY` on all twenty-two, and adds `maintenance_<command>_<table>` policies `TO cerebro_maint` on `agent_runs`, `agent_run_tasks`, `agent_task_attempts`, `agent_run_config_snapshots`, `agent_execution_authorities` (select), `agent_run_event_outbox` (select, update), `uploaded_documents` (select, delete where expired) and `egress_events` (select, delete where older than a day); `b2d6f9a1c4e8` drops the `cerebro_maint` policies and grants on `agent_run_tasks` and `agent_task_attempts`. Policies exist on PostgreSQL only. The setting is written by `set_postgres_tenant_context` and by `tenant_session` (`src/models/db/session.py`); execution-service sessions use `tenant_session`.
 
 **Repository filter.**
 
@@ -209,7 +209,7 @@ The "session only" repositories take an `AsyncSession` in the constructor and `o
 
 ## Migrations
 
-Alembic scripts are in `alembic/versions/`; `alembic/env.py` reads `DATABASE_URL` (rewriting `postgres://` and `postgresql://` to `postgresql+asyncpg://`), then the `sqlalchemy.url` option of `alembic.ini`, then a localhost development URL. The revision chain, oldest first, has a single head, `d9a3c5e7b1f4`:
+Alembic scripts are in `alembic/versions/`; `alembic/env.py` reads `MIGRATION_DATABASE_URL` when set (the schema owner's login), otherwise `DATABASE_URL` (rewriting `postgres://` and `postgresql://` to `postgresql+asyncpg://`), then the `sqlalchemy.url` option of `alembic.ini`, then a localhost development URL. The revision chain, oldest first, has a single head, `b2d6f9a1c4e8`:
 
 | Revision | Purpose |
 |---|---|
@@ -237,12 +237,14 @@ Alembic scripts are in `alembic/versions/`; `alembic/env.py` reads `DATABASE_URL
 | `f1c8a4d7e2b6` | `NULLIF` tenant policies, `FORCE ROW LEVEL SECURITY`, `cerebro_maint` policies and grants |
 | `d5a1c8e2b7f3` | `owner_instance_id`, `lease_expires_at` and `fencing_token` on `agent_runs`, with a non-negative token CHECK, a CHECK that owner and expiry are both set or both null, and an index on the expiry |
 | `c9d4a7e2b6f1` | `users.totp_secret_enc`, `totp_enabled`, `totp_last_step`; `mfa_recovery_codes` |
+| `a9c3e5f7b1d2` | `server_default now()` on `created_at` and `updated_at` of `agent_runs`, `agent_run_tasks`, `agent_task_attempts`, `agent_capability_grants`, `agent_capability_approvals`, `agent_artifacts` and `agent_tool_invocations`, which the ORM omits from its INSERTs; also `oauth_accounts.first_connected_at`, whose default had been frozen to the migration's own timestamp |
+| `b2d6f9a1c4e8` | drops `cerebro_maint`'s policies and grants on `agent_run_tasks` and `agent_task_attempts`; recovery reads only run rows as that role |
 
 Migrations that create row-level security or triggers do so inside an `_is_postgresql()` guard; on another dialect they create tables and indexes only.
 
-`docker/entrypoint.sh` runs `alembic upgrade head` before starting the application. If the upgrade fails it prints the exit status and exits with it, so the container does not start; with no application command it exits with status 64. The `api` service in `docker-compose.yml` uses this entrypoint.
+`docker/entrypoint.sh` runs the roles script and `alembic upgrade head` before starting the application, unless `SKIP_MIGRATIONS=1`. If the upgrade fails it prints the exit status and exits with it, so the container does not start; with no application command it exits with status 64. The `api` service in both compose files uses this entrypoint with `SKIP_MIGRATIONS=1`; the one-shot `db-roles` and `migrate` services apply the roles and run `alembic upgrade head` as `cerebro_migrator`, and `api` waits for `migrate` to complete.
 
-Commands (the `Makefile` targets run them inside the `api` container):
+Commands (the `Makefile` targets run them in the `migrate` service):
 
 ```bash
 make db-init                                  # alembic upgrade head

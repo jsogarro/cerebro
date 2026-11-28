@@ -206,7 +206,9 @@ def test_is_template_migration_parity() -> None:
     config = Config(str(REPO_ROOT / "alembic.ini"))
     script = ScriptDirectory.from_config(config)
     heads = script.get_heads()
-    assert heads == [NEW_REVISION]
+    assert len(heads) == 1
+    chain = [r.revision for r in script.walk_revisions("base", heads[0])]
+    assert NEW_REVISION in chain
 
     rev = script.get_revision(NEW_REVISION)
     assert rev is not None

@@ -50,11 +50,11 @@ prod-logs: ## Show production logs
 
 ## Database Management
 db-init: ## Initialize database with migrations
-	./scripts/compose.sh exec api alembic upgrade head
+	./scripts/compose.sh run --rm migrate upgrade head
 
 db-migrate: ## Create new database migration
 	@read -p "Migration message: " msg; \
-	./scripts/compose.sh exec api alembic revision --autogenerate -m "$$msg"
+	./scripts/compose.sh run --rm migrate revision --autogenerate -m "$$msg"
 
 db-reset: ## Reset database (WARNING: destroys all data)
 	./scripts/compose.sh down postgres

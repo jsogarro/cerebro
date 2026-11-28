@@ -78,7 +78,7 @@ Services in `docker-compose.yml` and their host ports:
 | `pgadmin` | 5050 | Profile `dev-tools` |
 | `redis-commander` | 8081 | Profile `dev-tools` |
 
-Migrations: the `api` service uses `/entrypoint.sh` (`docker/entrypoint.sh`), which runs `alembic upgrade head`, exits with the migration's status if it fails and otherwise `exec`s the command. `make db-init` runs the same upgrade inside a running `api` container.
+Migrations: the one-shot `db-roles` and `migrate` services apply the roles and run `alembic upgrade head` as the schema owner, and `api` starts only after `migrate` completes. The `api` service still uses `/entrypoint.sh` (`docker/entrypoint.sh`) but sets `SKIP_MIGRATIONS=1`, so it holds neither the admin nor the owner credential and `exec`s its command. `make db-init` runs `migrate` again.
 
 Web workbench: the web client calls the relative base URL `/api/v1` (`cerebro/web/src/api/client.ts`), so it needs a same-origin proxy. Through Compose, open `http://localhost` (the `nginx` service, `NGINX_HTTP_HOST_PORT`). For a local dev server, run `npm install` and `npm run dev` in `cerebro/web`; `cerebro/web/vite.config.ts` proxies `/api` and `/ws` to `VITE_API_URL`, or to `http://localhost:8000` when it is unset. The Playwright config starts that dev server on port 5173 (`PLAYWRIGHT_PORT`).
 
@@ -193,8 +193,8 @@ Targets whose recipes reference only files and services that exist:
 | `dev`, `dev-build`, `dev-logs`, `dev-stop` | `./scripts/compose.sh up -d`, `up -d --build`, `logs -f`, `down` |
 | `dev-clean` | `./scripts/compose.sh down -v --remove-orphans`, then `docker system prune -f` |
 | `prod-build`, `prod-up`, `prod-down`, `prod-logs` | `./scripts/compose.sh -f docker-compose.production.yml` with `build`, `up -d`, `down`, `logs -f` |
-| `db-init` | `./scripts/compose.sh exec api alembic upgrade head` |
-| `db-migrate` | prompts for a message, then `alembic revision --autogenerate -m` inside `api` |
+| `db-init` | `./scripts/compose.sh run --rm migrate upgrade head` |
+| `db-migrate` | prompts for a message, then `alembic revision --autogenerate -m` inside the `migrate` service |
 | `db-reset` | stops `postgres`, runs `docker volume rm cerebro_postgres_data` (the volume is named `<compose project>_postgres_data`, so the command works only when the checkout directory is named `cerebro`), starts `postgres`, sleeps 10 seconds, runs `make db-init` |
 | `db-backup` | `pg_dump -U research research_db` inside `postgres` into `backups/backup_<timestamp>.sql` |
 | `db-shell` | `psql -U research -d research_db` inside `postgres` |

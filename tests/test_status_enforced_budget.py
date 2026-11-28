@@ -8,6 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from src.api.services.direct_execution_service import (
     ExecutionStatus,
@@ -57,7 +58,7 @@ def client() -> Iterator[TestClient]:
 
     overrides = {
         get_jwt_service: _JWT,
-        get_session: lambda: Mock(execute=_noop),
+        get_session: lambda: Mock(execute=_noop, sync_session=Session()),
         get_application_direct_execution_service: _Backend,
     }
     app.dependency_overrides.update(overrides)

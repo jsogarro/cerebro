@@ -230,12 +230,15 @@ async def tenant_session(
     """
     async with factory() as session:
         if organization_id is not None:
-            event.listen(
-                session.sync_session,
-                "after_begin",
-                _scope_to(str(organization_id)),
-            )
+            scope_to_organization(session, organization_id)
         yield session
+
+
+def scope_to_organization(
+    session: AsyncSession, organization_id: str | uuid.UUID
+) -> None:
+    """Apply the tenant after every later ``BEGIN`` of an existing session."""
+    event.listen(session.sync_session, "after_begin", _scope_to(str(organization_id)))
 
 
 def _scope_to(organization_id: str) -> Callable[[Any, Any, Any], None]:
@@ -282,5 +285,6 @@ __all__ = [
     "get_session",
     "get_session_factory",
     "init_db",
+    "scope_to_organization",
     "tenant_session",
 ]

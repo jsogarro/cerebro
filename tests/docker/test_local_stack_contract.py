@@ -21,13 +21,15 @@ DOCKERFILE_PATH = REPO_ROOT / "Dockerfile"
 ENTRYPOINT_PATH = REPO_ROOT / "docker" / "entrypoint.sh"
 NGINX_PATH = REPO_ROOT / "docker" / "nginx" / "nginx.conf"
 
+# The two one-shots hold the admin and schema-owner credentials so the API does not.
+ONE_SHOT_SERVICES = {"db-roles", "migrate"}
 EXPECTED_DEFAULT_SERVICES = {
     "postgres",
     "redis",
     "api",
     "web",
     "nginx",
-}
+} | ONE_SHOT_SERVICES
 
 
 def _compose_services() -> dict[str, dict]:
@@ -59,10 +61,25 @@ def _nginx_upstream_targets() -> dict[str, list[tuple[str, int]]]:
     }
 
 
-def test_default_topology_contains_exactly_five_startable_services() -> None:
+def test_default_topology_is_the_stack_and_its_two_one_shots() -> None:
     """The default profile must be the complete local application stack."""
 
     assert set(_default_services()) == EXPECTED_DEFAULT_SERVICES
+
+
+def test_the_api_holds_no_admin_or_schema_owner_credential() -> None:
+    for path in (COMPOSE_PATH, REPO_ROOT / "docker-compose.production.yml"):
+        compose = yaml.safe_load(path.read_text(encoding="utf-8"))
+        api = compose["services"]["api"]
+        environment = "\n".join(api["environment"])
+
+        assert "SKIP_MIGRATIONS=1" in environment, path.name
+        assert "ROLES_ADMIN_DATABASE_URL" not in environment, path.name
+        assert "MIGRATION_DATABASE_URL" not in environment, path.name
+        assert "cerebro_migrator" not in environment, path.name
+        assert "migrate" in api["depends_on"], path.name
+        for one_shot in ONE_SHOT_SERVICES:
+            assert compose["services"][one_shot]["restart"] == "no", path.name
 
 
 def test_compose_resources_are_project_scoped_for_parallel_checkouts() -> None:
