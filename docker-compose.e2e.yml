@@ -18,4 +18,6 @@ services:
       - DOCUMENT_CRITIQUE_ENABLED=true
       - DOCUMENT_ENCRYPTION_KEY=ZTJlLW9ubHkta2V5LW5vdC1mb3ItcmVhbC11c2UtMDE=
       - PROVIDER_TERMS_VERIFIED_ON=2026-01-01
+      # start_critique answers 503 provider_not_configured while this is blank,
+      # before it asks for the model; the fixture model means it is never sent.
       - GEMINI_API_KEY=e2e-fixture-key-never-sent

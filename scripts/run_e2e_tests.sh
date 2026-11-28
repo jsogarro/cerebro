@@ -43,7 +43,7 @@ playwright install chromium firefox webkit
 
 # Start application
 echo -e "\n${YELLOW}Starting application...${NC}"
-docker-compose up -d
+docker-compose -f docker-compose.yml -f docker-compose.e2e.yml up -d
 
 # Wait for application to be ready
 echo -n "Waiting for application..."

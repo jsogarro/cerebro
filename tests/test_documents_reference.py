@@ -1,9 +1,10 @@
-"""The uploaded-documents reference page names every route and setting the code has."""
+"""The uploaded-documents reference page matches the routes and settings in code."""
 
 import re
 from pathlib import Path
 
-from src.api.routes.documents import router
+from src.api.routes.critiques import router as critiques_router
+from src.api.routes.documents import router as documents_router
 from src.core.config import Settings
 
 PAGE = (
@@ -11,22 +12,45 @@ PAGE = (
 ).read_text()
 
 
-def test_every_document_setting_is_documented_with_its_default() -> None:
-    for name in Settings.model_fields:
-        if name.startswith("DOCUMENT_"):
-            assert f"`{name}`" in PAGE, name
-    rows = dict(re.findall(r"^\| `(DOCUMENT_\w+)` \| ([^|]+) \|", PAGE, re.M))
-    assert rows["DOCUMENT_UPLOADS_ENABLED"].strip("` ") == "false"
-    assert rows["DOCUMENT_RETENTION_DAYS"].strip() == str(
-        Settings.model_fields["DOCUMENT_RETENTION_DAYS"].default
-    )
-    assert rows["DOCUMENT_UPLOADS_PER_DAY"].strip() == str(
-        Settings.model_fields["DOCUMENT_UPLOADS_PER_DAY"].default
-    )
+def _section(title: str) -> str:
+    match = re.search(rf"^## {title}\n(.*?)(?=^## |\Z)", PAGE, re.M | re.S)
+    assert match, title
+    return match.group(1)
 
 
-def test_every_document_route_is_documented() -> None:
+def _documented(value: str) -> object:
+    value = value.strip().strip("`")
+    if value == "empty":
+        return ""
+    if value in ("true", "false"):
+        return value == "true"
+    if value.endswith(" MiB"):
+        return int(value.removesuffix(" MiB")) * 1024 * 1024
+    return int(value.replace(",", ""))
+
+
+def test_every_setting_row_carries_the_real_default() -> None:
+    rows = dict(re.findall(r"^\| `(\w+)` \| ([^|]+) \|", _section("Settings"), re.M))
+    expected = {
+        name
+        for name in Settings.model_fields
+        if name.startswith("DOCUMENT_") or name == "PROVIDER_TERMS_VERIFIED_ON"
+    }
+    assert set(rows) == expected
+    for name, value in rows.items():
+        assert _documented(value) == Settings.model_fields[name].default, name
+
+
+def _routes(router, section: str) -> None:  # type: ignore[no-untyped-def]
+    body = _section(section)
     for route in router.routes:
-        method = sorted(route.methods)[0]  # type: ignore[attr-defined]
-        path = "/api/v1/documents" + route.path.removeprefix("/documents")  # type: ignore[attr-defined]
-        assert f"`{method} {path}`" in PAGE, (method, path)
+        for method in route.methods:
+            assert f"`{method} /api/v1{route.path}`" in body, (method, route.path)
+
+
+def test_every_document_route_is_in_the_routes_table() -> None:
+    _routes(documents_router, "Routes")
+
+
+def test_every_critique_route_is_in_the_critique_table() -> None:
+    _routes(critiques_router, "Critique")

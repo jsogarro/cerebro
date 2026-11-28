@@ -73,9 +73,12 @@ async def test_critique_runs_on_a_fixture_model(client, new_account):
         await asyncio.sleep(0.5)
     assert critique["status"] == "succeeded", critique
     assert critique["findings"]
-    text = MANUSCRIPT.decode()
-    for finding in critique["findings"]:
-        assert text[finding["raw_start"] : finding["raw_end"]] == finding["quote"]
+    # Offsets are located by the service from the document, so the quote and its
+    # position must be the ones the fixture model named, not merely self-consistent.
+    quote = "We was testing the claim."
+    assert {(f["quote"], f["raw_start"], f["raw_end"]) for f in critique["findings"]} == {
+        (quote, 0, len(quote))
+    }
 
 
 @_missing("P12", "uploads cannot be attached to a run until the retention rule lands")

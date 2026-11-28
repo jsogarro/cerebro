@@ -8,14 +8,14 @@ Mounted at `/api/v1/documents` in `src/api/main.py` (`src/api/routes/documents.p
 
 | Method and path | Purpose | Success | Errors |
 |---|---|---|---|
-| `POST /api/v1/documents` | upload one file (`multipart/form-data`, field `file`, optional `declared_authors` as a JSON list of at most 20 names of at most 100 characters) | 201, `DocumentOut` | 404 when uploads are off; 411 without `Content-Length`; 413 over the size limit; 415 for an unsupported or mismatched type; 422 for a missing file, bad authors, an extraction refusal (`too_many_pages`, `too_much_text`, `encrypted_pdf`, `no_text`, `malformed_pdf`); 429 `upload_quota_exceeded`; 503 `retention_unavailable`, `document_storage_unavailable` or `extraction_busy` |
-| `GET /api/v1/documents` | the caller's newest documents (`limit` 1 to 50) | 200, a list of `DocumentOut` | 404 when uploads are off |
-| `GET /api/v1/documents/{document_id}` | one document's metadata | 200, `DocumentOut` | 404 |
+| `POST /api/v1/documents` | upload one file (`multipart/form-data`, field `file`, optional `declared_authors` as a JSON list of at most 20 names of at most 100 characters) | 201, `DocumentOut` | 404 when uploads are off; 411 without `Content-Length`; 413 over the size limit; 415 for an unsupported or mismatched type; 400 `invalid_multipart` (or the multipart parser's own status) for a body that is not valid multipart; 422 for a missing file, bad authors, or an extraction refusal (`too_many_pages`, `too_much_text`, `encrypted_pdf`, `no_text`, `malformed_pdf`, `extraction_timeout`, `output_too_large`, `extraction_resource_limit`, `extraction_cpu_limit`); 429 `upload_quota_exceeded`; 503 `retention_unavailable`, `document_storage_unavailable` or `extraction_busy` |
+| `GET /api/v1/documents` | the caller's newest documents (`limit` 1 to 50) | 200, a list of `DocumentOut` | 404 when uploads are off; 503 `document_storage_unavailable` |
+| `GET /api/v1/documents/{document_id}` | one document's metadata | 200, `DocumentOut` | 404; 503 `document_storage_unavailable` |
 | `DELETE /api/v1/documents/{document_id}` | delete the document | 204 | 404 |
 
 `DocumentOut` carries `id`, `filename`, `media_type`, `char_count`, `page_count`, `text_sha256` (the SHA-256 of the extracted text as UTF-8), `invisible_chars_removed` and `expires_at`. `DELETE` works whether or not uploads are enabled, so data stored earlier can always be removed.
 
-Accepted types are `application/pdf`, `text/markdown` and `text/plain`. The declared type must agree with the content: a PDF declared as text, or text declared as PDF, is a 415. The request body is cut off at `DOCUMENT_MAX_BYTES` plus 64 KiB whatever the headers claim. Extraction runs in a child process with its own deadline (`DOCUMENT_EXTRACT_TIMEOUT_S`).
+Accepted types are `application/pdf`, `text/markdown` and `text/plain`. The declared type must agree with the content: a PDF declared as text, or text declared as PDF, is a 415. The request body is cut off at `DOCUMENT_MAX_BYTES` plus 64 KiB whatever the headers claim. A PDF is extracted in a child process with its own deadline (`DOCUMENT_EXTRACT_TIMEOUT_S`), which also covers the wait for an extraction slot; plain text and Markdown are decoded in a thread, not a child process.
 
 ## Settings
 
@@ -31,6 +31,7 @@ Accepted types are `application/pdf`, `text/markdown` and `text/plain`. The decl
 | `DOCUMENT_UPLOADS_PER_DAY` | 20 | Uploads per user per day; a failed extraction still counts |
 | `DOCUMENT_PURGE_INTERVAL_S` | 3600 | Seconds between sweeps that delete expired documents |
 | `DOCUMENT_CRITIQUE_ENABLED` | `false` | Serves the critique routes (see below) |
+| `PROVIDER_TERMS_VERIFIED_ON` | empty | ISO date the model provider's terms were checked; critique starts only when it is not in the future |
 
 ## Storage and retention
 
@@ -38,7 +39,16 @@ The extracted text, the filename and the declared authors are stored encrypted; 
 
 ## Critique
 
-`src/api/routes/critiques.py` serves `GET /api/v1/critique-config` and, when `DOCUMENT_CRITIQUE_ENABLED` is true, the critique routes under `/api/v1/documents/{document_id}/critiques` and `/api/v1/critiques/{critique_id}`. A critique sends the document text to a third-party model, so it also needs `PROVIDER_TERMS_VERIFIED_ON` (a date not in the future), `GEMINI_API_KEY`, and a request that acknowledges the consent text for the configured model and host. Each retained finding quotes a located span of the document.
+A critique sends the document text to a third-party model, so it also needs `PROVIDER_TERMS_VERIFIED_ON`, `GEMINI_API_KEY`, and a request that acknowledges the consent text for the configured model and host. Each retained finding quotes a located span of the document. Routes in `src/api/routes/critiques.py`, all under authentication and owner scope; all but the first answer 404 while `DOCUMENT_CRITIQUE_ENABLED` is false:
+
+| Route | Purpose |
+|---|---|
+| `GET /api/v1/critique-config` | enablement, model, hosts, limits and consent texts |
+| `POST /api/v1/documents/{document_id}/critiques` | start a critique (202) |
+| `GET /api/v1/documents/{document_id}/critiques` | list a document's critiques |
+| `GET /api/v1/critiques/{critique_id}` | status and findings |
+| `GET /api/v1/critiques/{critique_id}/report` | plain-text report |
+| `DELETE /api/v1/critiques/{critique_id}` | delete and stop the run |
 
 ## End-to-end stack
 
