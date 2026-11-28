@@ -8,9 +8,13 @@ import click
 from click.core import Context
 from click.exceptions import Exit
 
-from src.auth.models import PAT_ALLOWED_SCOPES, PAT_MAX_LIFETIME_DAYS, PAT_SCOPE_READ
 from src.cli.client import APIError, ResearchAPIClient
 from src.cli.formatters import print_error, print_success
+
+# Kept local so importing the CLI never loads server Settings (SECRET_KEY).
+_PAT_SCOPE_READ = "mcp:read"
+_PAT_ALLOWED_SCOPES = ("mcp:read", "mcp:start")
+_PAT_MAX_LIFETIME_DAYS = 90
 
 
 @click.group(name="tokens")
@@ -22,14 +26,14 @@ def tokens_group() -> None:
 @click.option("--name", required=True, help="Human-readable label for the token")
 @click.option(
     "--expires-in-days",
-    type=click.IntRange(1, PAT_MAX_LIFETIME_DAYS),
+    type=click.IntRange(1, _PAT_MAX_LIFETIME_DAYS),
     required=True,
-    help=f"Lifetime in days (1-{PAT_MAX_LIFETIME_DAYS})",
+    help=f"Lifetime in days (1-{_PAT_MAX_LIFETIME_DAYS})",
 )
 @click.option(
     "--scope",
     "scopes",
-    type=click.Choice(sorted(PAT_ALLOWED_SCOPES)),
+    type=click.Choice(_PAT_ALLOWED_SCOPES),
     multiple=True,
     help="Token scopes (defaults to mcp:read)",
 )
@@ -42,7 +46,7 @@ def create_token_command(
 ) -> None:
     """Create a personal access token and display its secret once."""
     verbose = ctx.obj["verbose"]
-    selected_scopes = list(scopes) if scopes else [PAT_SCOPE_READ]
+    selected_scopes = list(scopes) if scopes else [_PAT_SCOPE_READ]
 
     async def _run() -> None:
         async with ResearchAPIClient(verbose=verbose) as client:

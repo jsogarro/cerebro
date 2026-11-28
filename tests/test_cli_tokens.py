@@ -2,12 +2,28 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from unittest.mock import AsyncMock
 
 import pytest
 from click.testing import CliRunner
 
 from src.cli.main import cli
+
+
+def test_cli_imports_without_server_secret_key() -> None:
+    env = {key: value for key, value in os.environ.items() if key != "SECRET_KEY"}
+    result = subprocess.run(
+        [sys.executable, "-c", "from src.cli.main import cli; cli(['--help'])"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "tokens" in result.stdout
 
 
 def test_cli_tokens_create_list_revoke(monkeypatch: pytest.MonkeyPatch) -> None:

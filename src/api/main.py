@@ -296,6 +296,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             if durable_session_factory is not None
             else None
         )
+        if maintenance_session_factory is not None:
+            from src.auth.pat_service import PersonalAccessTokenService
+
+            pat_service = PersonalAccessTokenService(
+                session_factory=maintenance_session_factory
+            )
+            app.state.pat_service = pat_service
+            resources.callback(
+                _remove_app_state_if_owned, app, "pat_service", pat_service
+            )
         direct_execution_service = configure_direct_execution_service(
             gemini_service=gemini_service,
             masr_router=masr_runtime.router,

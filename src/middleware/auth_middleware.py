@@ -29,7 +29,7 @@ from src.auth.pat_service import (
 )
 from src.core.config import settings
 from src.models.db.audit_log import AuditEventType
-from src.models.db.session import get_maintenance_session_factory, get_session
+from src.models.db.session import get_session
 from src.models.db.user import User
 from src.repositories.user_repository import UserRepository
 from src.security.audit_middleware import audit_rejection
@@ -134,32 +134,26 @@ async def resolve_jwt_service(connection: HTTPConnection) -> JWTService:
 
 
 async def get_pat_service() -> PersonalAccessTokenService:
-    """Return a PAT validator backed by the maintenance session factory."""
-    try:
-        return PersonalAccessTokenService(
-            session_factory=get_maintenance_session_factory()
-        )
-    except Exception as exc:
-        logger.error("PAT authentication service unavailable", error=str(exc))
-        raise AuthenticationServiceUnavailableError from exc
+    """Dependency marker for PAT validation (wired onto app.state during lifespan)."""
+    raise AuthenticationServiceUnavailableError("PAT service is not initialized")
 
 
 async def resolve_pat_service(
     connection: HTTPConnection,
 ) -> PersonalAccessTokenService:
-    """Resolve PAT validation while honoring FastAPI test overrides."""
+    """Resolve PAT validation from app state while honoring FastAPI test overrides."""
     dependency_overrides = getattr(connection.app, "dependency_overrides", {})
-    service_factory: Callable[..., Any] = dependency_overrides.get(
-        get_pat_service, get_pat_service
-    )
-
-    try:
-        service = service_factory()
-        if inspect.isawaitable(service):
-            service = await service
-    except Exception as exc:
-        logger.error("PAT authentication service unavailable", error=str(exc))
-        raise AuthenticationServiceUnavailableError from exc
+    override: Callable[..., Any] | None = dependency_overrides.get(get_pat_service)
+    if override is not None:
+        try:
+            service = override()
+            if inspect.isawaitable(service):
+                service = await service
+        except Exception as exc:
+            logger.error("PAT authentication service unavailable", error=str(exc))
+            raise AuthenticationServiceUnavailableError from exc
+    else:
+        service = getattr(connection.app.state, "pat_service", None)
 
     if service is None or not callable(getattr(service, "validate_token", None)):
         logger.error("PAT authentication service has no token validator")
