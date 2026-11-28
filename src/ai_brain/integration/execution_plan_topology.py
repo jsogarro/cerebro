@@ -146,6 +146,18 @@ def _supports_data_handoff(version: str) -> bool:
     return int(version.split(".", 1)[0]) >= MIN_DATA_HANDOFF_WORKFLOW_MAJOR
 
 
+_FAILURE_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+
+
+def _failure_code(result: AgentResult) -> str:
+    # A worker may name why it failed; only a well-formed code is kept, since
+    # the output can carry model or retrieved text.
+    code = result.output.get("error_code") if isinstance(result.output, dict) else None
+    if isinstance(code, str) and _FAILURE_CODE.fullmatch(code):
+        return code
+    return "WORKER_FAILED"
+
+
 def classify_worker_result(
     worker: WorkerAssignment, result: AgentResult
 ) -> WorkerOutcome:
@@ -156,7 +168,9 @@ def classify_worker_result(
     if status in _TIMEOUT_STATUSES:
         return WorkerOutcome(worker_id, WorkerOutcomeStatus.TIMED_OUT, "WORKER_TIMEOUT")
     if status == "failed":
-        return WorkerOutcome(worker_id, WorkerOutcomeStatus.FAILED, "WORKER_FAILED")
+        return WorkerOutcome(
+            worker_id, WorkerOutcomeStatus.FAILED, _failure_code(result)
+        )
     if status != "success":
         return WorkerOutcome(
             worker_id, WorkerOutcomeStatus.FAILED, "WORKER_STATUS_UNKNOWN"

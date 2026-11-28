@@ -296,8 +296,6 @@ async def test_a_plan_run_with_an_llm_persists_retrieved_evidence_by_default(
 async def test_a_failed_search_records_no_evidence_visibly(
     monkeypatch: pytest.MonkeyPatch, test_engine: AsyncEngine, tmp_path: Path
 ) -> None:
-    # The run records only a generic WORKER_FAILED (classify_worker_result lives
-    # in execution_plan_topology.py), so the worker's own verdict is captured here.
     results: list[Any] = []
     real_execute = LiteratureReviewAgent.execute
 
@@ -316,7 +314,9 @@ async def test_a_failed_search_records_no_evidence_visibly(
     status = service.active_executions[execution_id]
     # No evidence fails the required worker, and the run with it.
     assert status.status == "failed"
-    assert any("WORKER_FAILED" in error for error in status.errors), status.errors
+    assert any("INSUFFICIENT_EVIDENCE" in error for error in status.errors), (
+        status.errors
+    )
     evidence_rows = await _rows(
         test_engine, "SELECT * FROM agent_evidence WHERE run_id = :r", r=run_id
     )
