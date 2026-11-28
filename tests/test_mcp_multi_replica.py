@@ -405,6 +405,7 @@ async def test_multi_replica_alternating_requests_succeed_without_session_affini
                 "get_research_status",
                 "get_research_results",
                 "get_research_evidence",
+                "start_research",
             }
 
             # 4-6. Alternating tool calls across replica-b, replica-a, replica-b

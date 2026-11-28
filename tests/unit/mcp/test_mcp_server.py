@@ -114,14 +114,32 @@ async def test_in_memory_client_lists_exact_read_only_tools() -> None:
         "get_research_status",
         "get_research_results",
         "get_research_evidence",
+        "start_research",
     }
     assert "execution_id" in by_name["get_research_status"].input_schema["properties"]
     assert "execution_id" in by_name["get_research_results"].input_schema["properties"]
     evidence_props = by_name["get_research_evidence"].input_schema["properties"]
     assert {"run_id", "cursor", "limit"} <= set(evidence_props)
-    for tool in by_name.values():
+    start_props = by_name["start_research"].input_schema["properties"]
+    assert {
+        "template_authority_id",
+        "template_authority_version",
+        "request_id",
+        "query",
+        "domains",
+    } == set(start_props)
+    for read_name in (
+        "get_research_status",
+        "get_research_results",
+        "get_research_evidence",
+    ):
+        tool = by_name[read_name]
         assert tool.annotations is not None
         assert tool.annotations.read_only_hint is True
+    start_annotations = by_name["start_research"].annotations
+    assert start_annotations is not None
+    assert start_annotations.read_only_hint is False
+    assert start_annotations.open_world_hint is True
 
 
 @pytest.mark.asyncio

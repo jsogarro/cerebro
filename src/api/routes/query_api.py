@@ -34,9 +34,12 @@ from ...core.observability import set_llm_request_estimated_cost
 from ...core.pii_redactor import redact_pii
 from ...middleware.tenant_context import TenantContext, get_tenant_context
 from ...models.execution_authority import ExecutionAuthorityReference
-from ...models.research_project import ResearchDepth, ResearchQuery
+from ...models.research_project import ResearchDepth
 from ...repositories.run_lifecycle_repository import RunCapExceededError
-from ..services.direct_execution_service import ResumeUnsupportedError
+from ..services.direct_execution_service import (
+    ResumeUnsupportedError,
+    RunParamsConflictError,
+)
 from ..services.execution_authority_resolver import ExecutionAuthorityError
 from ..services.masr_routing_service import MASRRoutingService
 from ..services.research_kernel import (
@@ -49,6 +52,7 @@ from ..services.research_kernel import (
     get_kernel_execution_status,
     get_legacy_research_kernel,
     resume_kernel_execution,
+    start_intelligent_research,
 )
 from .masr_api import get_masr_routing_service
 
@@ -216,22 +220,12 @@ async def intelligent_research_query(
 
         execution_service = _resolved_research_kernel(execution_service)
 
-        from ...models.research_project import ResearchProject, ResearchScope
-
-        project = ResearchProject(
-            title=f"API Query: {request.query[:50]}...",
-            query=ResearchQuery(
-                text=request.query,
-                domains=request.domains or ["general"],
-                depth_level=ResearchDepth.COMPREHENSIVE.value,
-            ),
-            user_id=tenant_context.user_id,
-            scope=ResearchScope(),
-        )
-
-        # Start intelligent execution
-        execution_id = await execution_service.execute(
-            project,
+        start_result = await start_intelligent_research(
+            execution_service,
+            tenant=tenant_context,
+            query=request.query,
+            domains=request.domains,
+            authority_reference=request.authority_reference,
             context={
                 **request.context,
                 "routing_strategy": request.routing_strategy.value
@@ -241,23 +235,18 @@ async def intelligent_research_query(
                 "cost_preference": request.cost_preference,
                 "api_endpoint": "intelligent_research_query",
             },
-            authority_reference=request.authority_reference,
-            organization_id=tenant_context.organization_id,
         )
 
-        execution_status = await get_kernel_execution_status(
-            execution_service,
-            execution_id,
-            organization_id=tenant_context.organization_id,
-        )
+        execution_id = start_result.execution_id
+        execution_status = start_result.execution_status
 
         routing_decision = (
             execution_status.routing_decision if execution_status else None
         ) or {}
         response = IntelligentQueryResponse(
             execution_id=execution_id,
-            query_id=str(project.id),
-            status=execution_status.status if execution_status else "pending",
+            query_id=start_result.project_id,
+            status=start_result.status,
             routing_decision=execution_status.routing_decision
             if execution_status and execution_status.routing_decision
             else {},
@@ -303,11 +292,16 @@ async def intelligent_research_query(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={"code": exc.code},
         ) from exc
+    except RunParamsConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code},
+        ) from exc
     except Exception as e:
-        logger.error(f"Intelligent research query failed: {e}")
+        logger.error("Intelligent research query failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Query execution failed: {e!s}",
+            detail="Internal server error",
         ) from e
 
 
@@ -361,10 +355,10 @@ async def intelligent_analysis_query(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Intelligent analysis query failed: {e}")
+        logger.error("Intelligent analysis query failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Analysis query failed: {e!s}",
+            detail="Internal server error",
         ) from e
 
 
@@ -415,10 +409,10 @@ async def intelligent_synthesis_query(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Intelligent synthesis query failed: {e}")
+        logger.error("Intelligent synthesis query failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Synthesis query failed: {e!s}",
+            detail="Internal server error",
         ) from e
 
 
