@@ -9,6 +9,7 @@ import pytest
 from httpx import AsyncClient
 from starlette import status
 
+from src.auth.jwt_service import JWTService
 from tests.integration.conftest import IntegrationTestConfig
 
 
@@ -121,9 +122,14 @@ class TestResearchEndpointsIntegration:
         assert response.status_code == status.HTTP_204_NO_CONTENT
 
     @pytest.mark.asyncio
-    async def test_metrics_endpoint(self, authenticated_client: AsyncClient) -> None:
-        """Test Prometheus metrics endpoint."""
-        response = await authenticated_client.get("/metrics/")
+    async def test_metrics_endpoint(
+        self, authenticated_client: AsyncClient, jwt_service: JWTService
+    ) -> None:
+        """Test Prometheus metrics endpoint with the scraper credential."""
+        response = await authenticated_client.get(
+            "/metrics/",
+            headers={"Authorization": f"Bearer {jwt_service.generate_metrics_token()}"},
+        )
 
         assert response.status_code == status.HTTP_200_OK
         # Prometheus metrics return text/plain content type

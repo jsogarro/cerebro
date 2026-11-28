@@ -365,7 +365,7 @@ class JWTService:
         cannot survive; this one carries its own ``exp`` instead.
         """
         now = datetime.now(UTC)
-        return jwt.encode(
+        token: str = jwt.encode(
             {
                 "sub": "metrics-scraper",
                 "jti": str(uuid4()),
@@ -379,6 +379,7 @@ class JWTService:
             self.private_key,
             algorithm=self.algorithm,
         )
+        return token
 
     async def validate_token(
         self,
