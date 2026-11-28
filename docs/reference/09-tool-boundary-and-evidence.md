@@ -12,13 +12,13 @@ Every tool call made by an agent goes through one mediator, `ToolBoundary`, whic
 | Capability approvals | Not wired | none | `src/repositories/capability_repository.py` (`create_approval`) |
 | Budget ledger | Active | one ledger per execution | `src/core/budget.py` (`BudgetLedger`) |
 | Local tool `arithmetic` on `DataAnalysisAgent` | Active | `LLMWorkerAgentBase._execute_model_tool_call` | `src/agents/tools/registry.py` (`ToolRegistry`) |
-| Local tools `datetime_info` and `unit_conversion` | Not wired | none | `src/agents/tools/registry.py` (`create_default_registry`) |
+| Local tools `datetime_info` and `unit_conversion` | Active | `MCPIntegration` (`get_datetime_info`, `convert_units`) and `ToolBoundary` | `src/agents/integrations/mcp_tool_specs.py`, `src/agents/tools/datetime_tool.py`, `unit_conversion_tool.py` |
 | `finance_math` called directly by finance agents | Active | `FinancialAnalysisAgent`, `ValuationAgent`, `FinancialCalculatorAgent` | `src/agents/tools/finance_math.py` |
 | Prompt identity verification | Not wired | none | `src/core/tools/prompts.py` (`PromptIdentityVerifier`) |
 | Durable tool audit (`agent_tool_invocations`) | Active | `SessionToolAuditStore` | `src/agents/tools/durable_audit.py` |
 | MCP tool path for plan workers | Active | `MCP_TOOL_PATH_ENABLED` (default `true`) | `src/ai_brain/integration/masr_supervisor_bridge.py` (`_execute_plan_worker`) |
 | Search evidence and source snapshots | Active | `SearchEvidenceRecorder` | `src/core/acquisition/search_evidence.py` |
-| Source fetch tool and `acquire` | Not wired | none | `src/core/acquisition/fetch_tool.py`, `service.py` |
+| Source fetch tool (`source.fetch`) and PDF full-text extraction | Active | `MCPIntegration.fetch_source` and `ToolBoundary` | `src/core/acquisition/fetch_tool.py`, `pdf_text.py`, `service.py` |
 | PDF text extraction | Active | document upload ingestion, through the `extract_child.py` subprocess | `src/core/acquisition/pdf_text.py`, `extract_child.py` |
 | Final-report artifact and claim records | Active | `_persist_transition` on `succeeded` | `src/core/claims/resolution.py`, `recording.py` |
 | Fixture claim-support pass | Active when configured | `CLAIM_SUPPORT_FIXTURE_MANIFEST` and `EVALUATION_DISPATCH_ENABLED` | `src/api/services/claim_support_evaluation_service.py`, `src/core/evaluation/fixture_support.py` |
@@ -83,8 +83,8 @@ A `CapabilityGrant` (`src/core/contracts/capabilities.py`) authorizes one tool f
 | Tool | Name | Registered by | Status |
 |---|---|---|---|
 | `ArithmeticTool` | `arithmetic` | `DataAnalysisAgent._register_tools` | Active |
-| `DatetimeTool` | `datetime_info` | `create_default_registry` | Not wired |
-| `UnitConversionTool` | `unit_conversion` | `create_default_registry` | Not wired |
+| `DatetimeTool` | `datetime_info` | `build_specs` (`MCPIntegration`) and `create_default_registry` | Active |
+| `UnitConversionTool` | `unit_conversion` | `build_specs` (`MCPIntegration`) and `create_default_registry` | Active |
 
 `create_default_registry` has no caller under `src/`. `src/agents/tools/finance_math.py` holds pure functions (`dcf_gordon_growth`, `npv`, `financial_ratios`, `compound_interest`, `loan_amortization`, `descriptive_stats`, `calculate`). `FinancialAnalysisAgent` and `ValuationAgent` call them in `_precompute`, and `FinancialCalculatorAgent` (agent type `financial_calculator`) dispatches on `parameters.operation`; none of these calls goes through the boundary.
 
@@ -113,14 +113,17 @@ Idempotency is enforced by the partial unique index `uq_agent_tool_invocation_id
 
 When enabled (the default), `MASRSupervisorBridge._execute_plan_worker` builds, per plan worker, an `MCPIntegration` with `enable_fallback=False`, the worker's grants filtered to its `tool_allowlist`, the task's identity and the run's budget ledger. The audit store is the configured one or `SessionToolAuditStore(session_factory)`.
 
-`MCPIntegration` registers four tools, each version `1.0.0`, `read_only`, with a 45-second default deadline (`tool_timeout_seconds` in its config):
+`MCPIntegration` registers seven tools, each version `1.0.0`, with a 45-second default deadline (`tool_timeout_seconds` in its config). Outbound tools (`mcp.academic_search`, `mcp.format_citations`, `source.fetch`) declare `external_read` sensitivity and pinned outbound host sets; local tools (`mcp.analyze_statistics`, `mcp.build_knowledge_graph`, `datetime_info`, `unit_conversion`) declare `read_only` with no outbound hosts:
 
-| Boundary tool | Method | In-process MCP tool |
-|---|---|---|
-| `mcp.academic_search` | `search_academic_sources` | `search_academic` |
-| `mcp.format_citations` | `format_citations` | `citation_formatter` |
-| `mcp.analyze_statistics` | `analyze_statistics` | `statistics_analyzer` |
-| `mcp.build_knowledge_graph` | `build_knowledge_graph` | `knowledge_graph` |
+| Boundary tool | Method | Sensitivity | Implementation |
+|---|---|---|---|
+| `mcp.academic_search` | `search_academic_sources` | `external_read` | `AcademicSearchTool` |
+| `mcp.format_citations` | `format_citations` | `external_read` | `CitationTool` |
+| `mcp.analyze_statistics` | `analyze_statistics` | `read_only` | `StatisticsTool` |
+| `mcp.build_knowledge_graph` | `build_knowledge_graph` | `read_only` | `KnowledgeGraphTool` |
+| `source.fetch` | `fetch_source` | `external_read` | `hardened_source_fetch_tool` / `HardenedHttpFetcher` |
+| `datetime_info` | `get_datetime_info` | `read_only` | `DatetimeTool` |
+| `unit_conversion` | `convert_units` | `read_only` | `UnitConversionTool` |
 
 Output trust is declared `external_untrusted`. A failed call returns `success=false`, `degraded=true` and the outcome's `error_code` and `retry`; with `enable_fallback=False` the stand-in payload is empty rather than invented. The default input trust is `user_supplied`.
 
@@ -144,7 +147,9 @@ Each source commits in its own session; a failed write is reported against its U
 
 Locators are `bytes`, `char` or `line` spans, optionally followed by annotation segments (`xpath`, `css`, `jsonptr`, `page`, `sheet`, `heading`); only the span is authoritative. `resolve(locator, snapshot_bytes)` returns the cited bytes and raises `UnresolvableLocatorError` for an out-of-range span rather than truncating.
 
-> **Not wired.** The `source.fetch` tool (`snapshot_fetch_tool`), `SourceAcquisitionService.acquire` and `read_excerpt`, and `build_extracted_text_artifact` have no caller outside their own modules. `extract_pdf_text` is live: `src/core/acquisition/extract_child.py` calls it in the sandboxed subprocess that `src/services/document_ingestion.py` launches for uploaded PDFs. Only `record_retrieved_source` and `locate` are reached, through `SearchEvidenceRecorder`.
+`source.fetch` (`hardened_source_fetch_tool` / `HardenedHttpFetcher` in `src/core/acquisition/fetch_tool.py`) is registered on `MCPIntegration.boundary` with `external_read` sensitivity and pinned scholarly hosts in `SOURCE_FETCH_OUTBOUND_HOSTS`. Before connecting, it enforces HTTPS-only URLs without userinfo or non-default ports, rejects raw IP literals, checks both declared and authority-approved host allowlists, resolves DNS, and refuses any host resolving to private, loopback, link-local, metadata, reserved, or non-global IPs (including IPv4-mapped IPv6 addresses). Redirects are followed manually up to `DEFAULT_MAX_REDIRECTS` (5) hops, re-running host allowlist and DNS/IP validation on every hop. When fetched bytes are a PDF (`application/pdf` media type or `%PDF-` header), `snapshot_fetch_tool` extracts full text via `extract_pdf_sandboxed` and writes an immutable `extracted_text` artifact through `build_extracted_text_artifact` tagged with `content_kind: "full_text"`, preserving the SHA-256 digest and canonical `bytes:0-<length>` locator. `SourceAcquisitionService.acquire` verifies the extracted text digest and persists both the `source_snapshot` and `extracted_text` artifacts when present.
+
+> **Partially wired.** `SourceAcquisitionService.acquire` and `read_excerpt` have no direct route caller outside tests; `SearchEvidenceRecorder` calls `record_retrieved_source` and `locate`, while `MCPIntegration.fetch_source` invokes `source.fetch` directly through the tool boundary.
 
 ## Claims and provenance
 
@@ -195,7 +200,7 @@ Read-only tools:
 - `src/agents/tools/arithmetic_tool.py`, `datetime_tool.py`, `unit_conversion_tool.py`, `finance_math.py`: local tools
 - `src/agents/integrations/mcp_integration.py`, `mcp_tool_specs.py`: mediated MCP operations
 - `src/ai_brain/integration/masr_supervisor_bridge.py`: MCP path wiring
-- `src/core/acquisition/`: snapshots, sources, search evidence, resolution, unused fetch and PDF modules
+- `src/core/acquisition/`: snapshots, sources, SSRF-hardened `source.fetch`, PDF extraction, search evidence, resolution
 - `src/core/claims/`: materiality, resolution, recording, unused citation validators
 - `src/mcp/`: research tools and academic search filters
 - `src/repositories/capability_repository.py`, `tool_invocation_repository.py`, `artifact_repository.py`, `evidence_repository.py`, `claim_support_repository.py`: persistence
