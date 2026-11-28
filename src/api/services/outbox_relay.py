@@ -32,9 +32,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from structlog import get_logger
 
-from src.ai_brain.router.outcome_recorder import ADAPTIVE_OUTCOME_DESTINATION
 from src.api.services.event_publisher import EventPublisher
 from src.api.websocket.run_stream import RunStreamHub, run_stream_hub
+from src.core.evaluation.events import ADAPTIVE_OUTCOME_DESTINATION
 from src.core.observability import outbox_dead_lettered_total, outbox_rows
 from src.models.db.run_event import AgentRunEventOutbox, EventDeliveryStatus
 

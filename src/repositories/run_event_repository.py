@@ -20,14 +20,12 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.ai_brain.router.outcome_recorder import (
-    ADAPTIVE_OUTCOME_DESTINATION,
-    TERMINAL_RUN_EVENTS,
-)
 from src.core.contracts import RunEvent, RunEventCursor, delivery_idempotency_key
 from src.core.evaluation.events import (
+    ADAPTIVE_OUTCOME_DESTINATION,
     EVALUATION_DESTINATION,
     EVALUATION_TRIGGER_EVENT,
+    TERMINAL_RUN_EVENTS,
 )
 from src.models.db.run_event import AgentRunEvent, AgentRunEventOutbox
 from src.models.db.run_lifecycle import AgentRun

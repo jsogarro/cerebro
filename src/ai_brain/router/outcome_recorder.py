@@ -10,9 +10,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from structlog import get_logger
+
+from src.core.evaluation.events import (
+    ADAPTIVE_OUTCOME_DESTINATION,
+    TERMINAL_RUN_EVENTS,
+)
 
 from .routing_observability import observe_outcome
 from .routing_outcome import (
@@ -29,16 +34,15 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 _IDENTIFIER_VERSION = "v1"
-ADAPTIVE_OUTCOME_DESTINATION: Final = "adaptive_outcome"
-TERMINAL_RUN_EVENTS: Final[frozenset[str]] = frozenset(
-    {
-        "run.succeeded",
-        "run.failed",
-        "run.budget_exceeded",
-        "run.cancelled",
-        "run.interrupted",
-    }
-)
+__all__ = [
+    "ADAPTIVE_OUTCOME_DESTINATION",
+    "TERMINAL_RUN_EVENTS",
+    "ExecutedAllocationOutcome",
+    "RecordedAdaptiveMetadata",
+    "RecordedAllocation",
+    "RecordedRoutingDecision",
+    "RoutingOutcomeRecorder",
+]
 
 
 @dataclass(frozen=True)
