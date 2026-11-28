@@ -7,6 +7,8 @@ import pytest
 import src.ai_brain.integration.masr_supervisor_bridge as bridge_module
 from src.agents.integrations.mcp_integration import MCPIntegration
 from src.agents.integrations.mcp_tool_specs import (
+    MCP_TOOL_OUTBOUND_HOSTS,
+    MCP_TOOL_SENSITIVITIES,
     TOOL_ACADEMIC_SEARCH,
     TOOL_FORMAT_CITATIONS,
     TOOL_VERSION,
@@ -33,9 +35,10 @@ def grant(tool_name: str, scope: str, *, task_id: str = "task-1") -> CapabilityG
         capability_scope=scope,
         tool_name=tool_name,
         tool_versions=(TOOL_VERSION,),
-        sensitivity=SensitivityClass.READ_ONLY,
+        sensitivity=MCP_TOOL_SENSITIVITIES.get(tool_name, SensitivityClass.READ_ONLY),
         max_input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
         requires_approval=False,
+        allowed_hosts=MCP_TOOL_OUTBOUND_HOSTS.get(tool_name, ()),
         issued_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(minutes=5),
     )

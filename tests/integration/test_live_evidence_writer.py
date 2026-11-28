@@ -20,7 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 import src.ai_brain.integration.masr_supervisor_bridge as bridge_module
 from src.agents.integrations.mcp_integration import MCPIntegration
-from src.agents.integrations.mcp_tool_specs import TOOL_ACADEMIC_SEARCH, TOOL_VERSION
+from src.agents.integrations.mcp_tool_specs import (
+    MCP_OUTBOUND_SENSITIVITY,
+    MCP_TOOL_OUTBOUND_HOSTS,
+    TOOL_ACADEMIC_SEARCH,
+    TOOL_VERSION,
+)
 from src.agents.models import AgentResult, AgentTask
 from src.agents.tools.durable_audit import SessionToolAuditStore
 from src.ai_brain.integration.masr_supervisor_bridge import MASRSupervisorBridge
@@ -30,7 +35,6 @@ from src.core.acquisition.snapshots import FilesystemSnapshotStore
 from src.core.capabilities import CAPABILITY_GRANTS_CONTEXT_KEY
 from src.core.contracts import (
     CapabilityGrant,
-    SensitivityClass,
     TrustClassification,
     WorkerAssignment,
 )
@@ -82,9 +86,10 @@ def _grant() -> CapabilityGrant:
         capability_scope="scope-search",
         tool_name=TOOL_ACADEMIC_SEARCH,
         tool_versions=(TOOL_VERSION,),
-        sensitivity=SensitivityClass.READ_ONLY,
+        sensitivity=MCP_OUTBOUND_SENSITIVITY,
         max_input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
         requires_approval=False,
+        allowed_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_ACADEMIC_SEARCH],
         issued_at=now - timedelta(hours=1),
         expires_at=now + timedelta(hours=1),
     )

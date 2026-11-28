@@ -274,6 +274,7 @@ class SelfIssuedPolicy:
     sensitivity: SensitivityClass
     max_input_trust: TrustClassification
     tool_versions: tuple[str, ...]
+    allowed_hosts: tuple[str, ...] = ()
 
 
 def self_issued_grant(
@@ -314,6 +315,7 @@ def self_issued_grant(
         sensitivity=policy.sensitivity,
         max_input_trust=policy.max_input_trust,
         requires_approval=False,
+        allowed_hosts=policy.allowed_hosts,
         issued_at=now,
         expires_at=now + ttl,
     )

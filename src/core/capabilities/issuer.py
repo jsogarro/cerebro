@@ -1,9 +1,10 @@
 """Issue immutable capability grants from admitted execution authority."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
-from typing import Protocol
+from types import MappingProxyType
+from typing import Final, Protocol
 
 from src.core.contracts.capabilities import CapabilityGrant, SensitivityClass
 from src.core.contracts.execution_plan import (
@@ -12,6 +13,8 @@ from src.core.contracts.execution_plan import (
     WorkerAssignment,
 )
 from src.core.contracts.provenance import TrustClassification
+from src.mcp.tools.academic_search_tool import ACADEMIC_SEARCH_OUTBOUND_HOSTS
+from src.mcp.tools.citation_tool import CITATION_OUTBOUND_HOSTS
 
 CAPABILITY_GRANTS_CONTEXT_KEY = "capability_grants"
 """Agent-task context key reserved for the admitted grant contracts."""
@@ -21,6 +24,14 @@ CAPABILITY_SCOPE_PREFIX = "plan-issued:"
 
 DEFAULT_TOOL_VERSION = "1.0.0"
 """The version pinned for tools whose plan declaration has no version field."""
+
+OUTBOUND_TOOL_HOSTS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
+    {
+        "mcp.academic_search": ACADEMIC_SEARCH_OUTBOUND_HOSTS,
+        "mcp.format_citations": CITATION_OUTBOUND_HOSTS,
+    }
+)
+"""Pinned outbound host sets for tools classified as ``EXTERNAL_READ``."""
 
 
 class _AdmittedAuthority(Protocol):
@@ -88,6 +99,18 @@ class PlanCapabilityIssuer:
                 if grant_id in seen_grant_ids:
                     raise ValueError(f"duplicate capability grant id {grant_id!r}")
                 seen_grant_ids.add(grant_id)
+                declared_hosts = OUTBOUND_TOOL_HOSTS.get(tool_name)
+                if declared_hosts is not None:
+                    sensitivity = SensitivityClass.EXTERNAL_READ
+                    declared_set = frozenset(declared_hosts)
+                    allowed_hosts = tuple(
+                        host
+                        for host in worker.allowed_outbound_hosts
+                        if host in declared_set
+                    )
+                else:
+                    sensitivity = SensitivityClass.READ_ONLY
+                    allowed_hosts = ()
                 grants.append(
                     CapabilityGrant(
                         grant_id=grant_id,
@@ -96,9 +119,10 @@ class PlanCapabilityIssuer:
                         capability_scope=f"{CAPABILITY_SCOPE_PREFIX}{tool_name}",
                         tool_name=tool_name,
                         tool_versions=(DEFAULT_TOOL_VERSION,),
-                        sensitivity=SensitivityClass.READ_ONLY,
+                        sensitivity=sensitivity,
                         max_input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
                         requires_approval=False,
+                        allowed_hosts=allowed_hosts,
                         issued_at=issued_at,
                         expires_at=expires_at,
                     )
@@ -126,5 +150,6 @@ __all__ = [
     "CAPABILITY_GRANTS_CONTEXT_KEY",
     "CAPABILITY_SCOPE_PREFIX",
     "DEFAULT_TOOL_VERSION",
+    "OUTBOUND_TOOL_HOSTS",
     "PlanCapabilityIssuer",
 ]

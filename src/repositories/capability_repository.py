@@ -68,6 +68,7 @@ class CapabilityRepository:
             sensitivity=grant.sensitivity.value,
             max_input_trust=grant.max_input_trust.value,
             requires_approval=grant.requires_approval,
+            allowed_hosts=list(grant.allowed_hosts),
             issued_at=grant.issued_at,
             expires_at=grant.expires_at,
         )

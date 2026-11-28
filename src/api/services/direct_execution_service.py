@@ -2578,6 +2578,9 @@ class DirectExecutionService:
                         "tool_versions": tuple(row.tool_versions or ()),
                         "sensitivity": row.sensitivity,
                         "max_input_trust": row.max_input_trust,
+                        "allowed_hosts": tuple(
+                            getattr(row, "allowed_hosts", None) or ()
+                        ),
                         "requires_approval": row.requires_approval,
                         "issued_at": aware(row.issued_at),
                         "expires_at": aware(row.expires_at),

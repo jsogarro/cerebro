@@ -171,14 +171,26 @@ def build_trial_authority(
     task_timeout_seconds: int,
     model_route: ProviderModelRoute,
     tool_grants: tuple[str, ...] = (),
+    allowed_outbound_hosts: tuple[str, ...] | None = None,
 ) -> ExecutionAuthorityBinding:
     """Mint and cache one run's authority; mint it right before admission.
 
     The deadline starts now, and a tool-granted run is admitted only while
     ``now + grant TTL`` still fits it, i.e. within the 60 s margin.
     """
+    from src.core.capabilities.issuer import OUTBOUND_TOOL_HOSTS
+
     if domain not in DOMAIN_WORKERS:
         raise LiveEnvironmentError(f"unknown evaluation domain {domain!r}")
+    if allowed_outbound_hosts is None:
+        resolved_hosts: list[str] = []
+        for tool_name in tool_grants:
+            for host in OUTBOUND_TOOL_HOSTS.get(tool_name, ()):
+                if host not in resolved_hosts:
+                    resolved_hosts.append(host)
+        effective_outbound_hosts = tuple(resolved_hosts)
+    else:
+        effective_outbound_hosts = allowed_outbound_hosts
     now = datetime.now(UTC)
     worker_types = DOMAIN_WORKERS[domain]
     budget = ExecutionBudget(
@@ -242,6 +254,7 @@ def build_trial_authority(
                 output_schema={},
                 permission_scopes=(TOOL_PERMISSION_SCOPE,) if tool_grants else (),
                 tool_allowlist=tool_grants,
+                allowed_outbound_hosts=effective_outbound_hosts,
             )
             for index, worker_type in enumerate(worker_types, start=1)
         ),

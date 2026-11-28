@@ -35,22 +35,56 @@ a classifier as a boundary.
 """
 
 import hashlib
+import re
 from collections.abc import Sequence
 from enum import StrEnum
 from typing import Self
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import AwareDatetime, Field, field_validator, model_validator
 
 from .base import ContentSha256, ContractId, ContractModel, Version, require_unique
 from .provenance import TrustClassification
 from .trust import at_least_as_trusted
+
+_HOST_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def normalize_outbound_host(host: str) -> str:
+    """Validate and lowercase a single pinned DNS hostname.
+
+    Rejects schemes, paths, ports, wildcards, whitespace, and malformed labels
+    so host allowlists cannot be widened by pattern syntax or URL confusion.
+    """
+    if not isinstance(host, str) or not host or host != host.strip():
+        raise ValueError(f"invalid outbound host {host!r}")
+    normalized = host.lower()
+    if len(normalized) > 253 or any(
+        ch in normalized for ch in (":", "/", "?", "#", "@", "*", " ")
+    ):
+        raise ValueError(f"invalid outbound host {host!r}")
+    labels = normalized.split(".")
+    if any(not _HOST_LABEL_RE.match(label) for label in labels):
+        raise ValueError(f"invalid outbound host {host!r}")
+    return normalized
+
+
+def normalize_outbound_hosts(
+    hosts: Sequence[str], *, field_name: str
+) -> tuple[str, ...]:
+    """Validate, lowercase, and check uniqueness for a sequence of hostnames."""
+    normalized = tuple(normalize_outbound_host(host) for host in hosts)
+    require_unique(normalized, field_name=field_name)
+    return normalized
 
 
 class SensitivityClass(StrEnum):
     """What an invocation can do to the world outside its own run."""
 
     READ_ONLY = "read_only"
-    """No effect outside the run."""
+    """No effect outside the run; makes no outbound network requests."""
+
+    EXTERNAL_READ = "external_read"
+    """Reads from pre-approved external hosts; transmits query/lookup text to allowlisted hosts only."""
 
     INTERNAL_WRITE = "internal_write"
     """Writes inside the requesting tenant's own store."""
@@ -84,6 +118,7 @@ class CapabilityDenialReason(StrEnum):
     GRANT_EXPIRED = "grant_expired"
     SENSITIVITY_MISMATCH = "sensitivity_mismatch"
     INPUT_TRUST_EXCEEDS_GRANT = "input_trust_exceeds_grant"
+    HOST_NOT_ALLOWED = "host_not_allowed"
     APPROVAL_MISSING = "approval_missing"
     APPROVAL_UNAVAILABLE = "approval_unavailable"
     APPROVAL_EXPIRED = "approval_expired"
@@ -108,6 +143,12 @@ class CapabilityRequest(ContractModel):
     input_trust: TrustClassification
     input_sha256: ContentSha256
     requested_at: AwareDatetime
+    target_hosts: tuple[str, ...] = ()
+
+    @field_validator("target_hosts")
+    @classmethod
+    def validate_target_hosts(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return normalize_outbound_hosts(value, field_name="target_hosts")
 
     def fingerprint(self) -> ContentSha256:
         """Return a stable digest of everything that determines authorization.
@@ -128,6 +169,7 @@ class CapabilityRequest(ContractModel):
                 self.sensitivity.value,
                 self.input_trust.value,
                 self.input_sha256,
+                ",".join(sorted(self.target_hosts)),
             )
         )
         return hashlib.sha256(material.encode("utf-8")).hexdigest()
@@ -147,6 +189,12 @@ class CapabilityGrant(ContractModel):
     requires_approval: bool
     issued_at: AwareDatetime
     expires_at: AwareDatetime
+    allowed_hosts: tuple[str, ...] = ()
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def validate_allowed_hosts(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return normalize_outbound_hosts(value, field_name="allowed_hosts")
 
     @model_validator(mode="after")
     def validate_grant(self) -> Self:
@@ -214,6 +262,7 @@ _DENIAL_STAGES: tuple[CapabilityDenialReason, ...] = (
     CapabilityDenialReason.GRANT_NOT_YET_VALID,
     CapabilityDenialReason.GRANT_EXPIRED,
     CapabilityDenialReason.INPUT_TRUST_EXCEEDS_GRANT,
+    CapabilityDenialReason.HOST_NOT_ALLOWED,
     CapabilityDenialReason.APPROVAL_MISSING,
     CapabilityDenialReason.APPROVAL_EXPIRED,
     CapabilityDenialReason.APPROVAL_FINGERPRINT_MISMATCH,
@@ -248,6 +297,13 @@ def _evaluate(
         return CapabilityDenialReason.GRANT_EXPIRED, None
     if not at_least_as_trusted(request.input_trust, grant.max_input_trust):
         return CapabilityDenialReason.INPUT_TRUST_EXCEEDS_GRANT, None
+    if (
+        request.target_hosts or request.sensitivity is SensitivityClass.EXTERNAL_READ
+    ) and (
+        not request.target_hosts
+        or not set(request.target_hosts).issubset(grant.allowed_hosts)
+    ):
+        return CapabilityDenialReason.HOST_NOT_ALLOWED, None
 
     # The second disjunct is defence in depth, and is unreachable through any
     # validated grant: `CapabilityGrant.validate_grant` already rejects a
@@ -370,4 +426,6 @@ __all__ = [
     "CapabilityRequest",
     "SensitivityClass",
     "decide_capability",
+    "normalize_outbound_host",
+    "normalize_outbound_hosts",
 ]

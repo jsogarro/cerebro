@@ -4,25 +4,38 @@ Citation Tool for MCP.
 Provides citation formatting and DOI resolution capabilities.
 """
 
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, Final
 
 import httpx
 from structlog import get_logger
 
+from src.mcp.tools.academic_search_tool import require_allowed_outbound_host
+
 logger = get_logger()
+
+CROSSREF_HOST: Final[str] = "api.crossref.org"
+CITATION_OUTBOUND_HOSTS: Final[tuple[str, ...]] = (CROSSREF_HOST,)
 
 
 class CitationTool:
     """Format APA, MLA, Chicago, or BibTeX citations and resolve DOIs."""
 
+    OUTBOUND_HOSTS: Final[tuple[str, ...]] = CITATION_OUTBOUND_HOSTS
+
     def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or {}
         self.client = httpx.AsyncClient(timeout=30.0)
-        self.crossref_base = "https://api.crossref.org/works"
+        self.crossref_base = f"https://{CROSSREF_HOST}/works"
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
+        allowed_hosts: Sequence[str] | None = kwargs.get("allowed_hosts")
         if "doi" in kwargs:
-            return await self._resolve_doi(kwargs["doi"], kwargs.get("style", "APA"))
+            return await self._resolve_doi(
+                kwargs["doi"],
+                kwargs.get("style", "APA"),
+                allowed_hosts=allowed_hosts,
+            )
 
         sources = kwargs.get("sources", [])
         style = kwargs.get("style", "APA")
@@ -160,10 +173,21 @@ class CitationTool:
             "count": len(bibtex_entries),
         }
 
-    async def _resolve_doi(self, doi: str, style: str) -> dict[str, Any]:
+    async def _resolve_doi(
+        self,
+        doi: str,
+        style: str,
+        *,
+        allowed_hosts: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
         """Resolve DOI and format citation."""
+        url = f"{self.crossref_base}/{doi}"
+        require_allowed_outbound_host(
+            url,
+            declared_hosts=self.OUTBOUND_HOSTS,
+            allowed_hosts=allowed_hosts,
+        )
         try:
-            url = f"{self.crossref_base}/{doi}"
             response = await self.client.get(url)
 
             if response.status_code != 200:

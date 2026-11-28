@@ -5,7 +5,10 @@ Provides search capabilities across multiple academic databases.
 """
 
 import re
-from typing import Any
+from collections.abc import Collection, Mapping, Sequence
+from types import MappingProxyType
+from typing import Any, Final
+from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -14,6 +17,46 @@ from structlog import get_logger
 from src.mcp.academic_filters import AcademicSearchFilters
 
 logger = get_logger()
+
+PUBMED_HOST: Final[str] = "eutils.ncbi.nlm.nih.gov"
+ARXIV_HOST: Final[str] = "export.arxiv.org"
+SEMANTIC_SCHOLAR_HOST: Final[str] = "api.semanticscholar.org"
+
+ACADEMIC_SEARCH_DATABASE_HOSTS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "pubmed": PUBMED_HOST,
+        "arxiv": ARXIV_HOST,
+        "semantic_scholar": SEMANTIC_SCHOLAR_HOST,
+    }
+)
+ACADEMIC_SEARCH_OUTBOUND_HOSTS: Final[tuple[str, ...]] = tuple(
+    sorted(ACADEMIC_SEARCH_DATABASE_HOSTS.values())
+)
+
+
+class OutboundHostNotAllowedError(PermissionError):
+    """Raised when an outbound HTTP call targets an undeclared or unapproved host."""
+
+
+def require_allowed_outbound_host(
+    url: str,
+    *,
+    declared_hosts: Collection[str],
+    allowed_hosts: Collection[str] | None,
+) -> None:
+    """Refuse any request whose host is not both declared by the tool and allowed."""
+    hostname = (urlparse(url).hostname or "").lower()
+    declared = {host.lower() for host in declared_hosts}
+    if not hostname or hostname not in declared:
+        raise OutboundHostNotAllowedError(
+            f"outbound host {hostname!r} is not in the tool's declared host set"
+        )
+    if allowed_hosts is not None:
+        approved = {host.lower() for host in allowed_hosts}
+        if hostname not in approved:
+            raise OutboundHostNotAllowedError(
+                f"outbound host {hostname!r} is not in the authority's allowed hosts"
+            )
 
 
 def _year(value: Any) -> int | None:
@@ -32,23 +75,39 @@ def _compact(record: dict[str, Any]) -> dict[str, Any]:
 class AcademicSearchTool:
     """Search PubMed, arXiv, and Semantic Scholar."""
 
+    DATABASE_HOSTS: Final[Mapping[str, str]] = ACADEMIC_SEARCH_DATABASE_HOSTS
+    OUTBOUND_HOSTS: Final[tuple[str, ...]] = ACADEMIC_SEARCH_OUTBOUND_HOSTS
+
+    @classmethod
+    def target_hosts_for_databases(cls, databases: Sequence[str]) -> tuple[str, ...]:
+        """Return the sorted pinned outbound hosts for the requested databases."""
+        if not databases:
+            return cls.OUTBOUND_HOSTS
+        hosts: list[str] = []
+        for db in databases:
+            host = cls.DATABASE_HOSTS.get(db)
+            if host is not None and host not in hosts:
+                hosts.append(host)
+        return tuple(sorted(hosts))
+
     def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or {}
         self.client = httpx.AsyncClient(timeout=30.0)
 
-        self.pubmed_base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-        self.arxiv_base = "https://export.arxiv.org/api/query"
-        self.semantic_scholar_base = "https://api.semanticscholar.org/graph/v1"
+        self.pubmed_base = f"https://{PUBMED_HOST}/entrez/eutils"
+        self.arxiv_base = f"https://{ARXIV_HOST}/api/query"
+        self.semantic_scholar_base = f"https://{SEMANTIC_SCHOLAR_HOST}/graph/v1"
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         query = kwargs.get("query", "")
         databases = kwargs.get("databases", ["arxiv"])
         max_results = kwargs.get("max_results", 10)
+        allowed_hosts: Sequence[str] | None = kwargs.get("allowed_hosts")
 
         if not query:
             return {"success": False, "error": "Query is required"}
 
-        valid_databases = ["pubmed", "arxiv", "semantic_scholar"]
+        valid_databases = list(self.DATABASE_HOSTS)
         invalid_dbs = [db for db in databases if db not in valid_databases]
         if invalid_dbs:
             return {"success": False, "error": f"Invalid databases: {invalid_dbs}"}
@@ -65,12 +124,16 @@ class AcademicSearchTool:
 
         for db in databases:
             if db == "pubmed":
-                results = await self._search_pubmed(query, max_results, filters)
+                results = await self._search_pubmed(
+                    query, max_results, filters, allowed_hosts=allowed_hosts
+                )
             elif db == "arxiv":
-                results = await self._search_arxiv(query, max_results, filters)
+                results = await self._search_arxiv(
+                    query, max_results, filters, allowed_hosts=allowed_hosts
+                )
             elif db == "semantic_scholar":
                 results = await self._search_semantic_scholar(
-                    query, max_results, filters
+                    query, max_results, filters, allowed_hosts=allowed_hosts
                 )
             else:
                 continue
@@ -104,7 +167,12 @@ class AcademicSearchTool:
         return payload
 
     async def _search_pubmed(
-        self, query: str, max_results: int, filters: AcademicSearchFilters
+        self,
+        query: str,
+        max_results: int,
+        filters: AcademicSearchFilters,
+        *,
+        allowed_hosts: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Search PubMed database.
@@ -117,6 +185,18 @@ class AcademicSearchTool:
         Returns:
             List of results
         """
+        search_url = f"{self.pubmed_base}/esearch.fcgi"
+        summary_url = f"{self.pubmed_base}/esummary.fcgi"
+        require_allowed_outbound_host(
+            search_url,
+            declared_hosts=self.OUTBOUND_HOSTS,
+            allowed_hosts=allowed_hosts,
+        )
+        require_allowed_outbound_host(
+            summary_url,
+            declared_hosts=self.OUTBOUND_HOSTS,
+            allowed_hosts=allowed_hosts,
+        )
         try:
             search_query = query
             if filters.bounded:
@@ -126,7 +206,6 @@ class AcademicSearchTool:
                 search_query += f" AND {start}:{end}[pdat]"
 
             # Search for IDs
-            search_url = f"{self.pubmed_base}/esearch.fcgi"
             search_params: dict[str, str | int] = {
                 "db": "pubmed",
                 "term": search_query,
@@ -146,7 +225,6 @@ class AcademicSearchTool:
                 return []
 
             # Fetch summaries
-            summary_url = f"{self.pubmed_base}/esummary.fcgi"
             summary_params = {
                 "db": "pubmed",
                 "id": ",".join(id_list),
@@ -197,7 +275,12 @@ class AcademicSearchTool:
             return []
 
     async def _search_arxiv(
-        self, query: str, max_results: int, filters: AcademicSearchFilters
+        self,
+        query: str,
+        max_results: int,
+        filters: AcademicSearchFilters,
+        *,
+        allowed_hosts: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Search arXiv database.
@@ -210,6 +293,11 @@ class AcademicSearchTool:
         Returns:
             List of results
         """
+        require_allowed_outbound_host(
+            self.arxiv_base,
+            declared_hosts=self.OUTBOUND_HOSTS,
+            allowed_hosts=allowed_hosts,
+        )
         try:
             search_query = f"all:{query}"
 
@@ -304,7 +392,12 @@ class AcademicSearchTool:
             return []
 
     async def _search_semantic_scholar(
-        self, query: str, max_results: int, filters: AcademicSearchFilters
+        self,
+        query: str,
+        max_results: int,
+        filters: AcademicSearchFilters,
+        *,
+        allowed_hosts: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Search Semantic Scholar database.
@@ -317,9 +410,14 @@ class AcademicSearchTool:
         Returns:
             List of results
         """
+        search_url = f"{self.semantic_scholar_base}/paper/search"
+        require_allowed_outbound_host(
+            search_url,
+            declared_hosts=self.OUTBOUND_HOSTS,
+            allowed_hosts=allowed_hosts,
+        )
         try:
             # Search papers
-            search_url = f"{self.semantic_scholar_base}/paper/search"
             params: dict[str, str | int] = {
                 "query": query,
                 "limit": max_results,

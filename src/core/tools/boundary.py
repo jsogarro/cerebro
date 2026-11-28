@@ -437,6 +437,9 @@ class ToolBoundary:
             lease_expires_at=now + lease_duration,
         )
 
+        target_hosts = spec.target_hosts_for(
+            prepared.validated_input if isinstance(prepared, _AcceptedInput) else None
+        )
         decision = self._decide(
             request=CapabilityRequest(
                 run_id=run_id,
@@ -449,6 +452,7 @@ class ToolBoundary:
                 input_trust=input_trust,
                 input_sha256=prepared.input_sha256,
                 requested_at=now,
+                target_hosts=target_hosts,
             ),
             grants=grants,
             now=now,
@@ -726,6 +730,7 @@ class ToolBoundary:
                 validated_input=prepared.validated_input,
                 declared_output_trust=output_trust,
                 decision=decision,
+                allowed_hosts=grant.allowed_hosts,
                 cancellation=cancellation,
                 lease_monitor=lease_monitor,
             )
@@ -743,6 +748,7 @@ class ToolBoundary:
         validated_input: BaseModel,
         declared_output_trust: TrustClassification | None,
         decision: CapabilityDecision,
+        allowed_hosts: tuple[str, ...],
         cancellation: CancellationToken | None,
         lease_monitor: _LeaseMonitor | None,
     ) -> ToolOutcome:
@@ -754,6 +760,7 @@ class ToolBoundary:
             attempt_id=call.attempt_id,
             tool_invocation_id=call.tool_invocation_id,
             resolve_secret=self._resolve_secret,
+            allowed_hosts=allowed_hosts,
         )
 
         try:
