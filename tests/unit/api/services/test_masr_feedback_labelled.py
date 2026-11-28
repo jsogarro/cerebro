@@ -61,7 +61,9 @@ async def test_submit_feedback_stores_labelled_record_without_live_learning() ->
         RoutingRequest(query="Compare two empirical methods for causal inference")
     )
     metrics_before = {k: dict(v) for k, v in service.performance_metrics.items()}
-    route_before = await router.route("Compare two empirical methods for causal inference")
+    route_before = await router.route(
+        "Compare two empirical methods for causal inference"
+    )
 
     response = await service.submit_feedback(
         RoutingFeedback(
@@ -95,7 +97,9 @@ async def test_submit_feedback_stores_labelled_record_without_live_learning() ->
     record_spy.assert_not_awaited()
     assert (await store.load()).snapshot is None
     assert service.performance_metrics == metrics_before
-    route_after = await router.route("Compare two empirical methods for causal inference")
+    route_after = await router.route(
+        "Compare two empirical methods for causal inference"
+    )
     assert _decision_fingerprint(route_before) == _decision_fingerprint(route_after)
 
     await service.close()
@@ -105,7 +109,9 @@ async def test_submit_feedback_stores_labelled_record_without_live_learning() ->
 def test_masr_feedback_route_stores_tenant_scoped_labelled_data_only() -> None:
     from src.api.main import app
 
-    router = MASRouter(config={"adaptive_routing_enabled": False, "enable_caching": False})
+    router = MASRouter(
+        config={"adaptive_routing_enabled": False, "enable_caching": False}
+    )
     service = MASRRoutingService(router=router)
     app.dependency_overrides[get_masr_routing_service] = lambda: service
     app.dependency_overrides[get_jwt_service] = _TestJWTService

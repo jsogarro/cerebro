@@ -20,7 +20,6 @@ from src.ai_brain.router.outcome_recorder import (
 from src.ai_brain.router.routing_outcome import (
     EvaluatorEligibilityPolicy,
     MetricAvailability,
-    OutcomeApplicationStatus,
     OutcomeSource,
     RoutingOutcome,
 )
@@ -161,7 +160,10 @@ def test_summarize_journal_cost_never_coerces_unknown_or_missing_to_zero() -> No
             settled_at=NOW,
         )
     ]
-    assert summarize_journal_cost(unknown_only) == (None, MetricAvailability.UNAVAILABLE)
+    assert summarize_journal_cost(unknown_only) == (
+        None,
+        MetricAvailability.UNAVAILABLE,
+    )
 
     mixed = [
         ModelCallReservation(
@@ -320,7 +322,9 @@ async def test_handler_records_failed_run_truthfully_and_keeps_unknown_cost_unkn
             session_factory=factory,
             outcome_recorder=RoutingOutcomeRecorder(router, retry_delay_seconds=0),
         )
-        row = _outbox_row(run_id="run-fail", event_id="evt-fail", event_type="run.failed")
+        row = _outbox_row(
+            run_id="run-fail", event_id="evt-fail", event_type="run.failed"
+        )
         assert await handler(row) is True
         # Second delivery (e.g. redelivery) is deduplicated by the store.
         assert await handler(row) is True

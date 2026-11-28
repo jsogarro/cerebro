@@ -78,10 +78,7 @@ def _imported_modules(name: str, path: Path, index: dict[str, Path]) -> set[str]
 
 
 def _script_entry_points() -> list[tuple[str, Path]]:
-    return [
-        (f"scripts.{path.stem}", path)
-        for path in sorted(SCRIPTS.glob("*.py"))
-    ]
+    return [(f"scripts.{path.stem}", path) for path in sorted(SCRIPTS.glob("*.py"))]
 
 
 def unreachable_modules() -> set[str]:
