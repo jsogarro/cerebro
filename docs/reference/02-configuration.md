@@ -65,6 +65,7 @@ A field is listed here when a production module outside `src/core/config.py` rea
 | `LOGIN_LOCKOUT_SECONDS` | `900` | `src/api/auth/auth_router.py` (`get_login_throttle`) | lockout window, measured from the first failure |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | `src/auth/jwt_service.py` (`JWTService.__init__`) | access-token lifetime |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | `7` | `src/auth/jwt_service.py` (`JWTService.__init__`) | refresh-token lifetime |
+| `METRICS_TOKEN_EXPIRE_DAYS` | `90` | `src/auth/jwt_service.py` (`JWTService.generate_metrics_token`) | lifetime of the minted `/metrics` scraper token |
 | `JWT_PRIVATE_KEY_PATH` | `/secrets/jwt_private.pem` | `src/middleware/auth_middleware.py` (`get_jwt_service`), `src/auth/jwt_service.py` | RS256 private key file; in `production` the file must exist and load, otherwise the JWT service fails to initialise; in other environments a missing file produces a generated key pair, written to the path when it is writable |
 | `JWT_PUBLIC_KEY_PATH` | `/secrets/jwt_public.pem` | `src/middleware/auth_middleware.py` (`get_jwt_service`), `src/auth/jwt_service.py` | RS256 public key file; same rules as the private key |
 | `BCRYPT_ROUNDS` | `12` | `src/api/auth/auth_router.py` (`get_password_service`) | bcrypt cost factor |

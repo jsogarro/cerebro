@@ -11,7 +11,7 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Final
 from uuid import uuid4
 
 import redis.asyncio as redis
@@ -26,6 +26,10 @@ from src.core.config import settings
 from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
 logger = structlog.get_logger(__name__)
+
+
+METRICS_AUDIENCE: Final = "cerebro-metrics"
+METRICS_PERMISSION: Final = "metrics:read"
 
 
 @dataclass(frozen=True)
@@ -352,6 +356,28 @@ class JWTService:
             refresh_token=refresh_token,
             token_type="Bearer",
             expires_in=self.access_token_expire_minutes * 60,
+        )
+
+    def generate_metrics_token(self) -> str:
+        """Mint the scraper credential, valid for ``METRICS_TOKEN_EXPIRE_DAYS``.
+
+        Access tokens last minutes, which a secret-manager-held scrape token
+        cannot survive; this one carries its own ``exp`` instead.
+        """
+        now = datetime.now(UTC)
+        return jwt.encode(
+            {
+                "sub": "metrics-scraper",
+                "jti": str(uuid4()),
+                "iat": now,
+                "iat_ns": time.time_ns(),
+                "exp": now + timedelta(days=settings.METRICS_TOKEN_EXPIRE_DAYS),
+                "token_type": "access",
+                "aud": METRICS_AUDIENCE,
+                "permissions": [METRICS_PERMISSION],
+            },
+            self.private_key,
+            algorithm=self.algorithm,
         )
 
     async def validate_token(

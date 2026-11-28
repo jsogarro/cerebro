@@ -6,12 +6,15 @@ import os
 import subprocess
 import sys
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.auth.jwt_service import JWTService
+from src.core.config import settings
 from src.middleware.auth_middleware import METRICS_AUDIENCE, get_jwt_service
 from tests.security.test_route_authentication_boundary import _override_audit_logger
 
@@ -143,3 +146,53 @@ def test_enable_metrics_controls_the_mount(flag: str, mounted: bool) -> None:
     assert result.stdout.strip().splitlines()[-1] == (
         "MOUNTED" if mounted else "ABSENT"
     )
+
+
+class _Shifted(datetime):
+    offset = timedelta(0)
+
+    @classmethod
+    def now(cls, tz: Any = None) -> datetime:  # type: ignore[override]
+        return datetime.now(tz) + cls.offset
+
+
+@pytest.fixture
+def shift_clock(monkeypatch: pytest.MonkeyPatch) -> Any:
+    def shift(delta: timedelta) -> None:
+        # Patched only once a token exists: jose's encoder isinstance-checks it.
+        monkeypatch.setattr("jose.jwt.datetime", _Shifted)
+        _Shifted.offset = delta
+
+    yield shift
+    _Shifted.offset = timedelta(0)
+
+
+@pytest.mark.asyncio
+async def test_minted_metrics_token_outlives_access_tokens_until_its_own_exp(
+    client: TestClient,
+    jwt_service: JWTService,
+    shift_clock: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "METRICS_TOKEN_EXPIRE_DAYS", 30)
+    token = jwt_service.generate_metrics_token()
+
+    shift_clock(timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES + 1))
+    assert _get(client, token) == 200
+
+    shift_clock(timedelta(days=29))
+    assert _get(client, token) == 200
+
+    shift_clock(timedelta(days=31))
+    assert _get(client, token) == 401
+
+
+@pytest.mark.asyncio
+async def test_minted_metrics_token_is_refused_on_the_api(
+    client: TestClient, jwt_service: JWTService
+) -> None:
+    token = jwt_service.generate_metrics_token()
+    response = client.get(
+        "/api/v1/users/me", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 401

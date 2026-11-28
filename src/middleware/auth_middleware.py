@@ -20,7 +20,12 @@ from starlette.requests import HTTPConnection
 from starlette.responses import Response
 
 from src.api.middleware.error_envelope import build_error_payload
-from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
+from src.auth.jwt_service import (
+    METRICS_AUDIENCE,
+    METRICS_PERMISSION,
+    JWTService,
+    JWTServiceUnavailableError,
+)
 from src.auth.models import PAT_PREFIX, PersonalAccessTokenPayload, TokenPayload
 from src.auth.pat_service import (
     PATServiceUnavailableError,
@@ -66,13 +71,9 @@ PUBLIC_ROUTE_ALLOWLIST: Final[dict[tuple[str, str], str]] = {
 }
 
 
-# Audience and permission of the scraper credential. Ordinary tokens carry no
-# audience, so ``/metrics`` never accepts them and the scraper token never
-# passes as an API credential (python-jose rejects an unexpected ``aud``).
-METRICS_AUDIENCE: Final = "cerebro-metrics"
-METRICS_PERMISSION: Final = "metrics:read"
-
-
+# Ordinary tokens carry no audience, so ``/metrics`` never accepts them and the
+# scraper token never passes as an API credential (python-jose rejects an
+# unexpected ``aud``).
 def _is_metrics_path(path: str) -> bool:
     return path == "/metrics" or path.startswith("/metrics/")
 

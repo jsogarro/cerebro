@@ -136,6 +136,8 @@ class Settings(BaseSettings):
     # JWT Authentication
     JWT_ALGORITHM: str = "RS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    # Scraper credential lifetime; rotate it before this elapses.
+    METRICS_TOKEN_EXPIRE_DAYS: int = 90
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     JWT_PRIVATE_KEY_PATH: str | None = "/secrets/jwt_private.pem"
     JWT_PUBLIC_KEY_PATH: str | None = "/secrets/jwt_public.pem"
