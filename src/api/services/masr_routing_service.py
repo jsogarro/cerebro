@@ -490,12 +490,12 @@ class MASRRoutingService:
 
         original_decision = self.routing_history[feedback.routing_id]
         raw_mode = getattr(original_decision, "collaboration_mode", None)
-        mode_value = raw_mode.value if hasattr(raw_mode, "value") else str(raw_mode)
+        mode_value = str(getattr(raw_mode, "value", raw_mode))
         raw_strategy = getattr(original_decision, "routing_strategy", None)
         strategy_value = (
-            raw_strategy.value
-            if hasattr(raw_strategy, "value")
-            else (str(raw_strategy) if raw_strategy is not None else None)
+            None
+            if raw_strategy is None
+            else str(getattr(raw_strategy, "value", raw_strategy))
         )
         allocation = getattr(original_decision, "agent_allocation", None)
         worker_count = getattr(allocation, "worker_count", 1)
