@@ -15,7 +15,6 @@ from src.agents.models import AgentResult, AgentTask
 from src.agents.tools.mediation import ToolCallIdentity
 from src.core.acquisition.search_result import (
     DEFAULT_MAX_PROMPT_SOURCES,
-    MIN_SOURCE_SHARE_TOKENS,
     BoundedSelectionResult,
     SelectionReason,
     select_bounded_sources,
@@ -594,8 +593,8 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
 
     def _resolve_evidence_budget(
         self, input_data: dict[str, Any], task: AgentTask | None
-    ) -> tuple[int, int, int, int]:
-        """Compute ``(context_window, output_reserve, instruction_tokens, evidence_budget)``."""
+    ) -> tuple[int, int, int, int, int | None]:
+        """Compute ``(context_window, output_reserve, instruction_tokens, evidence_budget, budget_cap)``."""
         context_window = self._resolve_context_window(task)
         output_reserve = self._resolve_output_reserve()
         # Render with a sentinel space so the <RETRIEVED_SOURCES> wrapper is counted too.
@@ -614,15 +613,26 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 else task.context.get(BUDGET_LEDGER_CONTEXT_KEY)
             )
         remaining = getattr(ledger, "remaining_tokens", None)
+        effective_window = context_window
+        budget_cap: int | None = None
+        # Leave an exhausted ledger (<= fixed overhead) to BudgetExceededError
+        # instead of relabelling it as INSUFFICIENT_EVIDENCE.
         if (
             isinstance(remaining, int)
-            and remaining
-            >= instruction_tokens + output_reserve + MIN_SOURCE_SHARE_TOKENS
+            and remaining > instruction_tokens + output_reserve
+            and remaining < context_window
         ):
-            context_window = min(context_window, remaining)
+            effective_window = remaining
+            budget_cap = remaining
 
-        evidence_budget = max(0, context_window - output_reserve - instruction_tokens)
-        return context_window, output_reserve, instruction_tokens, evidence_budget
+        evidence_budget = max(0, effective_window - output_reserve - instruction_tokens)
+        return (
+            context_window,
+            output_reserve,
+            instruction_tokens,
+            evidence_budget,
+            budget_cap,
+        )
 
     def _select_bounded_sources(
         self,
@@ -635,6 +645,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             output_reserve,
             instruction_tokens,
             evidence_budget,
+            budget_cap,
         ) = self._resolve_evidence_budget(input_data, task)
         max_prompt_sources = int(
             self.config.get("max_prompt_sources", DEFAULT_MAX_PROMPT_SOURCES)
@@ -648,6 +659,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             year_start=input_data.get("year_start"),
             year_end=input_data.get("year_end"),
             context_window_tokens=context_window,
+            budget_cap_tokens=budget_cap,
             output_reserve_tokens=output_reserve,
             instruction_tokens=instruction_tokens,
         )
@@ -660,6 +672,7 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             truncated_count=diag.truncated_count,
             omitted_count=diag.omitted_count,
             context_window_tokens=diag.context_window_tokens,
+            budget_cap_tokens=diag.budget_cap_tokens,
             output_reserve_tokens=diag.output_reserve_tokens,
             instruction_tokens=diag.instruction_tokens,
             evidence_budget_tokens=diag.evidence_budget_tokens,

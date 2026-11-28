@@ -52,6 +52,19 @@ _DOI = re.compile(r"^10\.\d{4,9}/\S+$")
 _CANONICAL_DOI = re.compile(r"^10\.\d+/\S+$")
 _DOI_PREFIX = re.compile(r"^(?:https?://(?:dx\.)?doi\.org/|doi:)\s*", re.IGNORECASE)
 _ARXIV_VERSION = re.compile(r"v\d+$", re.IGNORECASE)
+_ARXIV_ID_RE = re.compile(
+    r"^(?:arxiv:)?(\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[a-z-]+)?/\d{7}(?:v\d+)?)$",
+    re.IGNORECASE,
+)
+_PREFIXED_ID_RE = re.compile(
+    r"^(?:pmid|pmcid|pmc|s2|openalex|biorxiv|medrxiv|ssrn|isbn|issn|orcid)[:\-][a-z0-9._/-]*\d[a-z0-9._/-]*$",
+    re.IGNORECASE,
+)
+_PMC_ID_RE = re.compile(r"^pmc\d{5,}$", re.IGNORECASE)
+_LONG_HEX_ID_RE = re.compile(
+    r"^(?=[0-9a-f]{16,}$)(?=.*[a-f])(?=.*\d)[0-9a-f]+$",
+    re.IGNORECASE,
+)
 _YEAR = re.compile(r"^\d{4}$")
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
@@ -327,6 +340,7 @@ class SelectionDiagnostics:
     prompt_tokens_estimated: int
     sources: tuple[dict[str, Any], ...]
     omitted_sources: tuple[dict[str, Any], ...]
+    budget_cap_tokens: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -338,6 +352,7 @@ class SelectionDiagnostics:
             "omitted_count": self.omitted_count,
             "reason_counts": dict(self.reason_counts),
             "context_window_tokens": self.context_window_tokens,
+            "budget_cap_tokens": self.budget_cap_tokens,
             "output_reserve_tokens": self.output_reserve_tokens,
             "instruction_tokens": self.instruction_tokens,
             "evidence_budget_tokens": self.evidence_budget_tokens,
@@ -387,6 +402,8 @@ def _query_identifiers(query: str) -> set[str]:
     identifiers: set[str] = set()
     for raw_token in query.split():
         cleaned = raw_token.strip(".,;:()[]{}<>\"'")
+        if not cleaned:
+            continue
         doi = canonical_doi(cleaned)
         if doi:
             identifiers.add(doi)
@@ -395,9 +412,18 @@ def _query_identifiers(query: str) -> set[str]:
         if url:
             identifiers.add(url)
             continue
+        arxiv_match = _ARXIV_ID_RE.match(cleaned)
+        if arxiv_match:
+            bare = arxiv_match.group(1).lower()
+            identifiers.add(bare)
+            identifiers.add(_ARXIV_VERSION.sub("", bare))
+            continue
         lowered = cleaned.lower()
-        if any(ch.isdigit() for ch in lowered) and len(lowered) >= 4:
-            identifiers.add(_ARXIV_VERSION.sub("", lowered))
+        if (
+            _PREFIXED_ID_RE.match(lowered)
+            or _PMC_ID_RE.match(lowered)
+            or _LONG_HEX_ID_RE.match(lowered)
+        ):
             identifiers.add(lowered)
     return identifiers
 
@@ -498,15 +524,16 @@ def _score_span(
     query_ids: set[str],
     idf: Mapping[str, float],
 ) -> float:
-    lowered = span_text.lower()
-    if any(qid in lowered for qid in query_ids):
-        return 100.0
     counts = Counter(_tokenize(span_text))
     score = 0.0
     for term, weight in idf.items():
         tf = counts.get(term, 0)
         if tf:
             score += weight * (tf / (tf + 1.0))
+    lowered = span_text.lower()
+    if any(qid in lowered for qid in query_ids):
+        # Add an exact-ID boost on top of IDF so duplicate mentions still prefer answer-rich spans.
+        score += 100.0
     return score
 
 
@@ -680,14 +707,6 @@ def _deduplicate_candidates(
             continue
 
         assert match_reason is not None
-        reason_counts[match_reason.value] += 1
-        omitted_sources.append(
-            {
-                "ref": candidate["ref"],
-                "provider": _text(candidate.get("source")),
-                "reason": match_reason.value,
-            }
-        )
         existing = groups[match_idx]
         existing_prov = list(existing["provenance"])
         existing_prov.append(
@@ -709,7 +728,19 @@ def _deduplicate_candidates(
             1 if candidate.get("evidence_id") else 0,
             len(str(candidate.get("abstract") or "").encode("utf-8")),
         )
-        winner = candidate if candidate_rank > existing_rank else existing
+        if candidate_rank > existing_rank:
+            winner, loser = candidate, existing
+        else:
+            winner, loser = existing, candidate
+
+        reason_counts[match_reason.value] += 1
+        omitted_sources.append(
+            {
+                "ref": loser["ref"],
+                "provider": _text(loser.get("source")),
+                "reason": match_reason.value,
+            }
+        )
         merged = {
             **winner,
             "provenance": existing_prov,
@@ -858,6 +889,7 @@ def select_bounded_sources(
     year_start: int | None = None,
     year_end: int | None = None,
     context_window_tokens: int = 0,
+    budget_cap_tokens: int | None = None,
     output_reserve_tokens: int = 0,
     instruction_tokens: int = 0,
 ) -> BoundedSelectionResult:
@@ -1140,6 +1172,7 @@ def select_bounded_sources(
         omitted_count=len(omitted_sources),
         reason_counts=dict(reason_counts),
         context_window_tokens=context_window_tokens,
+        budget_cap_tokens=budget_cap_tokens,
         output_reserve_tokens=output_reserve_tokens,
         instruction_tokens=instruction_tokens,
         evidence_budget_tokens=evidence_budget_tokens,

@@ -263,6 +263,7 @@ def record_literature_selection(
     evidence_budget_tokens: int,
     evidence_tokens_used: int,
     reason_counts: dict[str, int],
+    budget_cap_tokens: int | None = None,
 ) -> None:
     """Record body-free literature selection counters and structured diagnostics."""
     for outcome, count in (
@@ -296,6 +297,7 @@ def record_literature_selection(
         truncated_count=truncated_count,
         omitted_count=omitted_count,
         context_window_tokens=context_window_tokens,
+        budget_cap_tokens=budget_cap_tokens,
         output_reserve_tokens=output_reserve_tokens,
         instruction_tokens=instruction_tokens,
         evidence_budget_tokens=evidence_budget_tokens,

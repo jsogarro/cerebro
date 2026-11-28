@@ -348,6 +348,10 @@ async def test_duplicate_doi_is_selected_once_and_retains_provenance_end_to_end(
     assert diag["deduped_count"] == 1
     assert diag["selected_count"] == 1
     assert diag["reason_counts"]["duplicate_doi"] == 1
+    assert diag["sources"][0]["ref"] == "ev-2"
+    assert diag["omitted_sources"] == [
+        {"ref": "ev-1", "provider": "arxiv", "reason": "duplicate_doi"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -554,3 +558,148 @@ async def test_exhausted_context_budget_fails_honestly_with_insufficient_evidenc
         result.output["selection_diagnostics"]["reason_counts"]["context_budget"] == 1
     )
     model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_budget_ledger_caps_evidence_budget_and_preserves_context_window() -> (
+    None
+):
+    from decimal import Decimal
+
+    from src.core.budget import (
+        BUDGET_LEDGER_CONTEXT_KEY,
+        BudgetLedger,
+        estimate_prompt_tokens,
+    )
+    from src.core.contracts import ExecutionBudget
+
+    filler = "Unrelated methodological background on historical archives. " * 12
+    answer = "Inflation targeting lowered quarterly core inflation volatility to 0.41 percent."
+    long_source = {
+        "id": "2409.00001",
+        "source": "arxiv",
+        "title": "Quarterly Inflation Volatility Study",
+        "abstract": f"{filler}{answer} Concluding remarks follow.",
+        "url": "https://arxiv.org/abs/2409.00001",
+    }
+    agent = _agent(_search_result(sources=[long_source]))
+    agent.config["context_window"] = 100_000
+    model = AsyncMock(return_value=(ANALYSIS, 0.9))
+    agent._generate_with_routing = model
+
+    ledger = BudgetLedger(
+        ExecutionBudget(
+            max_cost_usd=Decimal("1.00"),
+            max_total_tokens=2620,
+            max_tool_invocations=5,
+            max_parallel_tasks=1,
+            max_attempts_per_task=1,
+            task_timeout_seconds=30,
+        )
+    )
+    task = AgentTask(
+        id="lit-ledger-cap",
+        agent_type="literature_review",
+        input_data={"query": "quarterly core inflation volatility percent"},
+        context={BUDGET_LEDGER_CONTEXT_KEY: ledger},
+    )
+
+    result = await agent.execute(task)
+
+    assert result.status == "success"
+    prompt = model.await_args.args[0]
+    assert answer in prompt
+    assert estimate_prompt_tokens(prompt) + 2000 <= 2620
+
+    diag = result.output["selection_diagnostics"]
+    assert diag["context_window_tokens"] == 100_000
+    assert diag["budget_cap_tokens"] == 2620
+    assert diag["output_reserve_tokens"] == 2000
+    assert diag["evidence_budget_tokens"] == 2620 - 2000 - diag["instruction_tokens"]
+    assert diag["truncated_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_budget_ledger_cap_applies_below_min_source_share_and_skips_exhausted() -> (
+    None
+):
+    from decimal import Decimal
+
+    from src.core.budget import (
+        BUDGET_LEDGER_CONTEXT_KEY,
+        BudgetLedger,
+        estimate_prompt_tokens,
+    )
+    from src.core.contracts import ExecutionBudget
+
+    concise = {
+        "id": "2409.00002",
+        "source": "arxiv",
+        "title": "Core CPI",
+        "abstract": "Core CPI dropped 0.4 percent.",
+        "url": "https://arxiv.org/abs/2409.00002",
+    }
+    search = _search_result(sources=[concise], source_evidence={"enabled": False})
+    agent = _agent(search)
+    agent.config["context_window"] = 100_000
+    model = AsyncMock(return_value=(ANALYSIS, 0.9))
+    agent._generate_with_routing = model
+
+    probe_task = AgentTask(
+        id="lit-probe",
+        agent_type="literature_review",
+        input_data={"query": "Core CPI"},
+    )
+    _, output_reserve, instruction_tokens, *_ = agent._resolve_evidence_budget(
+        probe_task.input_data, probe_task
+    )
+    headroom = 75  # strictly in (0, MIN_SOURCE_SHARE_TOKENS=80)
+    capped_total = instruction_tokens + output_reserve + headroom
+
+    ledger = BudgetLedger(
+        ExecutionBudget(
+            max_cost_usd=Decimal("1.00"),
+            max_total_tokens=capped_total,
+            max_tool_invocations=5,
+            max_parallel_tasks=1,
+            max_attempts_per_task=1,
+            task_timeout_seconds=30,
+        )
+    )
+    task = AgentTask(
+        id="lit-small-headroom",
+        agent_type="literature_review",
+        input_data={"query": "Core CPI"},
+        context={BUDGET_LEDGER_CONTEXT_KEY: ledger},
+    )
+
+    result = await agent.execute(task)
+
+    assert result.status == "success"
+    prompt = model.await_args.args[0]
+    assert "Core CPI dropped 0.4 percent." in prompt
+    assert estimate_prompt_tokens(prompt) + output_reserve <= capped_total
+    diag = result.output["selection_diagnostics"]
+    assert diag["context_window_tokens"] == 100_000
+    assert diag["budget_cap_tokens"] == capped_total
+    assert diag["evidence_budget_tokens"] == headroom
+
+    exhausted_ledger = BudgetLedger(
+        ExecutionBudget(
+            max_cost_usd=Decimal("1.00"),
+            max_total_tokens=instruction_tokens + output_reserve,
+            max_tool_invocations=5,
+            max_parallel_tasks=1,
+            max_attempts_per_task=1,
+            task_timeout_seconds=30,
+        )
+    )
+    exhausted_task = AgentTask(
+        id="lit-exhausted",
+        agent_type="literature_review",
+        input_data={"query": "Core CPI"},
+        context={BUDGET_LEDGER_CONTEXT_KEY: exhausted_ledger},
+    )
+    resolved = agent._resolve_evidence_budget(exhausted_task.input_data, exhausted_task)
+    assert resolved[0] == 100_000
+    assert resolved[4] is None

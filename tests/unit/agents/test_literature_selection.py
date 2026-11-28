@@ -82,6 +82,62 @@ def test_duplicate_doi_collapses_once_and_retains_provenance() -> None:
     assert set(providers) == {"arxiv", "semantic_scholar"}
     assert result.diagnostics.reason_counts[SelectionReason.DUPLICATE_DOI] == 1
     assert result.diagnostics.omitted_count == 1
+    assert result.diagnostics.omitted_sources == (
+        {
+            "ref": "doi:10.1000/xyz",
+            "provider": "arxiv",
+            "reason": SelectionReason.DUPLICATE_DOI.value,
+        },
+    )
+
+
+def test_duplicate_swap_records_displaced_loser_not_winner_in_omitted_sources() -> None:
+    sources = [
+        {
+            "id": "2401.00001",
+            "source": "arxiv",
+            "title": "Inflation GNNs",
+            "abstract": "Brief.",
+            "url": "https://arxiv.org/abs/2401.00001",
+            "doi": "10.1000/XYZ",
+        },
+        {
+            "id": "s2-1",
+            "source": "semantic_scholar",
+            "title": "Inflation GNNs",
+            "abstract": (
+                "Detailed abstract explaining how graph neural networks cut "
+                "inflation forecast error by 14 percent."
+            ),
+            "url": "https://www.semanticscholar.org/paper/s2-1",
+            "doi": "https://doi.org/10.1000/xyz",
+        },
+    ]
+    source_evidence = {
+        "recorded": ["ev-1", "ev-2"],
+        "failed": [],
+        "sources": [
+            {"index": 0, "disposition": "recorded", "evidence_id": "ev-1"},
+            {"index": 1, "disposition": "recorded", "evidence_id": "ev-2"},
+        ],
+    }
+
+    result = select_bounded_sources(
+        sources,
+        query="inflation forecast error",
+        evidence_budget_tokens=4000,
+        source_evidence=source_evidence,
+    )
+
+    assert [e.ref for e in result.prompt_entries] == ["ev-2"]
+    assert [s["ref"] for s in result.diagnostics.sources] == ["ev-2"]
+    assert result.diagnostics.omitted_sources == (
+        {
+            "ref": "ev-1",
+            "provider": "arxiv",
+            "reason": SelectionReason.DUPLICATE_DOI.value,
+        },
+    )
 
 
 def test_distinct_dois_with_shared_url_are_never_merged() -> None:
@@ -138,6 +194,78 @@ def test_answer_span_after_char_200_survives_with_resolvable_locator_and_digest(
     assert estimate_prompt_tokens(entry.rendered_block) <= 120
     assert result.diagnostics.truncated_count == 1
     assert result.diagnostics.reason_counts[SelectionReason.EXCERPT_TRUNCATED] == 1
+
+
+@pytest.mark.parametrize(
+    ("query_suffix", "intro_sentence"),
+    [
+        (
+            "2024",
+            "In 2024, researchers reviewed many standard lab protocols across campuses. ",
+        ),
+        (
+            "COVID-19",
+            "Following COVID-19 supply disruptions, labs audited routine logistics. ",
+        ),
+        (
+            "GPT-4",
+            "Earlier GPT-4 benchmarks focused on general text summarization tasks. ",
+        ),
+    ],
+    ids=["year", "covid-19", "gpt-4"],
+)
+def test_year_and_alphanumeric_terms_do_not_displace_late_answer_span(
+    query_suffix: str, intro_sentence: str
+) -> None:
+    filler = intro_sentence + (
+        "Introductory context about unrelated benchmark setup. " * 10
+    )
+    assert len(filler) > 400
+    answer = "Cryogenic qubit coherence reached 942 microseconds at 12 mK."
+    source = {
+        "title": "Superconducting Qubit Coherence",
+        "abstract": f"{filler}{answer} Further closing remarks follow.",
+        "url": "https://arxiv.org/abs/2406.00001",
+        "doi": "10.1000/qubit-942",
+    }
+
+    result = select_bounded_sources(
+        [source],
+        query=f"cryogenic qubit coherence microseconds {query_suffix}",
+        evidence_budget_tokens=120,
+    )
+
+    assert len(result.prompt_entries) == 1
+    entry = result.prompt_entries[0]
+    assert entry.truncated is True
+    assert answer in entry.excerpt
+
+
+def test_real_identifier_in_multiple_sentences_prefers_higher_term_overlap_span() -> (
+    None
+):
+    intro = "Study 2406.00001 outlines laboratory infrastructure across three sites. "
+    filler = "Introductory context about unrelated benchmark setup. " * 10
+    answer = (
+        "Study 2406.00001 measured cryogenic qubit coherence of 942 microseconds "
+        "at 12 mK."
+    )
+    source = {
+        "id": "2406.00001",
+        "source": "arxiv",
+        "title": "Superconducting Qubit Coherence",
+        "abstract": f"{intro}{filler}{answer} Closing remarks follow.",
+        "url": "https://arxiv.org/abs/2406.00001",
+    }
+
+    result = select_bounded_sources(
+        [source],
+        query="2406.00001 cryogenic qubit coherence microseconds",
+        evidence_budget_tokens=120,
+    )
+
+    assert len(result.prompt_entries) == 1
+    assert answer in result.prompt_entries[0].excerpt
 
 
 def test_source_cap_and_context_budget_omissions_are_recorded_explicitly() -> None:
