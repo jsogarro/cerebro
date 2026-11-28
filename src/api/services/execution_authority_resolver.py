@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
+import json
 import uuid
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
+
+from sqlalchemy.exc import IntegrityError
 
 from src.core.contracts import (
     ExecutionBudget,
@@ -16,6 +21,7 @@ from src.core.contracts import (
     RoutingEdge,
     RoutingPolicy,
     Run,
+    RunStatus,
     WorkerAssignment,
     WorkflowDefinition,
 )
@@ -46,6 +52,103 @@ class ExecutionAuthorityUnavailableError(ExecutionAuthorityError):
     """Raised when no trusted resolver can supply the referenced authority."""
 
     code = "EXECUTION_AUTHORITY_UNAVAILABLE"
+
+
+class RequestIdExpiredError(ExecutionAuthorityError):
+    """Raised when retrying a request_id whose orphan minted authority expired."""
+
+    code = "REQUEST_ID_EXPIRED"
+
+
+MINTED_AUTHORITY_VERSION_PREFIX = "mint:"
+_MINT_AUTHORITY_VERSION_NAMESPACE = uuid.UUID("7f4c9a12-8b3d-4e56-9a10-2c3d4e5f6a70")
+_MINT_RUN_ID_NAMESPACE = uuid.UUID("3a8e1b45-6c9f-4d21-8b70-9e0f1a2b3c4d")
+
+
+def is_minted_authority_version(authority_version: str) -> bool:
+    """Return whether ``authority_version`` identifies a minted per-run binding."""
+    return authority_version.startswith(MINTED_AUTHORITY_VERSION_PREFIX)
+
+
+def _normalize_org_for_mint(tenant_id: str) -> str:
+    try:
+        return str(uuid.UUID(tenant_id))
+    except (ValueError, AttributeError, TypeError):
+        return tenant_id
+
+
+def validate_template_binding(binding: ExecutionAuthorityBinding) -> timedelta:
+    """Validate template invariants and return its positive deadline delta."""
+    if binding.run.status is not RunStatus.CREATED:
+        raise ValueError("template run status must be created")
+    if is_minted_authority_version(binding.authority_version):
+        raise ValueError(
+            "template authority_version cannot use reserved 'mint:' prefix"
+        )
+    if binding.deadline.tzinfo is None or binding.deadline.utcoffset() is None:
+        raise ValueError("template deadline must be timezone-aware")
+    delta = binding.deadline - binding.run.created_at
+    if delta <= timedelta(0):
+        raise ValueError("template deadline must follow run.created_at")
+    return delta
+
+
+def mint_run_binding(
+    template: ExecutionAuthorityBinding,
+    *,
+    user_id: str,
+    request_id: str,
+    now: datetime,
+) -> ExecutionAuthorityBinding:
+    """Deterministically derive a single-run binding from an operator template.
+
+    Policy, budget, workers (including outbound host allowlists), workflow,
+    and tenant ownership are copied verbatim from ``template``. Only the run
+    identity, requester, timestamps, and relative deadline are derived.
+    """
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("user_id must be a non-empty string")
+    if not isinstance(request_id, str) or not request_id.strip():
+        raise ValueError("request_id must be a non-empty string")
+    delta = validate_template_binding(template)
+
+    org = _normalize_org_for_mint(template.run.tenant_id)
+    canonical = json.dumps(
+        [
+            org,
+            template.authority_id,
+            template.authority_version,
+            user_id,
+            request_id,
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    authority_version = (
+        f"{MINTED_AUTHORITY_VERSION_PREFIX}"
+        f"{uuid.uuid5(_MINT_AUTHORITY_VERSION_NAMESPACE, canonical)}"
+    )
+    run_id = str(uuid.uuid5(_MINT_RUN_ID_NAMESPACE, canonical))
+    idempotency_key = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    minted_run = Run.model_validate(
+        {
+            **template.run.model_dump(mode="python"),
+            "run_id": run_id,
+            "requested_by": user_id,
+            "idempotency_key": idempotency_key,
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+    return dataclasses.replace(
+        template,
+        authority_version=authority_version,
+        run=minted_run,
+        deadline=now + delta,
+    )
 
 
 def tenant_owns_authority(tenant_id: str, organization_id: str) -> bool:
@@ -245,8 +348,15 @@ class PersistedExecutionAuthorityResolver:
         plan_id_factory: Callable[[], str] | None = None,
         session_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]]
         | None = None,
+        write_session_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]]
+        | None = None,
     ) -> None:
         self._session_factory = session_factory
+        self._write_session_factory = (
+            write_session_factory
+            if write_session_factory is not None
+            else session_factory
+        )
         self._bindings: dict[tuple[str, str], ExecutionAuthorityBinding] = {}
         self._clock: Callable[[], datetime] = clock or (lambda: datetime.now(UTC))
         self._plan_id_factory: Callable[[], str] = plan_id_factory or (
@@ -273,21 +383,34 @@ class PersistedExecutionAuthorityResolver:
         """Populate the in-process cache without touching persistence."""
         self._bindings[(binding.authority_id, binding.authority_version)] = binding
 
+    def _deserialize_row(self, row: Any) -> ExecutionAuthorityBinding:
+        return deserialize_execution_authority_binding(
+            row.configuration,
+            authority_id=row.authority_id,
+            authority_version=row.authority_version,
+            clock=self._clock,
+            plan_id_factory=self._plan_id_factory,
+        )
+
     async def load_authority(
         self,
         reference: ExecutionAuthorityReference,
         *,
         organization_id: str | None = None,
-    ) -> None:
-        """Cache the referenced authority from the database if it is not cached.
+    ) -> ExecutionAuthorityBinding | None:
+        """Load the referenced authority from the database on a cache miss.
 
-        An authority the caller's tenant registered is preferred; otherwise the
-        snapshot of an already-admitted run (another replica's) is used.
-        Tenant scoping still happens in :meth:`resolve`.
+        Operator-registered authorities are cached in-process; minted per-run
+        bindings are returned directly without populating ``_bindings`` so
+        memory does not grow O(runs) per replica. Tenant scoping still happens
+        on resolution.
         """
         key = (reference.authority_id, reference.authority_version)
-        if key in self._bindings or self._session_factory is None:
-            return
+        if key in self._bindings:
+            return self._bindings[key]
+        if self._session_factory is None:
+            return None
+        from src.middleware.tenant_context import set_postgres_tenant_context
         from src.repositories.execution_authority_repository import (
             ExecutionAuthorityRepository,
         )
@@ -298,10 +421,13 @@ class PersistedExecutionAuthorityResolver:
         async with self._session_factory() as session:
             row: Any = None
             if organization_id is not None:
+                if hasattr(session, "get_bind"):
+                    await set_postgres_tenant_context(session, organization_id)
                 row = await ExecutionAuthorityRepository(session).get(
                     authority_id=reference.authority_id,
                     authority_version=reference.authority_version,
                     organization_id=organization_id,
+                    is_template=False,
                 )
             if row is None:
                 snapshots = await RunConfigSnapshotRepository(
@@ -311,16 +437,106 @@ class PersistedExecutionAuthorityResolver:
                     authority_version=reference.authority_version,
                 )
                 row = snapshots[0] if snapshots else None
-        if row is not None:
-            self.cache_binding(
-                deserialize_execution_authority_binding(
-                    row.configuration,
-                    authority_id=row.authority_id,
-                    authority_version=row.authority_version,
-                    clock=self._clock,
-                    plan_id_factory=self._plan_id_factory,
-                )
+        if row is None:
+            return None
+        binding = self._deserialize_row(row)
+        if not is_minted_authority_version(binding.authority_version):
+            self.cache_binding(binding)
+        return binding
+
+    async def mint_authority_from_template(
+        self,
+        template_reference: ExecutionAuthorityReference,
+        *,
+        organization_id: str | None,
+        user_id: str,
+        request_id: str,
+        now: datetime | None = None,
+    ) -> ExecutionAuthorityBinding:
+        """Mint and durably persist a single-run authority from an org template.
+
+        Commits the minted ``is_template=False`` row in its own transaction so
+        subsequent admission sessions can read it. On a duplicate retry,
+        reloads the existing org-scoped row and rejects expired orphan rows
+        (no ``AgentRun`` yet) with :class:`RequestIdExpiredError`. Never
+        inserts minted bindings into ``_bindings``.
+        """
+        if self._write_session_factory is None or organization_id is None:
+            raise ExecutionAuthorityUnavailableError(
+                "execution authority is unavailable"
             )
+        from src.models.db.session import tenant_session
+        from src.repositories.execution_authority_repository import (
+            ExecutionAuthorityRepository,
+        )
+        from src.repositories.run_lifecycle_repository import RunLifecycleRepository
+        from src.repositories.tenant_scope import normalize_organization_id
+
+        try:
+            normalized_org = normalize_organization_id(organization_id)
+        except (ValueError, TypeError) as exc:
+            raise ExecutionAuthorityUnavailableError(
+                "execution authority is unavailable"
+            ) from exc
+
+        mint_now = now if now is not None else self._clock()
+        normalized_org_str = str(normalized_org)
+        session_factory = cast(
+            "Callable[[], AsyncSession]", self._write_session_factory
+        )
+
+        async with tenant_session(session_factory, normalized_org) as session:
+            template_row = await ExecutionAuthorityRepository(session).get_template(
+                authority_id=template_reference.authority_id,
+                authority_version=template_reference.authority_version,
+                organization_id=normalized_org,
+            )
+            if template_row is None:
+                raise ExecutionAuthorityUnavailableError(
+                    "execution authority is unavailable"
+                )
+            template_binding = self._deserialize_row(template_row)
+            enforce_authority_tenant(template_binding, normalized_org_str)
+            minted = mint_run_binding(
+                template_binding,
+                user_id=user_id,
+                request_id=request_id,
+                now=mint_now,
+            )
+            try:
+                await ExecutionAuthorityRepository(session).create(
+                    minted,
+                    organization_id=normalized_org,
+                    is_template=False,
+                )
+                await session.commit()
+                return minted
+            except IntegrityError:
+                await session.rollback()
+
+        async with tenant_session(session_factory, normalized_org) as reload_session:
+            existing_row = await ExecutionAuthorityRepository(reload_session).get(
+                authority_id=minted.authority_id,
+                authority_version=minted.authority_version,
+                organization_id=normalized_org,
+                is_template=False,
+            )
+            if existing_row is None:
+                raise ExecutionAuthorityUnavailableError(
+                    "execution authority is unavailable"
+                )
+            reloaded = self._deserialize_row(existing_row)
+            enforce_authority_tenant(reloaded, normalized_org_str)
+            if reloaded.deadline <= mint_now:
+                existing_run = await RunLifecycleRepository(reload_session).get_run(
+                    reloaded.run.run_id,
+                    organization_id=normalized_org,
+                )
+                if existing_run is None:
+                    raise RequestIdExpiredError(
+                        "request_id has expired; send a new request_id"
+                    )
+            return reloaded
 
     async def register(
         self,
@@ -331,7 +547,7 @@ class PersistedExecutionAuthorityResolver:
         config_snapshot_id: str,
         pinned_versions: PinnedVersions,
     ) -> AgentRunConfigSnapshot:
-        """Persist a binding's config snapshot and warm the cache with it.
+        """Persist a binding's config snapshot and warm the cache if non-minted.
 
         Args:
             session: The active database session; this method flushes but
@@ -360,33 +576,31 @@ class PersistedExecutionAuthorityResolver:
             pinned_versions=pinned_versions,
             configuration=configuration,
         )
-        self.cache_binding(binding)
+        if not is_minted_authority_version(binding.authority_version):
+            self.cache_binding(binding)
         return snapshot
 
     async def warm_from_snapshots(
         self, session: AsyncSession, *, limit: int | None = None
     ) -> int:
-        """Load every persisted authority binding into the cache.
+        """Load persisted non-minted authority bindings into the cache.
 
         Intended for a cold start: called once before the resolver starts
         serving ``resolve`` calls, so a process restart does not present as
-        every authority being unavailable.
+        every authority being unavailable. Minted per-run rows are skipped so
+        cache memory stays bounded by operator authorities.
 
         Returns:
-            The number of snapshots loaded.
+            The number of snapshots loaded into the cache.
         """
         from src.repositories.run_config_snapshot_repository import (
             RunConfigSnapshotRepository,
         )
 
-        snapshots = await RunConfigSnapshotRepository(session).list_all(limit=limit)
+        snapshots = await RunConfigSnapshotRepository(session).list_all(
+            limit=limit,
+            exclude_authority_version_prefix=MINTED_AUTHORITY_VERSION_PREFIX,
+        )
         for snapshot in snapshots:
-            binding = deserialize_execution_authority_binding(
-                snapshot.configuration,
-                authority_id=snapshot.authority_id,
-                authority_version=snapshot.authority_version,
-                clock=self._clock,
-                plan_id_factory=self._plan_id_factory,
-            )
-            self.cache_binding(binding)
+            self.cache_binding(self._deserialize_row(snapshot))
         return len(snapshots)

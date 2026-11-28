@@ -11,10 +11,12 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     String,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -33,6 +35,9 @@ class AgentExecutionAuthority(Base):
     authority_version: Mapped[str] = mapped_column(String(100), nullable=False)
     configuration: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_template: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

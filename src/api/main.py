@@ -347,7 +347,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
 
             persisted_resolver = PersistedExecutionAuthorityResolver(
-                session_factory=maintenance_session_factory
+                session_factory=maintenance_session_factory,
+                write_session_factory=durable_session_factory,
             )
             try:
                 async with maintenance_session_factory() as warm_session:

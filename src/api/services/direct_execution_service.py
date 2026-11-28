@@ -143,6 +143,7 @@ from .execution_authority_resolver import (
     ExecutionAuthorityResolver,
     ExecutionAuthorityUnavailableError,
     PersistedExecutionAuthorityResolver,
+    enforce_authority_tenant,
     serialize_execution_authority_binding,
     tenant_owns_authority,
 )
@@ -2736,15 +2737,19 @@ class DirectExecutionService:
         if self.closed:
             raise RuntimeError("Direct execution service is closed")
 
+        loaded_binding: ExecutionAuthorityBinding | None = None
         if authority_reference is not None and isinstance(
             self.execution_authority_resolver, PersistedExecutionAuthorityResolver
         ):
-            await self.execution_authority_resolver.load_authority(
+            loaded_binding = await self.execution_authority_resolver.load_authority(
                 authority_reference, organization_id=organization_id
             )
-        binding = self._resolve_execution_authority(
-            authority_reference, organization_id=organization_id
-        )
+        if loaded_binding is not None:
+            binding = enforce_authority_tenant(loaded_binding, organization_id)
+        else:
+            binding = self._resolve_execution_authority(
+                authority_reference, organization_id=organization_id
+            )
         run_id = binding.run.run_id
 
         locally_known_execution_id = self._locally_known_execution_id(run_id)
