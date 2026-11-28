@@ -9,7 +9,6 @@ Callers authenticate with RS256-signed JWTs issued by the `/api/v1/auth` routes 
 | Default-deny request authentication | Active | every request | `src/middleware/auth_middleware.py` (`AuthMiddleware`, `PUBLIC_ROUTE_ALLOWLIST`) |
 | Route-level token dependency | Active | `Depends(get_current_token)` | `src/middleware/auth_middleware.py` (`get_current_token`) |
 | WebSocket token authentication | Active | `?token=` query parameter | `src/api/websocket/auth.py` (`require_authenticated_websocket`) |
-| Anonymous WebSocket project access | Off by default | `DEV_ALLOW_ANONYMOUS_WEBSOCKETS` | `src/api/websocket/auth.py` (`verify_project_access`) |
 | RS256 access and refresh tokens | Active | `/api/v1/auth/login`, `/register`, `/refresh` | `src/auth/jwt_service.py` (`JWTService`) |
 | Token and session revocation | Active | `/api/v1/auth/logout`, `/revoke-all`, `/sessions/{device_id}` | `src/auth/jwt_service.py` (`revoke_token`, `revoke_all_user_tokens`) |
 | Personal access tokens (`/mcp` only) | Active | `/api/v1/auth/tokens`, `research-cli tokens` | `src/auth/pat_service.py`, `src/api/auth/tokens_router.py`, `src/models/db/personal_access_token.py` |
@@ -40,13 +39,11 @@ The constructor argument `exclude_paths` is accepted and ignored: access is defi
 
 ### WebSocket authentication
 
-Mounted WebSocket routes depend on `require_authenticated_websocket` (`src/api/websocket/auth.py`). It reads only the `token` query parameter (a leading `Bearer ` is stripped) and validates it through the same `JWTService` as HTTP, so the key pair and revocation checks are shared. An `Authorization` header alone does not authenticate a WebSocket. It always calls `authenticate_websocket_principal` with `allow_anonymous=False`: a missing token closes the connection with code 1008 and a failed or unavailable service closes with 1008 or 1011 (`WebSocketException`). The validated principal (`user_id`, `organization_id`, client type) is stored on `websocket.state.websocket_principal`.
+Mounted WebSocket routes depend on `require_authenticated_websocket` (`src/api/websocket/auth.py`). It reads only the `token` query parameter (a leading `Bearer ` is stripped) and validates it through the same `JWTService` as HTTP, so the key pair and revocation checks are shared. An `Authorization` header alone does not authenticate a WebSocket. It calls `authenticate_websocket_principal`: a missing token closes the connection with code 1008 and a failed or unavailable service closes with 1008 or 1011 (`WebSocketException`). The validated principal (`user_id`, `organization_id`, client type) is stored on `websocket.state.websocket_principal`.
 
 The run event stream (`/ws/runs/{run_id}`) additionally requires an `organization_id` claim (`resolve_run_stream_entitlement`).
 
-> **Off by default.** With `ENVIRONMENT=development` and `DEV_ALLOW_ANONYMOUS_WEBSOCKETS=true` both set, `verify_project_access` returns `True` for any project without checking ownership. It does not admit a connection without a token, because every mounted route already requires one.
-
-Without that opt-in, `verify_project_access` allows a project subscription only when the caller has a user id, an organization claim and a database session and the project belongs to the caller within the caller's organization (`ResearchRepository.get_for_user`). The code states that the application-level organization filter is the enforcement here, because the policies are not forced for the table owner (see [Tenancy](#tenancy)).
+`verify_project_access` allows a project subscription only when the caller has a user id, an organization claim and a database session and the project belongs to the caller within the caller's organization (`ResearchRepository.get_for_user`). The code states that the application-level organization filter is the enforcement here, because the policies are not forced for the table owner (see [Tenancy](#tenancy)).
 
 ## Tokens
 

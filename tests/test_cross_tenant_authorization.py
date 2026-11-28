@@ -77,9 +77,7 @@ AUTHORITY_REFERENCE = ExecutionAuthorityReference(
 
 @pytest.fixture(autouse=True)
 def _production_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the anonymous-development opt-in out of every test but its own."""
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
-    monkeypatch.setattr(settings, "DEV_ALLOW_ANONYMOUS_WEBSOCKETS", False)
 
 
 @pytest_asyncio.fixture
@@ -297,25 +295,6 @@ async def test_anonymous_caller_denied_project_access(
             session=project_session,
         )
         is False
-    )
-
-
-@pytest.mark.asyncio
-async def test_explicit_development_opt_in_still_allows_project_access(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The deliberate local-development opt-in keeps its exact semantics."""
-    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
-    monkeypatch.setattr(settings, "DEV_ALLOW_ANONYMOUS_WEBSOCKETS", True)
-
-    assert (
-        await verify_project_access(
-            None,
-            str(uuid.uuid4()),
-            organization_id=None,
-            session=None,
-        )
-        is True
     )
 
 

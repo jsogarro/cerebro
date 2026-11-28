@@ -89,14 +89,8 @@ class TestWebSocketE2E:
 
     async def test_websocket_connect_without_token_in_dev_mode(self):
         """
-        Unauthenticated connection with no anonymous-access opt-in.
-
-        Anonymous WebSocket access is gated by the explicit
-        `DEV_ALLOW_ANONYMOUS_WEBSOCKETS` setting (default `False`), not by
-        `ENVIRONMENT == "development"` alone — see
-        src/api/websocket/auth.py:42-56 and src/core/config.py:324.
-        `ENVIRONMENT` is not an authorization control, so selecting the dev
-        environment must not silently bypass authentication.
+        Unauthenticated connection: there is no anonymous WebSocket access, and
+        `ENVIRONMENT` is not an authorization control.
 
         The fail-closed boundary may reject the handshake at HTTP level or
         accept it and close with code 1008 ("Authentication token required").
@@ -124,8 +118,7 @@ class TestWebSocketE2E:
 
         assert disconnect is not None, (
             "Expected the server to accept then close the connection with "
-            "1008 for an anonymous WebSocket when DEV_ALLOW_ANONYMOUS_WEBSOCKETS "
-            "is unset"
+            "1008 for an anonymous WebSocket"
         )
         assert disconnect.code == 1008
         assert "token" in (disconnect.reason or "").lower()

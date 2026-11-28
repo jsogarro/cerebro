@@ -54,7 +54,7 @@ from src.middleware.auth_middleware import (
     get_current_user,
     get_jwt_service,
 )
-from src.models.db.session import get_session
+from src.models.db.session import SessionDep
 from src.models.db.user import User
 from src.repositories.user_repository import UserRepository
 from src.security.login_throttle import LoginThrottle
@@ -178,7 +178,7 @@ async def _current_identity(
 async def register(
     request: RegisterRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     jwt_service: JWTService = Depends(get_jwt_service),
     password_service: PasswordService = Depends(get_password_service),
 ) -> AuthResponse:
@@ -294,7 +294,7 @@ async def register(
 async def login(
     request: LoginRequest,
     req: Request,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     jwt_service: JWTService = Depends(get_jwt_service),
     password_service: PasswordService = Depends(get_password_service),
     throttle: LoginThrottle = Depends(get_login_throttle),
@@ -439,7 +439,7 @@ def _require_enrolment_enabled() -> None:
 async def mfa_enroll(
     request: MfaEnrollRequest,
     req: Request,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     user: User = Depends(get_current_user),
     throttle: LoginThrottle = Depends(get_login_throttle),
 ) -> MfaEnrollResponse:
@@ -473,7 +473,7 @@ async def mfa_enroll(
 async def mfa_verify(
     request: MfaCodeRequest,
     req: Request,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     user: User = Depends(get_current_user),
     throttle: LoginThrottle = Depends(get_login_throttle),
     jwt_service: JWTService = Depends(get_jwt_service),
@@ -507,7 +507,7 @@ async def mfa_verify(
 async def mfa_disable(
     request: MfaCodeRequest,
     req: Request,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     user: User = Depends(get_current_user),
     throttle: LoginThrottle = Depends(get_login_throttle),
     jwt_service: JWTService = Depends(get_jwt_service),
@@ -547,7 +547,7 @@ async def _revoke_sessions(jwt_service: JWTService, user: User) -> None:
 async def refresh_tokens(
     request: RefreshRequest,
     jwt_service: JWTService = Depends(get_jwt_service),
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
 ) -> TokenPair:
     """
     Refresh authentication tokens.
@@ -615,7 +615,7 @@ async def logout(
 async def forgot_password(
     request: PasswordResetRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     password_service: PasswordService = Depends(get_password_service),
 ) -> dict[str, str]:
     """
@@ -667,7 +667,7 @@ async def forgot_password(
 @router.post("/reset-password", status_code=status.HTTP_200_OK)
 async def reset_password(
     request: PasswordResetConfirm,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     password_service: PasswordService = Depends(get_password_service),
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> dict[str, str]:
@@ -741,7 +741,7 @@ async def reset_password(
 async def change_password(
     request: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     password_service: PasswordService = Depends(get_password_service),
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> dict[str, str]:
@@ -803,7 +803,7 @@ async def change_password(
 @router.get("/verify-email", status_code=status.HTTP_200_OK)
 async def verify_email(
     token: str,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     password_service: PasswordService = Depends(get_password_service),
 ) -> dict[str, str]:
     """

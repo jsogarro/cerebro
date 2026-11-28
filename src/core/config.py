@@ -352,7 +352,6 @@ class Settings(BaseSettings):
     DEV_ENABLE_AI_BRAIN_DEBUG: bool = False
     DEV_ENABLE_MEMORY_DEBUG: bool = False
     DEV_ENABLE_ROUTING_DEBUG: bool = False
-    DEV_ALLOW_ANONYMOUS_WEBSOCKETS: bool = False
     DEV_MOCK_PROVIDERS: bool = False
     DEV_MOCK_MEMORY: bool = False
 

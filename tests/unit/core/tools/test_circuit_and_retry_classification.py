@@ -339,3 +339,17 @@ class TestLateOutcomesFromBeforeTheTrip:
         breaker.record_failure(later, epoch=stale)
 
         assert breaker.state is BreakerState.HALF_OPEN
+
+
+def test_effective_state_reads_an_expired_cooldown_without_taking_the_probe_slot():
+    from datetime import UTC, datetime
+
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    breaker = CircuitBreaker(failure_threshold=1, cooldown_seconds=30)
+    breaker.record_failure(start)
+
+    assert breaker.effective_state(start) is BreakerState.OPEN
+    later = start + timedelta(seconds=31)
+    assert breaker.effective_state(later) is BreakerState.HALF_OPEN
+    assert breaker.state is BreakerState.OPEN
+    assert breaker.allows(later) is True

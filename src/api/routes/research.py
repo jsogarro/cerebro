@@ -20,7 +20,7 @@ from src.api.services.direct_execution_service import (
 from src.middleware.auth_middleware import get_current_token
 from src.middleware.tenant_context import TenantContext, get_tenant_context
 from src.models.db.research_project import ProjectStatus
-from src.models.db.session import get_session
+from src.models.db.session import SessionDep
 from src.models.execution_authority import ExecutionAuthorityReference
 from src.models.research_project import (
     ResearchProgress,
@@ -62,7 +62,7 @@ def _to_research_status(status: ProjectStatus) -> ResearchStatus:
 
 
 async def get_research_repo(
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
 ) -> ResearchRepository:
     """Get research repository dependency."""
     return ResearchRepository(session)

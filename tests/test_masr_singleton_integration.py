@@ -15,6 +15,27 @@ from src.api.main import app, lifespan
 from tests.fixtures.authenticated_caller import allow_authenticated
 
 
+def test_lifespan_removes_the_gemini_service_it_published(monkeypatch) -> None:
+    from src.api.services import direct_execution_service
+    from src.api.services.event_publisher import event_publisher
+    from src.api.websocket.connection_manager import websocket_manager
+    from src.core.config import settings
+    from src.models.db import session as db_session
+
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "k")
+    monkeypatch.setattr(settings, "ADAPTIVE_ROUTING_ENABLED", False)
+    monkeypatch.setattr(db_session, "init_db", AsyncMock())
+    monkeypatch.setattr(event_publisher, "initialize", AsyncMock())
+    monkeypatch.setattr(event_publisher, "shutdown", AsyncMock())
+    monkeypatch.setattr(websocket_manager, "shutdown", AsyncMock())
+    monkeypatch.setattr(direct_execution_service, "_direct_execution_service", None)
+
+    with TestClient(app):
+        assert app.state.gemini_service is not None
+
+    assert not hasattr(app.state, "gemini_service")
+
+
 def test_lifespan_injects_one_router_across_active_consumers(
     monkeypatch,
 ) -> None:

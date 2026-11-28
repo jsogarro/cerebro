@@ -195,8 +195,6 @@ GUARANTEE_PROVEN_BY: Final[dict[str, tuple[str, ...]]] = {
         "::test_missing_session_denies_project_access",
         "tests/test_cross_tenant_authorization.py"
         "::test_anonymous_caller_denied_project_access",
-        "tests/test_cross_tenant_authorization.py"
-        "::test_explicit_development_opt_in_still_allows_project_access",
     ),
 }
 """For each in-process-unrunnable scenario, the tests that actually prove it.

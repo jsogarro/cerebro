@@ -22,7 +22,7 @@ from src.middleware.tenant_context import (
     owner_ids,
     set_postgres_tenant_context,
 )
-from src.models.db.session import get_session
+from src.models.db.session import SessionDep
 from src.repositories.uploaded_document_repository import (
     DocumentMeta,
     UploadedDocumentRepository,
@@ -141,7 +141,7 @@ def _parse_authors(raw: object) -> list[str]:
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=DocumentOut)
 async def upload_document(
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> DocumentOut:
     _require_enabled()
@@ -209,7 +209,7 @@ async def upload_document(
 @router.get("", response_model=list[DocumentOut])
 async def list_documents(
     limit: Annotated[int, Query(ge=1, le=50)] = 50,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> list[DocumentOut]:
     _require_enabled()
@@ -223,7 +223,7 @@ async def list_documents(
 @router.get("/{document_id}", response_model=DocumentOut)
 async def get_document(
     document_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> DocumentOut:
     _require_enabled()
@@ -239,7 +239,7 @@ async def get_document(
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
     tenant: TenantContext = Depends(get_tenant_context),
 ) -> Response:
     ids = owner_ids(tenant)

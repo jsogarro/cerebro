@@ -15,7 +15,7 @@ from src.api.services.evidence_service import (
 )
 from src.middleware.auth_middleware import get_current_token
 from src.middleware.tenant_context import TenantContext, get_tenant_context
-from src.models.db.session import get_session
+from src.models.db.session import SessionDep
 
 router = APIRouter(dependencies=[Depends(get_current_token)])
 
@@ -33,7 +33,7 @@ async def get_run_evidence(
         description="Maximum evidence rows to return (default 100, cap 500)",
     ),
     tenant_context: TenantContext = Depends(get_tenant_context),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = SessionDep,
 ) -> RunEvidencePage:
     """Return metadata-only evidence rows for a run owned by the caller's tenant."""
     try:

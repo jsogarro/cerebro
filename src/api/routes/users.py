@@ -17,7 +17,7 @@ from src.models.db.audit_log import AuditEventType
 from src.models.db.generated_report import GeneratedReport
 from src.models.db.research_project import ResearchProject
 from src.models.db.research_result import ResearchResult
-from src.models.db.session import get_session
+from src.models.db.session import SessionDep
 from src.models.db.similarity_check import EgressEvent
 from src.models.db.uploaded_document import UploadedDocument, UsageLedger
 from src.models.db.user import User
@@ -55,7 +55,7 @@ _RETAINED = {
 @router.delete("/{user_id}/gdpr")
 async def delete_user_gdpr(
     user_id: UUID,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     memory_system: MultiTierMemorySystem | None = Depends(get_memory_system),
     audit_logger: AuditLogger | None = Depends(get_audit_logger),
     current_user: User = Depends(get_current_active_user),
