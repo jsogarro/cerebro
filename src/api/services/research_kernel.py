@@ -457,11 +457,7 @@ async def start_intelligent_research(
         organization_id=tenant.organization_id,
     )
 
-    status_project_id = (
-        getattr(execution_status, "project_id", None)
-        if execution_status is not None
-        else None
-    )
+    status_project_id = getattr(execution_status, "project_id", None)
     replayed = bool(status_project_id) and status_project_id != str(project.id)
     effective_project_id = (
         str(status_project_id) if status_project_id else str(project.id)
@@ -469,13 +465,9 @@ async def start_intelligent_research(
 
     return StartResult(
         execution_id=execution_id,
-        run_id=(
-            getattr(execution_status, "run_id", None)
-            if execution_status is not None
-            else None
-        ),
+        run_id=getattr(execution_status, "run_id", None),
         project_id=effective_project_id,
-        status=execution_status.status if execution_status is not None else "pending",
+        status=getattr(execution_status, "status", None) or "pending",
         replayed=replayed,
         execution_status=execution_status,
     )

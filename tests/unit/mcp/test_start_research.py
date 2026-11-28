@@ -399,15 +399,18 @@ async def test_mcp_foreign_origin_returns_403(
             no_origin = await client.post("/mcp", json={})
             assert no_origin.status_code == 401
 
-            # Allowed loopback & configured CORS origins pass through Origin guard
-            # (reaching AuthMiddleware -> 401 without token, not 403)
+            # Allowed loopback (http + https) & configured CORS origins pass through
+            # Origin guard (reaching AuthMiddleware -> 401 without token, not 403)
             for good_origin in (
                 "http://localhost",
                 "http://localhost:3000",
+                "https://localhost:8000",
                 "http://127.0.0.1",
                 "http://127.0.0.1:8000",
+                "https://127.0.0.1:8000",
                 "http://[::1]",
                 "http://[::1]:8000",
+                "https://[::1]:8000",
                 "https://trusted.local",
             ):
                 resp = await client.post(
@@ -416,6 +419,54 @@ async def test_mcp_foreign_origin_returns_403(
                     json={},
                 )
                 assert resp.status_code == 401, (good_origin, resp.status_code)
+
+            # HIGH #1: multiple Origin headers must be rejected with 403
+            multi_origin_resp = await client.post(
+                "/mcp",
+                headers=[
+                    ("Origin", "http://localhost:3000"),
+                    ("Origin", "https://evil.example"),
+                ],
+                json={},
+            )
+            assert multi_origin_resp.status_code == 403
+
+            # HIGH #2: malformed/delimiter-suffixed origins must be rejected
+            from src.middleware.mcp_origin import is_allowed_mcp_origin
+
+            for malformed_origin in (
+                "http://localhost:3000?",
+                "http://localhost:3000#",
+                "http://localhost:",
+                "http://localhost\t:3000",
+                "http://local\nhost:3000",
+            ):
+                assert not is_allowed_mcp_origin(
+                    malformed_origin, settings.CORS_ORIGINS
+                ), malformed_origin
+            for http_malformed in (
+                "http://localhost:3000?",
+                "http://localhost:3000#",
+                "http://localhost:",
+            ):
+                resp = await client.post(
+                    "/mcp",
+                    headers={"Origin": http_malformed},
+                    json={},
+                )
+                assert resp.status_code == 403, (http_malformed, resp.status_code)
+
+            # MEDIUM #4: OPTIONS preflight on /mcp with foreign Origin must return 403
+            # (McpOriginMiddleware outermost, before CORSMiddleware, even with "*")
+            monkeypatch.setattr(settings, "CORS_ORIGINS", ["*"])
+            preflight_resp = await client.options(
+                "/mcp",
+                headers={
+                    "Origin": "https://evil.example",
+                    "Access-Control-Request-Method": "POST",
+                },
+            )
+            assert preflight_resp.status_code == 403
     finally:
         app.dependency_overrides.pop(get_jwt_service, None)
 
@@ -1687,3 +1738,245 @@ async def test_mcp_start_research_injection_drill_t3(
         await service.close()
     finally:
         await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Review hardening red-first tests (HIGH #3, MEDIUM #5/#6, LOW #8/#9)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_replay_missing_active_execution_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    from src.api.services.direct_execution_service import (
+        RunAlreadyAdmittedError,
+        RunParamsConflictError,
+    )
+    from src.api.services.research_kernel import start_intelligent_research
+
+    engine, factory = await _make_sqlite_session_factory(tmp_path)
+    try:
+        template = _make_template_binding()
+        await _seed_template(factory, template)
+        resolver = PersistedExecutionAuthorityResolver(session_factory=factory)
+        service = DirectExecutionService(
+            masr_router=_fake_router(template),
+            supervisor_bridge=_CountingBridge(),
+            supervisor_factory=Mock(),
+            session_factory=factory,
+            execution_authority_resolver=resolver,
+        )
+        minted = await resolver.mint_authority_from_template(
+            ExecutionAuthorityReference(
+                authority_id="tpl-research", authority_version="1"
+            ),
+            organization_id=ORG_A,
+            user_id=USER_A,
+            request_id="req-missing-active",
+        )
+        ref = ExecutionAuthorityReference(
+            authority_id=minted.authority_id,
+            authority_version=minted.authority_version,
+        )
+        tenant = TenantContext(user_id=USER_A, organization_id=ORG_A)
+        kernel = compose_application_research_kernel(service)
+
+        # Path 3: durable lookup returns an execution_id absent from active_executions
+        monkeypatch.setattr(
+            service,
+            "_durably_recorded_execution_id",
+            AsyncMock(return_value="ghost-exec-path-3"),
+        )
+        with pytest.raises(RunParamsConflictError):
+            await start_intelligent_research(
+                kernel,
+                tenant=tenant,
+                query="Any query",
+                domains=["ml"],
+                authority_reference=ref,
+            )
+
+        # Path 4: _admit_run raises RunAlreadyAdmittedError for an id absent from active_executions
+        monkeypatch.setattr(
+            service, "_durably_recorded_execution_id", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(
+            service,
+            "_admit_run",
+            AsyncMock(side_effect=RunAlreadyAdmittedError("ghost-exec-path-4")),
+        )
+        with pytest.raises(RunParamsConflictError):
+            await start_intelligent_research(
+                kernel,
+                tenant=tenant,
+                query="Any query",
+                domains=["ml"],
+                authority_reference=ref,
+            )
+
+        await service.close()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_replay_domain_canonicalization_and_whitespace_query_hash_parity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    engine, factory = await _make_sqlite_session_factory(tmp_path)
+    try:
+        template = _make_template_binding()
+        await _seed_template(factory, template)
+        resolver = PersistedExecutionAuthorityResolver(session_factory=factory)
+        service = DirectExecutionService(
+            masr_router=_fake_router(template),
+            supervisor_bridge=_CountingBridge(),
+            supervisor_factory=Mock(),
+            session_factory=factory,
+            execution_authority_resolver=resolver,
+        )
+        audit = _StubAuditLogger()
+        server = build_mcp_server(
+            kernel=compose_application_research_kernel(service),
+            audit_logger=audit,
+            session_factory=factory,
+            authority_resolver=resolver,
+        )
+        fake_req = SimpleNamespace(
+            state=SimpleNamespace(token_payload=_pat_payload(scopes=[PAT_SCOPE_START]))
+        )
+        monkeypatch.setattr("src.mcp.server.get_http_request", lambda: fake_req)
+
+        from src.api.services.direct_execution_service import research_query_sha256
+
+        raw_query = "  what is X?  "
+        stripped_hash = hashlib.sha256(b"what is X?").hexdigest()
+        assert research_query_sha256(raw_query) == stripped_hash
+
+        async with Client(server) as client:
+            first = await client.call_tool(
+                "start_research",
+                {
+                    "template_authority_id": "tpl-research",
+                    "template_authority_version": "1",
+                    "request_id": "req-canon-1",
+                    "query": raw_query,
+                    "domains": ["Biology", "chemistry"],
+                },
+            )
+            assert first.data["replayed"] is False
+
+            # MEDIUM #6: audit query_sha256 and query_length match stripped Task.input
+            exec_status = service.active_executions[first.data["execution_id"]]
+            assert exec_status._task is not None
+            assert exec_status._task.input["query_sha256"] == stripped_hash
+            evt_meta = audit.events[-1]["metadata"]
+            assert evt_meta["query_sha256"] == stripped_hash
+            assert evt_meta["query_length"] == len("what is X?")
+
+            # MEDIUM #5: equivalent domains (reordered, different case, duplicates, blank) replay cleanly
+            replayed = await client.call_tool(
+                "start_research",
+                {
+                    "template_authority_id": "tpl-research",
+                    "template_authority_version": "1",
+                    "request_id": "req-canon-1",
+                    "query": "what is X?",
+                    "domains": ["chemistry", "biology", "biology", "   "],
+                },
+            )
+            assert replayed.data["replayed"] is True
+            assert replayed.data["execution_id"] == first.data["execution_id"]
+
+            # Genuinely different domains still conflict
+            with pytest.raises(ToolError, match="RUN_PARAMS_CONFLICT"):
+                await client.call_tool(
+                    "start_research",
+                    {
+                        "template_authority_id": "tpl-research",
+                        "template_authority_version": "1",
+                        "request_id": "req-canon-1",
+                        "query": "what is X?",
+                        "domains": ["physics"],
+                    },
+                )
+
+        await _await_settled(service, first.data["execution_id"])
+        await service.close()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_start_input_bounds_wire_schema_and_empty_scope_pat_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.mcp.server import StartResearchInput
+
+    # LOW #8: max_length bounds on StartResearchInput
+    with pytest.raises(ValidationError):
+        StartResearchInput.model_validate(
+            {
+                "template_authority_id": "a" * 257,
+                "template_authority_version": "1",
+                "request_id": "req-1",
+                "query": "valid",
+            }
+        )
+    with pytest.raises(ValidationError):
+        StartResearchInput.model_validate(
+            {
+                "template_authority_id": "tpl",
+                "template_authority_version": "1",
+                "request_id": "req-1",
+                "query": "q" * 100_001,
+            }
+        )
+    with pytest.raises(ValidationError):
+        StartResearchInput.model_validate(
+            {
+                "template_authority_id": "tpl",
+                "template_authority_version": "1",
+                "request_id": "req-1",
+                "query": "valid",
+                "domains": [f"d{i}" for i in range(51)],
+            }
+        )
+
+    audit = _StubAuditLogger()
+    server = build_mcp_server(
+        kernel=compose_application_research_kernel(Mock()),
+        audit_logger=audit,
+    )
+    empty_scope_pat = _pat_payload(scopes=[], pat_id=PAT_READ_ID)
+    fake_req = SimpleNamespace(state=SimpleNamespace(token_payload=empty_scope_pat))
+    monkeypatch.setattr("src.mcp.server.get_http_request", lambda: fake_req)
+
+    async with Client(server) as client:
+        tools = {t.name: t for t in await client.list_tools()}
+        props = tools["start_research"].input_schema["properties"]
+        for req_field in (
+            "template_authority_id",
+            "template_authority_version",
+            "request_id",
+            "query",
+        ):
+            assert props[req_field].get("minLength") == 1, req_field
+
+        # LOW #9: empty-scope PAT still records "scopes": [] in audit metadata
+        with pytest.raises(ToolError, match="mcp:start"):
+            await client.call_tool(
+                "start_research",
+                {
+                    "template_authority_id": "tpl-research",
+                    "template_authority_version": "1",
+                    "request_id": "req-empty-scope",
+                    "query": "test",
+                },
+            )
+
+    assert audit.events[-1]["metadata"]["pat_id"] == PAT_READ_ID
+    assert audit.events[-1]["metadata"]["scopes"] == []

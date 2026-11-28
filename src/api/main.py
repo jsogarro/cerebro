@@ -610,10 +610,6 @@ app.add_middleware(LLMCostDriftMiddleware)
 
 app.add_middleware(AuthMiddleware)
 
-# DNS-rebinding guard for /mcp runs outside AuthMiddleware so foreign-Origin
-# requests are refused with 403 before credential validation.
-app.add_middleware(McpOriginMiddleware)
-
 # Registered after authentication, so rejection logging and the response
 # headers wrap the responses that authentication and rate limiting produce.
 app.middleware("http")(log_rejected_requests)
@@ -625,9 +621,8 @@ app.middleware("http")(
     )
 )
 
-# CORS must be the outermost application middleware. It terminates genuine
-# browser preflights before authentication, while AuthMiddleware remains the
-# exact public-route boundary for every other request, including OPTIONS.
+# CORS sits inside McpOriginMiddleware for /mcp and remains outermost for all
+# other routes, terminating genuine browser preflights before authentication.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -635,6 +630,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# DNS-rebinding guard for /mcp runs outermost so disallowed Origin headers
+# (including OPTIONS preflights) receive 403 before CORS or authentication.
+app.add_middleware(McpOriginMiddleware)
 
 # Mount Prometheus metrics endpoint. AuthMiddleware gates it on the metrics
 # credential, never on an ordinary tenant token.

@@ -3,8 +3,8 @@
 Defends local and browser-adjacent MCP servers against DNS-rebinding and
 cross-origin browser requests per the MCP Streamable HTTP specification.
 Requests without an ``Origin`` header (CLI and non-browser MCP clients) pass
-through untouched; requests carrying a disallowed ``Origin`` receive ``403``
-before authentication runs.
+through untouched; requests carrying a disallowed or duplicate ``Origin``
+receive ``403`` before CORS or authentication runs.
 """
 
 from __future__ import annotations
@@ -28,7 +28,9 @@ _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 def _parse_origin(raw: str) -> tuple[str, str, int] | None:
     """Parse a strict ``scheme://host[:port]`` origin, or return ``None``."""
-    if not raw or raw != raw.strip():
+    if not raw or any(ch <= " " or ch == "\x7f" for ch in raw):
+        return None
+    if "?" in raw or "#" in raw:
         return None
     try:
         parsed = urlsplit(raw)
@@ -36,9 +38,9 @@ def _parse_origin(raw: str) -> tuple[str, str, int] | None:
     except ValueError:
         return None
     scheme = parsed.scheme.lower()
-    if scheme not in _DEFAULT_PORTS:
+    if scheme not in _DEFAULT_PORTS or not raw.lower().startswith(f"{scheme}://"):
         return None
-    if not parsed.hostname:
+    if not parsed.hostname or parsed.netloc.endswith(":"):
         return None
     if parsed.username is not None or parsed.password is not None:
         return None
@@ -54,7 +56,7 @@ def is_allowed_mcp_origin(origin: str, cors_origins: Sequence[str]) -> bool:
     if parsed is None:
         return False
     scheme, host, _port = parsed
-    if scheme == "http" and host in _LOOPBACK_HOSTS:
+    if scheme in _DEFAULT_PORTS and host in _LOOPBACK_HOSTS:
         return True
     for configured in cors_origins:
         if configured == "*":
@@ -70,7 +72,7 @@ def _is_mcp_path(path: str) -> bool:
 
 
 class McpOriginMiddleware(BaseHTTPMiddleware):
-    """Reject browser requests to ``/mcp`` with a disallowed ``Origin`` header."""
+    """Reject browser requests to ``/mcp`` with disallowed or duplicate ``Origin``."""
 
     async def dispatch(
         self,
@@ -78,9 +80,10 @@ class McpOriginMiddleware(BaseHTTPMiddleware):
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         if _is_mcp_path(request.url.path):
-            origin = request.headers.get("origin")
-            if origin is not None and not is_allowed_mcp_origin(
-                origin, settings.CORS_ORIGINS
+            origins = request.headers.getlist("origin")
+            if len(origins) > 1 or (
+                len(origins) == 1
+                and not is_allowed_mcp_origin(origins[0], settings.CORS_ORIGINS)
             ):
                 audit_rejection(
                     request,

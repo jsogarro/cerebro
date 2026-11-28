@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import HTTPException
 from fastmcp import FastMCP
@@ -67,11 +67,11 @@ class StartResearchInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    template_authority_id: str = Field(..., min_length=1)
-    template_authority_version: str = Field(..., min_length=1)
-    request_id: str = Field(..., min_length=1)
-    query: str = Field(..., min_length=1)
-    domains: list[str] = Field(default_factory=list)
+    template_authority_id: str = Field(..., min_length=1, max_length=256)
+    template_authority_version: str = Field(..., min_length=1, max_length=256)
+    request_id: str = Field(..., min_length=1, max_length=256)
+    query: str = Field(..., min_length=1, max_length=100_000)
+    domains: list[str] = Field(default_factory=list, max_length=50)
 
     @field_validator(
         "template_authority_id",
@@ -81,29 +81,48 @@ class StartResearchInput(BaseModel):
     )
     @classmethod
     def _reject_blank(cls, value: str) -> str:
-        if not value.strip():
+        cleaned = value.strip()
+        if not cleaned:
             raise ValueError("value must not be blank")
-        return value
+        return cleaned
 
 
 @dataclass(frozen=True, slots=True)
-class _CallerIdentity:
-    """Authenticated caller context preserved across scope/tenant denials."""
+class _AuditIdentity:
+    """Partial or full caller identity attached to audit events."""
 
-    tenant: TenantContext | None
     request: Any
-    pat_id: str | None
+    pat_id: str | None = None
     scopes: tuple[str, ...] = ()
     user_id: str | None = None
     organization_id: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _CallerIdentity:
+    """Verified caller identity with a non-null tenant context."""
+
+    tenant: TenantContext
+    request: Any
+    pat_id: str | None
+    scopes: tuple[str, ...] = ()
+
+    def to_audit(self) -> _AuditIdentity:
+        return _AuditIdentity(
+            request=self.request,
+            pat_id=self.pat_id,
+            scopes=self.scopes,
+            user_id=self.tenant.user_id,
+            organization_id=self.tenant.organization_id,
+        )
+
+
 class _CallerAuthError(ToolError):
     """Auth/scope denial that retains resolved caller identity for audit."""
 
-    def __init__(self, message: str, *, caller: _CallerIdentity) -> None:
+    def __init__(self, message: str, *, audit_identity: _AuditIdentity) -> None:
         super().__init__(message)
-        self.caller = caller
+        self.audit_identity = audit_identity
 
 
 def _caller(*, required_scope: str) -> _CallerIdentity:
@@ -123,7 +142,7 @@ def _caller(*, required_scope: str) -> _CallerIdentity:
     if not isinstance(payload, (TokenPayload, PersonalAccessTokenPayload)):
         raise _CallerAuthError(
             "Authentication required",
-            caller=_CallerIdentity(tenant=None, request=request, pat_id=None),
+            audit_identity=_AuditIdentity(request=request),
         )
 
     pat_id: str | None = None
@@ -137,13 +156,11 @@ def _caller(*, required_scope: str) -> _CallerIdentity:
     except HTTPException as exc:
         raise _CallerAuthError(
             str(exc.detail),
-            caller=_CallerIdentity(
-                tenant=None,
+            audit_identity=_AuditIdentity(
                 request=request,
                 pat_id=pat_id,
                 scopes=scopes,
                 user_id=payload.sub,
-                organization_id=None,
             ),
         ) from exc
 
@@ -153,8 +170,6 @@ def _caller(*, required_scope: str) -> _CallerIdentity:
         request=request,
         pat_id=pat_id,
         scopes=scopes,
-        user_id=tenant.user_id,
-        organization_id=tenant.organization_id,
     )
 
     if isinstance(payload, PersonalAccessTokenPayload) and not payload.has_scope(
@@ -162,7 +177,7 @@ def _caller(*, required_scope: str) -> _CallerIdentity:
     ):
         raise _CallerAuthError(
             f"Personal access token missing required scope: {required_scope}",
-            caller=identity,
+            audit_identity=identity.to_audit(),
         )
 
     return identity
@@ -203,7 +218,7 @@ def build_mcp_server(
         resource_type: str,
         resource_id: str,
         result: str,
-        caller: _CallerIdentity | None = None,
+        caller: _AuditIdentity | None = None,
         detail: str | None = None,
         event_type: AuditEventType = AuditEventType.DATA_ACCESSED,
         extra_metadata: dict[str, Any] | None = None,
@@ -214,7 +229,6 @@ def build_mcp_server(
                 metadata["organization_id"] = caller.organization_id
             if caller.pat_id is not None:
                 metadata["pat_id"] = caller.pat_id
-            if caller.scopes:
                 metadata["scopes"] = list(caller.scopes)
         if detail is not None:
             metadata["detail"] = detail
@@ -234,10 +248,10 @@ def build_mcp_server(
     @mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
     async def get_research_status(execution_id: str) -> dict[str, Any]:
         """Get the status and progress of a research execution."""
-        caller: _CallerIdentity | None = None
+        audit_caller: _AuditIdentity | None = None
         try:
             caller = _caller(required_scope=PAT_SCOPE_READ)
-            assert caller.tenant is not None
+            audit_caller = caller.to_audit()
             exec_status = await get_kernel_execution_status(
                 kernel,
                 execution_id,
@@ -247,14 +261,14 @@ def build_mcp_server(
                 raise ToolError(f"Execution {execution_id} not found")
             payload = execution_status_payload(execution_id, exec_status)
         except ToolError as exc:
-            if caller is None and isinstance(exc, _CallerAuthError):
-                caller = exc.caller
+            if audit_caller is None and isinstance(exc, _CallerAuthError):
+                audit_caller = exc.audit_identity
             await _audit(
                 tool_name="get_research_status",
                 resource_type="research_execution",
                 resource_id=execution_id,
                 result="failure",
-                caller=caller,
+                caller=audit_caller,
                 detail=str(exc),
             )
             raise
@@ -264,17 +278,17 @@ def build_mcp_server(
             resource_type="research_execution",
             resource_id=execution_id,
             result="success",
-            caller=caller,
+            caller=audit_caller,
         )
         return payload
 
     @mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
     async def get_research_results(execution_id: str) -> dict[str, Any]:
         """Get completed research results with trust labels and claim verdicts."""
-        caller: _CallerIdentity | None = None
+        audit_caller: _AuditIdentity | None = None
         try:
             caller = _caller(required_scope=PAT_SCOPE_READ)
-            assert caller.tenant is not None
+            audit_caller = caller.to_audit()
             payload = await build_research_results_payload(
                 kernel,
                 execution_id,
@@ -284,14 +298,14 @@ def build_mcp_server(
             if payload is None:
                 raise ToolError(f"Execution {execution_id} not found or not completed")
         except ToolError as exc:
-            if caller is None and isinstance(exc, _CallerAuthError):
-                caller = exc.caller
+            if audit_caller is None and isinstance(exc, _CallerAuthError):
+                audit_caller = exc.audit_identity
             await _audit(
                 tool_name="get_research_results",
                 resource_type="research_execution",
                 resource_id=execution_id,
                 result="failure",
-                caller=caller,
+                caller=audit_caller,
                 detail=str(exc),
             )
             raise
@@ -301,7 +315,7 @@ def build_mcp_server(
             resource_type="research_execution",
             resource_id=execution_id,
             result="success",
-            caller=caller,
+            caller=audit_caller,
         )
         return payload
 
@@ -312,10 +326,10 @@ def build_mcp_server(
         limit: int = DEFAULT_EVIDENCE_LIMIT,
     ) -> dict[str, Any]:
         """List metadata-only evidence records for a research run."""
-        caller: _CallerIdentity | None = None
+        audit_caller: _AuditIdentity | None = None
         try:
             caller = _caller(required_scope=PAT_SCOPE_READ)
-            assert caller.tenant is not None
+            audit_caller = caller.to_audit()
             if session_factory is None:
                 raise ToolError("Evidence storage is unavailable")
             try:
@@ -330,14 +344,14 @@ def build_mcp_server(
                 raise ToolError(str(exc)) from exc
             payload = page.model_dump()
         except ToolError as exc:
-            if caller is None and isinstance(exc, _CallerAuthError):
-                caller = exc.caller
+            if audit_caller is None and isinstance(exc, _CallerAuthError):
+                audit_caller = exc.audit_identity
             await _audit(
                 tool_name="get_research_evidence",
                 resource_type="research_run",
                 resource_id=run_id,
                 result="failure",
-                caller=caller,
+                caller=audit_caller,
                 detail=str(exc),
             )
             raise
@@ -347,31 +361,43 @@ def build_mcp_server(
             resource_type="research_run",
             resource_id=run_id,
             result="success",
-            caller=caller,
+            caller=audit_caller,
         )
         return payload
 
     @mcp.tool(annotations=_START_RESEARCH_ANNOTATIONS)
     async def start_research(
-        template_authority_id: str,
-        template_authority_version: str,
-        request_id: str,
-        query: str,
-        domains: list[str] | None = None,
+        template_authority_id: Annotated[str, Field(min_length=1, max_length=256)],
+        template_authority_version: Annotated[str, Field(min_length=1, max_length=256)],
+        request_id: Annotated[str, Field(min_length=1, max_length=256)],
+        query: Annotated[str, Field(min_length=1, max_length=100_000)],
+        domains: Annotated[list[str] | None, Field(max_length=50)] = None,
     ) -> dict[str, Any]:
         """Start or idempotently replay a research run from an authority template."""
-        caller: _CallerIdentity | None = None
-        query_hash = research_query_sha256(query)
-        query_length = len(query)
+        audit_caller: _AuditIdentity | None = None
+        stripped_query = query.strip()
         audit_extra: dict[str, Any] = {
-            "query_sha256": query_hash,
-            "query_length": query_length,
+            "query_sha256": research_query_sha256(stripped_query),
+            "query_length": len(stripped_query),
             "authority_id": template_authority_id,
             "authority_version": template_authority_version,
         }
+
+        async def _audit_failure(detail: str) -> None:
+            await _audit(
+                tool_name="start_research",
+                resource_type="research_execution",
+                resource_id=request_id,
+                result="failure",
+                caller=audit_caller,
+                detail=detail,
+                event_type=AuditEventType.DATA_MODIFIED,
+                extra_metadata=audit_extra,
+            )
+
         try:
             caller = _caller(required_scope=PAT_SCOPE_START)
-            assert caller.tenant is not None
+            audit_caller = caller.to_audit()
             try:
                 validated = StartResearchInput.model_validate(
                     {
@@ -409,46 +435,19 @@ def build_mcp_server(
                 ),
             )
         except ToolError as exc:
-            if caller is None and isinstance(exc, _CallerAuthError):
-                caller = exc.caller
-            await _audit(
-                tool_name="start_research",
-                resource_type="research_execution",
-                resource_id=request_id,
-                result="failure",
-                caller=caller,
-                detail=str(exc),
-                event_type=AuditEventType.DATA_MODIFIED,
-                extra_metadata=audit_extra,
-            )
+            if audit_caller is None and isinstance(exc, _CallerAuthError):
+                audit_caller = exc.audit_identity
+            await _audit_failure(str(exc))
             raise
         except (
             ExecutionAuthorityError,
             RunCapExceededError,
             RunParamsConflictError,
         ) as exc:
-            await _audit(
-                tool_name="start_research",
-                resource_type="research_execution",
-                resource_id=request_id,
-                result="failure",
-                caller=caller,
-                detail=exc.code,
-                event_type=AuditEventType.DATA_MODIFIED,
-                extra_metadata=audit_extra,
-            )
+            await _audit_failure(exc.code)
             raise ToolError(exc.code) from exc
         except RunAdmissionError as exc:
-            await _audit(
-                tool_name="start_research",
-                resource_type="research_execution",
-                resource_id=request_id,
-                result="failure",
-                caller=caller,
-                detail="RUN_ADMISSION_FAILED",
-                event_type=AuditEventType.DATA_MODIFIED,
-                extra_metadata=audit_extra,
-            )
+            await _audit_failure("RUN_ADMISSION_FAILED")
             raise ToolError("RUN_ADMISSION_FAILED") from exc
         except Exception as exc:
             logger.error(
@@ -457,16 +456,7 @@ def build_mcp_server(
                 request_id=request_id,
                 exc_info=exc,
             )
-            await _audit(
-                tool_name="start_research",
-                resource_type="research_execution",
-                resource_id=request_id,
-                result="failure",
-                caller=caller,
-                detail="internal error",
-                event_type=AuditEventType.DATA_MODIFIED,
-                extra_metadata=audit_extra,
-            )
+            await _audit_failure("internal error")
             raise ToolError("internal error") from exc
 
         audit_extra.update(
@@ -481,7 +471,7 @@ def build_mcp_server(
             resource_type="research_execution",
             resource_id=start_result.execution_id,
             result="success",
-            caller=caller,
+            caller=audit_caller,
             event_type=AuditEventType.DATA_MODIFIED,
             extra_metadata=audit_extra,
         )
