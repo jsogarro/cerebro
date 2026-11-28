@@ -2,10 +2,10 @@
 
 Under forced row-level security a session with no tenant reads nothing and
 cannot insert, and nothing in the handler looks wrong. A handler that depends
-on ``get_session`` therefore also has to depend on ``get_tenant_context``
-(directly, through an alias, or through a dependency that does), unless it
-only touches tables that carry no row policy; those are listed below with the
-tables they touch.
+on ``SessionDep`` or ``get_session`` therefore also has to depend on
+``get_tenant_context`` (directly, through an alias, or through a dependency
+that does), unless it only touches tables that carry no row policy; those are
+listed below with the tables they touch.
 
 This is a static check on the route modules. Background jobs and the lifespan
 are covered by the integration suites that run as ``cerebro_app``.
@@ -17,10 +17,11 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[2] / "src"
 MODULES = (
     *sorted((SRC / "api" / "routes").glob("*.py")),
-    SRC / "api" / "auth" / "auth_router.py",
+    *sorted((SRC / "api" / "auth").glob("*.py")),
     SRC / "middleware" / "auth_middleware.py",
 )
 TENANT = "get_tenant_context"
+SESSION_DEP = "SessionDep"
 
 # Handlers whose session reaches only tables without a row policy.
 UNPOLICED = {
@@ -33,6 +34,8 @@ SETS_TENANT_ITSELF = {("users.py", "delete_user_gdpr")}
 
 
 def _depends_target(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name) and node.id == SESSION_DEP:
+        return "get_session"
     if (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
@@ -49,7 +52,7 @@ def _depends_in(node: ast.AST) -> set[str]:
 
 
 def _aliases(tree: ast.Module) -> dict[str, set[str]]:
-    """Module-level ``Name = Annotated[T, Depends(f)]`` aliases."""
+    """Module-level ``Name = Annotated[T, Depends(f)]`` or ``SessionDep`` aliases."""
     return {
         target.id: _depends_in(stmt.value)
         for stmt in tree.body
@@ -71,15 +74,12 @@ def _direct_dependencies(
     fn: ast.AsyncFunctionDef | ast.FunctionDef, aliases: dict[str, set[str]]
 ) -> set[str]:
     found = _depends_in(fn.args)
-    for arg in [*fn.args.args, *fn.args.kwonlyargs]:
-        if arg.annotation is not None:
-            found |= _depends_in(arg.annotation)
-            found |= {
-                dep
-                for n in ast.walk(arg.annotation)
-                if isinstance(n, ast.Name)
-                for dep in aliases.get(n.id, ())
-            }
+    found |= {
+        dep
+        for n in ast.walk(fn.args)
+        if isinstance(n, ast.Name)
+        for dep in aliases.get(n.id, ())
+    }
     for decorator in fn.decorator_list:
         found |= _depends_in(decorator)
     return found
@@ -104,26 +104,84 @@ def _is_handler(fn: ast.AsyncFunctionDef | ast.FunctionDef) -> bool:
     )
 
 
-def _violations() -> list[str]:
-    found = []
+def _scan_tree(tree: ast.Module, module_name: str) -> tuple[list[str], list[str]]:
+    checked: list[str] = []
+    violations: list[str] = []
+    functions, aliases = _functions(tree), _aliases(tree)
+    for name, fn in functions.items():
+        if not _is_handler(fn):
+            continue
+        if (module_name, name) in SETS_TENANT_ITSELF:
+            continue
+        closure = _closure(name, functions, aliases, set())
+        if "get_session" in closure:
+            label = f"{module_name}:{name}"
+            checked.append(label)
+            if TENANT not in closure:
+                violations.append(label)
+    return checked, violations
+
+
+def _scan_modules() -> tuple[list[str], list[str]]:
+    checked: list[str] = []
+    violations: list[str] = []
     for path in MODULES:
         if path.name in UNPOLICED:
             continue
         tree = ast.parse(path.read_text())
-        functions, aliases = _functions(tree), _aliases(tree)
-        for name, fn in functions.items():
-            if not _is_handler(fn):
-                continue
-            if (path.name, name) in SETS_TENANT_ITSELF:
-                continue
-            closure = _closure(name, functions, aliases, set())
-            if "get_session" in closure and TENANT not in closure:
-                found.append(f"{path.name}:{name}")
-    return found
+        mod_checked, mod_violations = _scan_tree(tree, path.name)
+        checked.extend(mod_checked)
+        violations.extend(mod_violations)
+    return checked, violations
 
 
 def test_every_handler_that_uses_the_session_resolves_the_tenant() -> None:
-    assert _violations() == []
+    checked, violations = _scan_modules()
+    assert checked, "guard matched zero session-using handlers"
+    assert any(h.startswith("tokens_router.py:") for h in checked)
+    assert violations == []
+
+
+def test_guard_catches_unscoped_session_dependencies() -> None:
+    sample = """
+from typing import Annotated
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+SessionAlias = Annotated[AsyncSession, SessionDep]
+
+@router.get("/default")
+async def unscoped_default(db: AsyncSession = SessionDep): ...
+
+@router.get("/annotated")
+async def unscoped_annotated(db: Annotated[AsyncSession, SessionDep]): ...
+
+@router.get("/alias")
+async def unscoped_alias(db: SessionAlias): ...
+
+@router.get("/depends")
+async def unscoped_depends(db: AsyncSession = Depends(get_session)): ...
+
+@router.get("/scoped")
+async def scoped(
+    db: AsyncSession = SessionDep,
+    tenant=Depends(get_tenant_context),
+): ...
+"""
+    checked, violations = _scan_tree(ast.parse(sample), "sample.py")
+    assert set(checked) == {
+        "sample.py:unscoped_default",
+        "sample.py:unscoped_annotated",
+        "sample.py:unscoped_alias",
+        "sample.py:unscoped_depends",
+        "sample.py:scoped",
+    }
+    assert set(violations) == {
+        "sample.py:unscoped_default",
+        "sample.py:unscoped_annotated",
+        "sample.py:unscoped_alias",
+        "sample.py:unscoped_depends",
+    }
 
 
 def test_the_exemptions_still_name_real_modules() -> None:
