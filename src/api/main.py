@@ -445,6 +445,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             direct_execution_service.close,
         )
         app.state.gemini_service = gemini_service
+        if gemini_service is not None:
+            # None is shared by every keyless lifespan, so it has no owner to match.
+            resources.callback(
+                _remove_app_state_if_owned, app, "gemini_service", gemini_service
+            )
         app.state.direct_execution_service = direct_execution_service
         resources.callback(
             _remove_app_state_if_owned,

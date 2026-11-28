@@ -275,6 +275,22 @@ def test_ready_reports_the_observed_gemini_breaker_and_stays_200(
     assert response.json()["checks"]["providers"] == ("open" if trips else "closed")
 
 
+def test_observed_state_reads_an_open_breaker_past_its_cooldown_as_half_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from src.core.provider_readiness import observed_provider_state
+    from src.core.tools.circuit import CircuitBreaker
+
+    monkeypatch.setattr(settings, "GEMINI_ENABLED", True)
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "k")
+    breaker = CircuitBreaker(failure_threshold=1, cooldown_seconds=30)
+    breaker.record_failure(datetime.now(UTC) - timedelta(seconds=31))
+
+    assert observed_provider_state(SimpleNamespace(circuit=breaker)) == "half_open"
+
+
 @pytest.mark.parametrize("name", ["GEMINI_MAX_CONCURRENT", "GEMINI_TEMPERATURE"])
 def test_invalid_gemini_env_value_is_rejected_without_echoing_it(
     monkeypatch: pytest.MonkeyPatch, name: str

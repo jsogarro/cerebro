@@ -5,7 +5,7 @@ from collections.abc import MutableMapping
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -101,3 +101,38 @@ async def test_failed_commit_does_not_return_2xx(sessions, monkeypatch):
 
     assert statuses == [] or statuses[0] >= 500
     assert await _user_count(sessions) == 0
+
+
+async def test_a_dependency_and_its_route_share_one_session(
+    test_engine, monkeypatch
+) -> None:
+    opened = 0
+    real = async_sessionmaker(test_engine, expire_on_commit=False)
+
+    def counting() -> AsyncSession:
+        nonlocal opened
+        opened += 1
+        return real()
+
+    monkeypatch.setattr(session_module, "_async_session_factory", counting)
+    app = FastAPI()
+    seen: list[AsyncSession] = []
+
+    async def tenant(db: AsyncSession = SessionDep) -> None:
+        seen.append(db)
+
+    @app.post("/users")
+    async def create(
+        _: None = Depends(tenant), db: AsyncSession = SessionDep
+    ) -> dict[str, bool]:
+        seen.append(db)
+        return {}
+
+    await _post(app, _ignore_status)
+
+    assert opened == 1
+    assert seen[0] is seen[1]
+
+
+async def _ignore_status(_status: int) -> None:
+    return None

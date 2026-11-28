@@ -1,5 +1,6 @@
 """Which model providers are configured, without contacting any of them."""
 
+from datetime import UTC, datetime
 from typing import Any
 
 from src.core.config import settings
@@ -34,4 +35,4 @@ def observed_provider_state(gemini_service: Any | None) -> str:
         return "unconfigured"
     if gemini_service is None or not configured["gemini"]:
         return "unknown"
-    return str(gemini_service.circuit.state)
+    return str(gemini_service.circuit.effective_state(datetime.now(UTC)))
