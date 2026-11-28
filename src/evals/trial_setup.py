@@ -25,6 +25,7 @@ from src.api.services.direct_execution_service import DirectExecutionService
 from src.api.services.execution_authority_resolver import (
     PersistedExecutionAuthorityResolver,
 )
+from src.core.capabilities.issuer import OUTBOUND_TOOL_HOSTS
 from src.core.config import Settings
 from src.core.contracts import (
     ExecutionBudget,
@@ -179,6 +180,13 @@ def build_trial_authority(
     """
     if domain not in DOMAIN_WORKERS:
         raise LiveEnvironmentError(f"unknown evaluation domain {domain!r}")
+    effective_outbound_hosts = tuple(
+        dict.fromkeys(
+            host
+            for tool_name in tool_grants
+            for host in OUTBOUND_TOOL_HOSTS.get(tool_name, ())
+        )
+    )
     now = datetime.now(UTC)
     worker_types = DOMAIN_WORKERS[domain]
     budget = ExecutionBudget(
@@ -242,6 +250,7 @@ def build_trial_authority(
                 output_schema={},
                 permission_scopes=(TOOL_PERMISSION_SCOPE,) if tool_grants else (),
                 tool_allowlist=tool_grants,
+                allowed_outbound_hosts=effective_outbound_hosts,
             )
             for index, worker_type in enumerate(worker_types, start=1)
         ),

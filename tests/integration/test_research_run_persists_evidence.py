@@ -22,7 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 import src.ai_brain.integration.masr_supervisor_bridge as bridge_module
 from src.agents.integrations.mcp_integration import MCPIntegration
-from src.agents.integrations.mcp_tool_specs import TOOL_ACADEMIC_SEARCH
+from src.agents.integrations.mcp_tool_specs import (
+    MCP_TOOL_OUTBOUND_HOSTS,
+    TOOL_ACADEMIC_SEARCH,
+)
 from src.agents.literature_review_agent import LiteratureReviewAgent
 from src.agents.schemas.literature_review import LiteratureAnalysisSchema
 from src.ai_brain.providers import ModelRouter
@@ -135,6 +138,7 @@ def _binding(run_id: str) -> ExecutionAuthorityBinding:
                 output_schema={},
                 permission_scopes=("research:read",),
                 tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
+                allowed_outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_ACADEMIC_SEARCH],
             ),
         ),
         edges=(

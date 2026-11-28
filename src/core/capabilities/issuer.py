@@ -12,6 +12,7 @@ from src.core.contracts.execution_plan import (
     WorkerAssignment,
 )
 from src.core.contracts.provenance import TrustClassification
+from src.core.tools.outbound import OUTBOUND_TOOL_HOSTS
 
 CAPABILITY_GRANTS_CONTEXT_KEY = "capability_grants"
 """Agent-task context key reserved for the admitted grant contracts."""
@@ -88,6 +89,18 @@ class PlanCapabilityIssuer:
                 if grant_id in seen_grant_ids:
                     raise ValueError(f"duplicate capability grant id {grant_id!r}")
                 seen_grant_ids.add(grant_id)
+                declared_hosts = OUTBOUND_TOOL_HOSTS.get(tool_name)
+                if declared_hosts is not None:
+                    sensitivity = SensitivityClass.EXTERNAL_READ
+                    declared_set = frozenset(declared_hosts)
+                    allowed_hosts = tuple(
+                        host
+                        for host in worker.allowed_outbound_hosts
+                        if host in declared_set
+                    )
+                else:
+                    sensitivity = SensitivityClass.READ_ONLY
+                    allowed_hosts = ()
                 grants.append(
                     CapabilityGrant(
                         grant_id=grant_id,
@@ -96,9 +109,10 @@ class PlanCapabilityIssuer:
                         capability_scope=f"{CAPABILITY_SCOPE_PREFIX}{tool_name}",
                         tool_name=tool_name,
                         tool_versions=(DEFAULT_TOOL_VERSION,),
-                        sensitivity=SensitivityClass.READ_ONLY,
+                        sensitivity=sensitivity,
                         max_input_trust=TrustClassification.EXTERNAL_UNTRUSTED,
                         requires_approval=False,
+                        allowed_hosts=allowed_hosts,
                         issued_at=issued_at,
                         expires_at=expires_at,
                     )
@@ -126,5 +140,6 @@ __all__ = [
     "CAPABILITY_GRANTS_CONTEXT_KEY",
     "CAPABILITY_SCOPE_PREFIX",
     "DEFAULT_TOOL_VERSION",
+    "OUTBOUND_TOOL_HOSTS",
     "PlanCapabilityIssuer",
 ]

@@ -105,7 +105,11 @@ def test_issue_returns_one_static_safe_grant_per_allowlisted_tool() -> None:
     assert all(
         grant.capability_scope == f"plan-issued:{grant.tool_name}" for grant in grants
     )
-    assert all(grant.sensitivity is SensitivityClass.READ_ONLY for grant in grants)
+    by_tool = {grant.tool_name: grant for grant in grants}
+    assert by_tool["mcp.academic_search"].sensitivity is SensitivityClass.EXTERNAL_READ
+    assert by_tool["mcp.format_citations"].sensitivity is SensitivityClass.EXTERNAL_READ
+    assert by_tool["arithmetic"].sensitivity is SensitivityClass.READ_ONLY
+    assert all(grant.allowed_hosts == () for grant in grants)
     assert all(
         grant.max_input_trust is TrustClassification.EXTERNAL_UNTRUSTED
         for grant in grants

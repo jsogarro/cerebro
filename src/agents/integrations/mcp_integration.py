@@ -48,7 +48,6 @@ from structlog import get_logger
 
 from src.agents.integrations.mcp_tool_specs import (
     DEFAULT_MCP_TIMEOUT_SECONDS,
-    MCP_SENSITIVITY,
     TOOL_ACADEMIC_SEARCH,
     TOOL_ANALYZE_STATISTICS,
     TOOL_BUILD_KNOWLEDGE_GRAPH,
@@ -479,9 +478,10 @@ class MCPIntegration:
                     self_issued_grant(
                         tool_name=spec.name,
                         policy=SelfIssuedPolicy(
-                            sensitivity=MCP_SENSITIVITY,
+                            sensitivity=spec.sensitivity,
                             max_input_trust=MCP_MAX_INPUT_TRUST,
                             tool_versions=(spec.version,),
+                            allowed_hosts=spec.outbound_hosts,
                         ),
                         identity=call_identity,
                         now=now,

@@ -28,7 +28,8 @@ import pytest
 import src.ai_brain.integration.masr_supervisor_bridge as bridge_module
 from src.agents.integrations.mcp_integration import MCP_MAX_INPUT_TRUST, MCPIntegration
 from src.agents.integrations.mcp_tool_specs import (
-    MCP_SENSITIVITY,
+    MCP_OUTBOUND_SENSITIVITY,
+    MCP_TOOL_OUTBOUND_HOSTS,
     TOOL_ACADEMIC_SEARCH,
     TOOL_VERSION,
 )
@@ -158,6 +159,7 @@ async def test_a_plan_worker_receives_a_live_mcp_integration(
         output_schema={},
         permission_scopes=(),
         tool_allowlist=(TOOL_ACADEMIC_SEARCH,),
+        allowed_outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_ACADEMIC_SEARCH],
     )
     task = AgentTask(
         id="worker-task",
@@ -176,9 +178,10 @@ async def test_a_plan_worker_receives_a_live_mcp_integration(
                     capability_scope="mcp.academic_search",
                     tool_name=TOOL_ACADEMIC_SEARCH,
                     tool_versions=(TOOL_VERSION,),
-                    sensitivity=MCP_SENSITIVITY,
+                    sensitivity=MCP_OUTBOUND_SENSITIVITY,
                     max_input_trust=MCP_MAX_INPUT_TRUST,
                     requires_approval=False,
+                    allowed_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_ACADEMIC_SEARCH],
                     issued_at=datetime.now(UTC) - timedelta(minutes=1),
                     expires_at=datetime.now(UTC) + timedelta(minutes=5),
                 )

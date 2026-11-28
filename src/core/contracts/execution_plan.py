@@ -15,6 +15,7 @@ from .base import (
     Version,
     require_unique,
 )
+from .capabilities import normalize_outbound_hosts
 
 
 class CollaborationMode(StrEnum):
@@ -73,6 +74,12 @@ class WorkerAssignment(ContractModel):
     output_schema: JsonObject
     permission_scopes: tuple[ContractId, ...]
     tool_allowlist: tuple[ContractId, ...]
+    allowed_outbound_hosts: tuple[str, ...] = ()
+
+    @field_validator("allowed_outbound_hosts")
+    @classmethod
+    def validate_allowed_outbound_hosts(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return normalize_outbound_hosts(value, field_name="allowed_outbound_hosts")
 
     @model_validator(mode="after")
     def validate_ordered_sets(self) -> Self:

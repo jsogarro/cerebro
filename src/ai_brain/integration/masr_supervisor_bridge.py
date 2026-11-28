@@ -658,10 +658,12 @@ class MASRSupervisorBridge:
         }
         if _mcp_tool_path_enabled():
             task_grants = task.context.get(CAPABILITY_GRANTS_CONTEXT_KEY) or ()
+            worker_hosts = frozenset(worker.allowed_outbound_hosts)
             grants = tuple(
                 grant
                 for grant in task_grants
                 if grant.tool_name in worker.tool_allowlist
+                and set(grant.allowed_hosts).issubset(worker_hosts)
             )
             audit_store = self._mcp_audit_store()
             evidence_recorder = None

@@ -5,12 +5,22 @@ Provides search capabilities across multiple academic databases.
 """
 
 import re
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, Final
 from xml.etree import ElementTree as ET
 
 import httpx
 from structlog import get_logger
 
+from src.core.tools.outbound import (
+    ACADEMIC_SEARCH_DATABASE_HOSTS,
+    ACADEMIC_SEARCH_OUTBOUND_HOSTS,
+    ARXIV_HOST,
+    PUBMED_HOST,
+    SEMANTIC_SCHOLAR_HOST,
+    checked_get,
+    require_allowed_outbound_host,
+)
 from src.mcp.academic_filters import AcademicSearchFilters
 
 logger = get_logger()
@@ -32,24 +42,27 @@ def _compact(record: dict[str, Any]) -> dict[str, Any]:
 class AcademicSearchTool:
     """Search PubMed, arXiv, and Semantic Scholar."""
 
+    DATABASE_HOSTS: Final[Mapping[str, str]] = ACADEMIC_SEARCH_DATABASE_HOSTS
+    OUTBOUND_HOSTS: Final[tuple[str, ...]] = ACADEMIC_SEARCH_OUTBOUND_HOSTS
+
     def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or {}
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.client = httpx.AsyncClient(timeout=30.0, follow_redirects=False)
 
-        self.pubmed_base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-        self.arxiv_base = "https://export.arxiv.org/api/query"
-        self.semantic_scholar_base = "https://api.semanticscholar.org/graph/v1"
+        self.pubmed_base = f"https://{PUBMED_HOST}/entrez/eutils"
+        self.arxiv_base = f"https://{ARXIV_HOST}/api/query"
+        self.semantic_scholar_base = f"https://{SEMANTIC_SCHOLAR_HOST}/graph/v1"
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         query = kwargs.get("query", "")
         databases = kwargs.get("databases", ["arxiv"])
         max_results = kwargs.get("max_results", 10)
+        allowed_hosts: Sequence[str] | None = kwargs.get("allowed_hosts")
 
         if not query:
             return {"success": False, "error": "Query is required"}
 
-        valid_databases = ["pubmed", "arxiv", "semantic_scholar"]
-        invalid_dbs = [db for db in databases if db not in valid_databases]
+        invalid_dbs = [db for db in databases if db not in self.DATABASE_HOSTS]
         if invalid_dbs:
             return {"success": False, "error": f"Invalid databases: {invalid_dbs}"}
 
@@ -65,12 +78,16 @@ class AcademicSearchTool:
 
         for db in databases:
             if db == "pubmed":
-                results = await self._search_pubmed(query, max_results, filters)
+                results = await self._search_pubmed(
+                    query, max_results, filters, allowed_hosts=allowed_hosts
+                )
             elif db == "arxiv":
-                results = await self._search_arxiv(query, max_results, filters)
+                results = await self._search_arxiv(
+                    query, max_results, filters, allowed_hosts=allowed_hosts
+                )
             elif db == "semantic_scholar":
                 results = await self._search_semantic_scholar(
-                    query, max_results, filters
+                    query, max_results, filters, allowed_hosts=allowed_hosts
                 )
             else:
                 continue
@@ -104,19 +121,26 @@ class AcademicSearchTool:
         return payload
 
     async def _search_pubmed(
-        self, query: str, max_results: int, filters: AcademicSearchFilters
+        self,
+        query: str,
+        max_results: int,
+        filters: AcademicSearchFilters,
+        *,
+        allowed_hosts: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Search PubMed database.
+        """Search PubMed database.
 
         Args:
             query: Search query
             max_results: Maximum results
             filters: Validated search filters
+            allowed_hosts: Authority-approved outbound hosts, or ``None`` for direct calls
 
         Returns:
             List of results
         """
+        search_url = f"{self.pubmed_base}/esearch.fcgi"
+        summary_url = f"{self.pubmed_base}/esummary.fcgi"
         try:
             search_query = query
             if filters.bounded:
@@ -126,7 +150,6 @@ class AcademicSearchTool:
                 search_query += f" AND {start}:{end}[pdat]"
 
             # Search for IDs
-            search_url = f"{self.pubmed_base}/esearch.fcgi"
             search_params: dict[str, str | int] = {
                 "db": "pubmed",
                 "term": search_query,
@@ -134,7 +157,13 @@ class AcademicSearchTool:
                 "retmax": max_results,
             }
 
-            response = await self.client.get(search_url, params=search_params)
+            response = await checked_get(
+                self.client,
+                search_url,
+                declared_hosts=(PUBMED_HOST,),
+                allowed_hosts=allowed_hosts,
+                params=search_params,
+            )
             if response.status_code != 200:
                 logger.error(f"PubMed search failed: {response.status_code}")
                 return []
@@ -146,14 +175,19 @@ class AcademicSearchTool:
                 return []
 
             # Fetch summaries
-            summary_url = f"{self.pubmed_base}/esummary.fcgi"
             summary_params = {
                 "db": "pubmed",
                 "id": ",".join(id_list),
                 "retmode": "json",
             }
 
-            response = await self.client.get(summary_url, params=summary_params)
+            response = await checked_get(
+                self.client,
+                summary_url,
+                declared_hosts=(PUBMED_HOST,),
+                allowed_hosts=allowed_hosts,
+                params=summary_params,
+            )
             if response.status_code != 200:
                 return []
 
@@ -197,15 +231,20 @@ class AcademicSearchTool:
             return []
 
     async def _search_arxiv(
-        self, query: str, max_results: int, filters: AcademicSearchFilters
+        self,
+        query: str,
+        max_results: int,
+        filters: AcademicSearchFilters,
+        *,
+        allowed_hosts: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Search arXiv database.
+        """Search arXiv database.
 
         Args:
             query: Search query
             max_results: Maximum results
             filters: Validated search filters
+            allowed_hosts: Authority-approved outbound hosts, or ``None`` for direct calls
 
         Returns:
             List of results
@@ -229,7 +268,13 @@ class AcademicSearchTool:
                 "sortOrder": "descending",
             }
 
-            response = await self.client.get(self.arxiv_base, params=params)
+            response = await checked_get(
+                self.client,
+                self.arxiv_base,
+                declared_hosts=(ARXIV_HOST,),
+                allowed_hosts=allowed_hosts,
+                params=params,
+            )
             if response.status_code != 200:
                 logger.error(f"arXiv search failed: {response.status_code}")
                 return []
@@ -304,22 +349,27 @@ class AcademicSearchTool:
             return []
 
     async def _search_semantic_scholar(
-        self, query: str, max_results: int, filters: AcademicSearchFilters
+        self,
+        query: str,
+        max_results: int,
+        filters: AcademicSearchFilters,
+        *,
+        allowed_hosts: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Search Semantic Scholar database.
+        """Search Semantic Scholar database.
 
         Args:
             query: Search query
             max_results: Maximum results
             filters: Validated search filters
+            allowed_hosts: Authority-approved outbound hosts, or ``None`` for direct calls
 
         Returns:
             List of results
         """
+        search_url = f"{self.semantic_scholar_base}/paper/search"
         try:
             # Search papers
-            search_url = f"{self.semantic_scholar_base}/paper/search"
             params: dict[str, str | int] = {
                 "query": query,
                 "limit": max_results,
@@ -335,7 +385,13 @@ class AcademicSearchTool:
                 if filters.year_start == filters.year_end:
                     params["year"] = str(filters.year_start)
 
-            response = await self.client.get(search_url, params=params)
+            response = await checked_get(
+                self.client,
+                search_url,
+                declared_hosts=(SEMANTIC_SCHOLAR_HOST,),
+                allowed_hosts=allowed_hosts,
+                params=params,
+            )
             if response.status_code != 200:
                 logger.error(f"Semantic Scholar search failed: {response.status_code}")
                 return []
@@ -374,3 +430,6 @@ class AcademicSearchTool:
         """Cleanup HTTP client."""
         # Note: We can't use async in __del__, so client cleanup
         # should be handled explicitly in production code
+
+
+__all__ = ["AcademicSearchTool", "require_allowed_outbound_host"]

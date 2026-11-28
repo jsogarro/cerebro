@@ -57,7 +57,7 @@ from typing import Any, Final, final, get_args
 from pydantic import AliasChoices, AliasPath, BaseModel
 from pydantic.fields import FieldInfo
 
-from src.core.contracts.capabilities import SensitivityClass
+from src.core.contracts.capabilities import SensitivityClass, normalize_outbound_hosts
 from src.core.contracts.redaction import SecretRef, is_credential_key
 
 from .errors import ToolSpecError
@@ -87,6 +87,7 @@ class ToolCallContext:
     attempt_id: str
     tool_invocation_id: str
     resolve_secret: Callable[[SecretRef], str]
+    allowed_hosts: tuple[str, ...] = ()
 
 
 ToolHandler = Callable[[Any, ToolCallContext], Awaitable[Mapping[str, Any]]]
@@ -258,6 +259,15 @@ class ToolSpec:
     retriable is how a call with side effects gets duplicated, so a tool that
     knows an error is transient has to say so.
     """
+    outbound_hosts: tuple[str, ...] = ()
+    """Pinned outbound hostnames this tool may contact.
+
+    Required for ``SensitivityClass.EXTERNAL_READ`` tools and forbidden for
+    ``SensitivityClass.READ_ONLY`` tools so a specification cannot claim local
+    read-only behavior while declaring outbound destinations.
+    """
+    resolve_target_hosts: Callable[[BaseModel], tuple[str, ...]] | None = None
+    """Optional per-call target host resolver over the validated input model."""
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -270,12 +280,54 @@ class ToolSpec:
                 f"{self.timeout_seconds!r}; every tool needs a deadline "
                 "somebody chose"
             )
+        try:
+            normalized_hosts = normalize_outbound_hosts(
+                self.outbound_hosts, field_name="outbound_hosts"
+            )
+        except ValueError as error:
+            raise ToolSpecError(
+                f"tool {self.name!r} declares invalid outbound_hosts: {error}"
+            ) from error
+        object.__setattr__(self, "outbound_hosts", normalized_hosts)
+        if self.sensitivity is SensitivityClass.READ_ONLY and normalized_hosts:
+            raise ToolSpecError(
+                f"tool {self.name!r} is READ_ONLY and cannot declare outbound_hosts"
+            )
+        if self.sensitivity is SensitivityClass.EXTERNAL_READ and not normalized_hosts:
+            raise ToolSpecError(
+                f"tool {self.name!r} is EXTERNAL_READ and must declare pinned outbound_hosts"
+            )
+        if self.resolve_target_hosts is not None and not normalized_hosts:
+            raise ToolSpecError(
+                f"tool {self.name!r} declares resolve_target_hosts without outbound_hosts"
+            )
         _reject_undeclared_field_admission(
             self.input_model, tool_name=self.name, seen=set(), path=""
         )
         _audit_credential_fields(
             self.input_model, tool_name=self.name, seen=set(), path=""
         )
+
+    def target_hosts_for(self, validated_input: BaseModel | None) -> tuple[str, ...]:
+        """Return the pinned outbound hosts targeted by one invocation."""
+        if not self.outbound_hosts:
+            return ()
+        if validated_input is None or self.resolve_target_hosts is None:
+            return self.outbound_hosts
+        try:
+            resolved = normalize_outbound_hosts(
+                self.resolve_target_hosts(validated_input), field_name="target_hosts"
+            )
+        except ValueError as error:
+            raise ToolSpecError(
+                f"tool {self.name!r} resolved invalid target hosts: {error}"
+            ) from error
+        undeclared = set(resolved) - set(self.outbound_hosts)
+        if undeclared:
+            raise ToolSpecError(
+                f"tool {self.name!r} targeted undeclared host(s): {sorted(undeclared)}"
+            )
+        return resolved or self.outbound_hosts
 
     def disposition_for(self, error: BaseException) -> RetryDisposition:
         """Classify a handler error, defaulting to ``TERMINAL``."""

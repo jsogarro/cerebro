@@ -24,6 +24,7 @@ from sqlalchemy import (
     Index,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -65,6 +66,12 @@ class AgentCapabilityGrant(BaseModel):
     sensitivity: Mapped[str] = mapped_column(String(30), nullable=False)
     max_input_trust: Mapped[str] = mapped_column(String(30), nullable=False)
     requires_approval: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    allowed_hosts: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
 
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(

@@ -45,13 +45,19 @@ offending field visible.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from types import MappingProxyType
 from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from src.core.contracts.capabilities import SensitivityClass
 from src.core.tools import ToolCallContext, ToolSpec
+from src.core.tools.outbound import (
+    ACADEMIC_SEARCH_DATABASE_HOSTS,
+    ACADEMIC_SEARCH_OUTBOUND_HOSTS,
+    CITATION_OUTBOUND_HOSTS,
+)
 from src.mcp.academic_filters import AcademicSearchFilters
 from src.security.content_sanitizer import ContentSanitizer
 
@@ -62,15 +68,40 @@ TOOL_BUILD_KNOWLEDGE_GRAPH: Final[str] = "mcp.build_knowledge_graph"
 
 TOOL_VERSION: Final[str] = "1.0.0"
 
-MCP_SENSITIVITY: Final[SensitivityClass] = SensitivityClass.READ_ONLY
-"""These four operations read public bibliographic sources and compute.
+MCP_OUTBOUND_SENSITIVITY: Final[SensitivityClass] = SensitivityClass.EXTERNAL_READ
+"""Outbound bibliographic tools transmit query or DOI text outside the tenant boundary.
 
-None of them writes to a third-party system or sends run content outside the
-tenant boundary, so none is ``EXTERNAL_WRITE`` or ``EXFILTRATION``. That is
-load-bearing for the interim self-issued grant — see
-``src/agents/tools/mediation.py``. A tool added here that *does* write must
-declare it, and the self-issued grant will then refuse to authorize it.
+``AcademicSearchTool`` sends search queries and filters to PubMed
+(``eutils.ncbi.nlm.nih.gov``), arXiv (``export.arxiv.org``), and Semantic
+Scholar (``api.semanticscholar.org``). ``CitationTool`` resolves DOIs against
+Crossref (``api.crossref.org``). None mutates third-party state, but run query
+text leaves the tenant boundary to those pinned hosts, so grants must
+explicitly allowlist every target host.
 """
+
+MCP_LOCAL_SENSITIVITY: Final[SensitivityClass] = SensitivityClass.READ_ONLY
+"""Pure local compute tools (``StatisticsTool``, ``KnowledgeGraphTool``).
+
+These operations execute in-process with no outbound network access.
+"""
+
+MCP_TOOL_SENSITIVITIES: Final[Mapping[str, SensitivityClass]] = MappingProxyType(
+    {
+        TOOL_ACADEMIC_SEARCH: MCP_OUTBOUND_SENSITIVITY,
+        TOOL_FORMAT_CITATIONS: MCP_OUTBOUND_SENSITIVITY,
+        TOOL_ANALYZE_STATISTICS: MCP_LOCAL_SENSITIVITY,
+        TOOL_BUILD_KNOWLEDGE_GRAPH: MCP_LOCAL_SENSITIVITY,
+    }
+)
+
+MCP_TOOL_OUTBOUND_HOSTS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
+    {
+        TOOL_ACADEMIC_SEARCH: ACADEMIC_SEARCH_OUTBOUND_HOSTS,
+        TOOL_FORMAT_CITATIONS: CITATION_OUTBOUND_HOSTS,
+        TOOL_ANALYZE_STATISTICS: (),
+        TOOL_BUILD_KNOWLEDGE_GRAPH: (),
+    }
+)
 
 DEFAULT_MCP_TIMEOUT_SECONDS: Final[float] = 45.0
 """Chosen against the tools' own 30s httpx client timeout, with headroom.
@@ -266,6 +297,21 @@ def _require_success(result: Any, *, operation: str) -> dict[str, Any]:
     return result
 
 
+def _academic_search_target_hosts(params: BaseModel) -> tuple[str, ...]:
+    assert isinstance(params, AcademicSearchInput)
+    if not params.databases:
+        return ACADEMIC_SEARCH_OUTBOUND_HOSTS
+    return tuple(
+        sorted(
+            {
+                ACADEMIC_SEARCH_DATABASE_HOSTS[db]
+                for db in params.databases
+                if db in ACADEMIC_SEARCH_DATABASE_HOSTS
+            }
+        )
+    )
+
+
 def build_specs(
     *,
     client: ClientProvider,
@@ -275,7 +321,7 @@ def build_specs(
     """Return the four specifications, bound to one tool provider and sanitizer."""
 
     async def academic_search(
-        params: BaseModel, _context: ToolCallContext
+        params: BaseModel, context: ToolCallContext
     ) -> dict[str, JsonValue]:
         assert isinstance(params, AcademicSearchInput)
         connected = await client()
@@ -285,6 +331,7 @@ def build_specs(
                 databases=params.databases,
                 max_results=params.max_results,
                 filters=params.filters,
+                allowed_hosts=context.allowed_hosts,
             )
         else:
             raw = await connected.search_academic(
@@ -310,13 +357,15 @@ def build_specs(
         }
 
     async def format_citations(
-        params: BaseModel, _context: ToolCallContext
+        params: BaseModel, context: ToolCallContext
     ) -> dict[str, JsonValue]:
         assert isinstance(params, FormatCitationsInput)
         connected = await client()
         if isinstance(connected, ResearchToolSet):
             raw = await connected.citation.execute(
-                sources=params.sources, style=params.style
+                sources=params.sources,
+                style=params.style,
+                allowed_hosts=context.allowed_hosts,
             )
         else:
             raw = await connected.format_citations(
@@ -412,45 +461,53 @@ def build_specs(
         ToolSpec(
             name=TOOL_ACADEMIC_SEARCH,
             version=TOOL_VERSION,
-            sensitivity=MCP_SENSITIVITY,
+            sensitivity=MCP_TOOL_SENSITIVITIES[TOOL_ACADEMIC_SEARCH],
             input_model=AcademicSearchInput,
             output_model=AcademicSearchOutput,
             timeout_seconds=timeout_seconds,
             handler=academic_search,
+            outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_ACADEMIC_SEARCH],
+            resolve_target_hosts=_academic_search_target_hosts,
         ),
         ToolSpec(
             name=TOOL_FORMAT_CITATIONS,
             version=TOOL_VERSION,
-            sensitivity=MCP_SENSITIVITY,
+            sensitivity=MCP_TOOL_SENSITIVITIES[TOOL_FORMAT_CITATIONS],
             input_model=FormatCitationsInput,
             output_model=FormatCitationsOutput,
             timeout_seconds=timeout_seconds,
             handler=format_citations,
+            outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_FORMAT_CITATIONS],
         ),
         ToolSpec(
             name=TOOL_ANALYZE_STATISTICS,
             version=TOOL_VERSION,
-            sensitivity=MCP_SENSITIVITY,
+            sensitivity=MCP_TOOL_SENSITIVITIES[TOOL_ANALYZE_STATISTICS],
             input_model=AnalyzeStatisticsInput,
             output_model=AnalyzeStatisticsOutput,
             timeout_seconds=timeout_seconds,
             handler=analyze_statistics,
+            outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_ANALYZE_STATISTICS],
         ),
         ToolSpec(
             name=TOOL_BUILD_KNOWLEDGE_GRAPH,
             version=TOOL_VERSION,
-            sensitivity=MCP_SENSITIVITY,
+            sensitivity=MCP_TOOL_SENSITIVITIES[TOOL_BUILD_KNOWLEDGE_GRAPH],
             input_model=BuildKnowledgeGraphInput,
             output_model=BuildKnowledgeGraphOutput,
             timeout_seconds=timeout_seconds,
             handler=build_knowledge_graph,
+            outbound_hosts=MCP_TOOL_OUTBOUND_HOSTS[TOOL_BUILD_KNOWLEDGE_GRAPH],
         ),
     )
 
 
 __all__ = [
     "DEFAULT_MCP_TIMEOUT_SECONDS",
-    "MCP_SENSITIVITY",
+    "MCP_LOCAL_SENSITIVITY",
+    "MCP_OUTBOUND_SENSITIVITY",
+    "MCP_TOOL_OUTBOUND_HOSTS",
+    "MCP_TOOL_SENSITIVITIES",
     "TOOL_ACADEMIC_SEARCH",
     "TOOL_ANALYZE_STATISTICS",
     "TOOL_BUILD_KNOWLEDGE_GRAPH",
