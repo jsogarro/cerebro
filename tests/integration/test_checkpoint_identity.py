@@ -15,6 +15,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from src.api.services.direct_execution_service import ResumeUnsupportedError
 from src.models.db.research_project import ProjectStatus, ResearchProject
 from src.repositories.checkpoint_repository import (
     CheckpointIdentityError,
@@ -272,40 +273,26 @@ async def _checkpoint_run(factory, world, run_id: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_resumed_execution_keeps_the_run_its_checkpoint_belongs_to(
+async def test_resume_is_refused_and_revives_no_checkpoint_state(
     test_engine: AsyncEngine, world: dict[str, uuid.UUID]
 ) -> None:
     factory, service = _service(test_engine)
     await _checkpoint_run(factory, world, "run-a1")
-    await _checkpoint_run(factory, world, "run-a2")
 
-    execution_id = await service.resume_execution(
-        world["project_a"], organization_id=str(ORG_A)
-    )
+    with pytest.raises(ResumeUnsupportedError) as refused:
+        await service.resume_execution(world["project_a"], organization_id=str(ORG_A))
 
-    assert execution_id == "wf-run-a2"
-    assert service.active_executions[execution_id].run_id == "run-a2"
+    assert refused.value.code == "RESUME_UNSUPPORTED"
+    assert service.active_executions == {}
 
 
 @pytest.mark.asyncio
-async def test_a_checkpoint_whose_pins_disagree_with_its_run_is_not_resumed(
+async def test_resume_of_another_tenants_project_reads_as_not_found(
     test_engine: AsyncEngine, world: dict[str, uuid.UUID]
 ) -> None:
-    from sqlalchemy import text
-
-    factory, service = _service(test_engine)
-    await _checkpoint_run(factory, world, "run-a1")
-    async with factory() as session:
-        await session.execute(
-            text(
-                "UPDATE agent_runs SET workflow_definition_version = '2' "
-                "WHERE run_id = 'run-a1'"
-            )
-        )
-        await session.commit()
+    _, service = _service(test_engine)
 
     assert (
-        await service.resume_execution(world["project_a"], organization_id=str(ORG_A))
+        await service.resume_execution(world["project_a"], organization_id=str(ORG_B))
         is None
     )
-    assert service.active_executions == {}

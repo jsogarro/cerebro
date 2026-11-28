@@ -124,6 +124,7 @@ async def _seed_pre_restart_state(
         run_transition_at = max(now, run_row.created_at)
         queued = binding.run.transition_to(RunStatus.QUEUED, at=run_transition_at)
         running = queued.transition_to(RunStatus.RUNNING, at=run_transition_at)
+        await lifecycle_repo.record_run_transition(queued, organization_id=ORG_ID)
         await lifecycle_repo.record_run_transition(running, organization_id=ORG_ID)
 
         task = Task(
@@ -141,6 +142,7 @@ async def _seed_pre_restart_state(
         task_transition_at = max(now, task_row.created_at)
         ready = task.transition_to(TaskStatus.READY, at=task_transition_at)
         running_task = ready.transition_to(TaskStatus.RUNNING, at=task_transition_at)
+        await lifecycle_repo.record_task_transition(ready, organization_id=ORG_ID)
         await lifecycle_repo.record_task_transition(
             running_task, organization_id=ORG_ID
         )

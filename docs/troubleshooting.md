@@ -174,7 +174,7 @@ An execution that belongs to another organization is reported as not found. See 
 
 1. Poll the status endpoint and read `status`, `progress_percentage` and `current_phase`.
 2. Search the logs for the id: `docker compose logs api | grep "<execution-id>"`.
-3. If the API restarted mid-run, `POST /api/v1/query/execution/<project-id>/resume` rebuilds the execution record from the latest recoverable checkpoint and registers it so its status can be read. It does not start any work ([research execution](reference/05-research-execution.md)).
+3. If the API restarted mid-run, a run whose owner's lease expired is failed as `PROCESS_INTERRUPTED` within the lease time (30 seconds) plus the 15-second scan interval. `POST /api/v1/query/execution/<project-id>/resume` answers 409 `RESUME_UNSUPPORTED`; start a new run ([research execution](reference/05-research-execution.md)).
 
 ### "Maximum concurrent executions reached"
 

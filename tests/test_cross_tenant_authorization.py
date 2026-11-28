@@ -38,6 +38,7 @@ from src.api.routes import query_api
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
     ExecutionStatus,
+    ResumeUnsupportedError,
 )
 from src.api.services.execution_authority_resolver import (
     ExecutionAuthorityUnavailableError,
@@ -740,29 +741,20 @@ async def _seed_checkpoint(session: AsyncSession, project_id: uuid.UUID) -> None
 
 
 @pytest.mark.asyncio
-async def test_resumed_execution_is_readable_by_the_resuming_tenant(
+async def test_resume_is_refused_for_the_owning_tenant_and_exposes_no_output(
     project_session: AsyncSession,
 ) -> None:
-    """The defect: the rebuilt status had no owner, so reads said not found."""
+    """A checkpoint's output is not revived into an execution anyone can read."""
     project_id = await _seed_project(
         project_session, user_id=USER_A, organization_id=ORG_A
     )
     await _seed_checkpoint(project_session, project_id)
     service = _resume_service(project_session)
 
-    execution_id = await service.resume_execution(project_id, organization_id=ORG_A)
+    with pytest.raises(ResumeUnsupportedError):
+        await service.resume_execution(project_id, organization_id=ORG_A)
 
-    assert execution_id == "resumed-exec"
-    assert (
-        await service.get_execution_status(execution_id, organization_id=ORG_A)
-        is not None
-    )
-    assert await service.get_execution_results(execution_id, organization_id=ORG_A) == {
-        "secret": "org A resumed output"
-    }
-    assert (
-        await service.get_execution_status(execution_id, organization_id=ORG_B) is None
-    )
+    assert service.active_executions == {}
 
 
 @pytest.mark.asyncio
@@ -787,14 +779,17 @@ async def test_resume_route_passes_the_callers_organization() -> None:
     class _Kernel(_TenantScopedKernel):
         async def resume_execution(  # type: ignore[override]
             self, project_id: Any, *, organization_id: str | None = None
-        ) -> str | None:
+        ) -> None:
             seen.append(organization_id)
-            return "resumed-exec" if organization_id == ORG_A else None
+            if organization_id == ORG_A:
+                raise ResumeUnsupportedError(project_id)
 
     project = str(uuid.uuid4())
-    await query_api.resume_execution(
-        project, _Kernel(), TenantContext(user_id=USER_A, organization_id=ORG_A)
-    )
+    with pytest.raises(HTTPException) as owner_refused:
+        await query_api.resume_execution(
+            project, _Kernel(), TenantContext(user_id=USER_A, organization_id=ORG_A)
+        )
+    assert owner_refused.value.status_code == 409
     with pytest.raises(HTTPException) as excinfo:
         await query_api.resume_execution(
             project, _Kernel(), TenantContext(user_id=USER_B, organization_id=ORG_B)
@@ -850,33 +845,28 @@ async def _resume_through_app(
             headers={"Authorization": f"Bearer {caller_organization}"},
         ) as client:
             response = await client.post(f"/api/v1/query/execution/{project_id}/resume")
-            status = None
-            if response.status_code == 200:
-                status = await client.get(
-                    f"/api/v1/query/execution/{response.json()['execution_id']}/status"
-                )
     finally:
         for dependency in overrides:
             app.dependency_overrides.pop(dependency, None)
-    return (response, status), service, project_id
+    return response, service, project_id
 
 
 @pytest.mark.asyncio
 async def test_real_app_rejects_resuming_another_tenants_project(
     project_session: AsyncSession,
 ) -> None:
-    (response, _), service, _ = await _resume_through_app(project_session, ORG_B)
+    response, service, _ = await _resume_through_app(project_session, ORG_B)
 
     assert response.status_code == 404, response.text
     assert service.active_executions == {}
 
 
 @pytest.mark.asyncio
-async def test_real_app_resumed_execution_is_readable_by_its_tenant(
+async def test_real_app_answers_the_owner_with_resume_unsupported(
     project_session: AsyncSession,
 ) -> None:
-    (response, status), _, _ = await _resume_through_app(project_session, ORG_A)
+    response, service, _ = await _resume_through_app(project_session, ORG_A)
 
-    assert response.status_code == 200, response.text
-    assert status is not None
-    assert status.status_code == 200, status.text
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "RESUME_UNSUPPORTED"
+    assert service.active_executions == {}

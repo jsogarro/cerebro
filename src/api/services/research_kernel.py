@@ -64,7 +64,7 @@ class ResearchExecutionBackend(Protocol):
 
     async def resume_execution(
         self, project_id: UUID, *, organization_id: str | None = None
-    ) -> str | None: ...
+    ) -> None: ...
 
 
 class AgentExecutionBackend(Protocol):
@@ -196,7 +196,7 @@ class _ApplicationKernelAdapter:
 
     async def resume_execution(
         self, project_id: UUID, *, organization_id: str | None = None
-    ) -> str | None:
+    ) -> None:
         return await self.backend.resume_execution(
             project_id, organization_id=organization_id
         )
@@ -429,8 +429,12 @@ async def resume_kernel_execution(
     project_id: UUID,
     *,
     organization_id: str | None = None,
-) -> str | None:
-    """Resume through the adapter owned by the canonical kernel."""
+) -> None:
+    """Refuse to resume through the adapter owned by the canonical kernel.
+
+    Returns ``None`` for a project the caller cannot see; otherwise raises
+    ``ResumeUnsupportedError``.
+    """
 
     return await _execution_adapter(kernel).resume_execution(
         project_id, organization_id=organization_id

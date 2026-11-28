@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
@@ -60,6 +61,15 @@ async def test_restore_fails_a_past_deadline_run_and_spares_a_live_one(
     now = datetime.now(UTC)
     await _running_run(writer, "deadline-stale", now - timedelta(hours=1))
     await _running_run(writer, "deadline-live", now + timedelta(hours=1))
+    # Rows from before ownership existed carry no lease; only those fall back
+    # to the deadline rule (a leased run is live until its lease expires).
+    async with session_factory() as session:
+        await session.execute(
+            text(
+                "UPDATE agent_runs SET owner_instance_id = NULL, lease_expires_at = NULL"
+            )
+        )
+        await session.commit()
 
     restarted = _service(session_factory)
     await restarted.restore_active_executions()

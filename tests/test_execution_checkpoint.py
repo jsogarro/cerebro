@@ -6,7 +6,6 @@ with mocked repository to avoid requiring a live database.
 """
 
 import uuid
-from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,8 +15,8 @@ from sqlalchemy.exc import OperationalError
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
     ExecutionStatus,
+    ResumeUnsupportedError,
 )
-from src.models.db.workflow_checkpoint import WorkflowCheckpoint
 from src.repositories.checkpoint_repository import (
     CheckpointIdentityError,
     CheckpointRepository,
@@ -175,91 +174,40 @@ async def test_checkpoint_on_repository_error_degrades_gracefully(
 
 
 @pytest.mark.asyncio
-async def test_resume_execution_restores_from_checkpoint(
-    execution_service_with_checkpoint, mock_session_factory
+async def test_resume_execution_refuses_and_revives_nothing(
+    execution_service_with_checkpoint, _project_in_caller_org
 ):
-    """Test that resume_execution restores ExecutionStatus from checkpoint."""
-    project_id = uuid.uuid4()
-    execution_id = "exec-restored-123"
-
-    # Mock checkpoint data
-    checkpoint_data = {
-        "status": "running",
-        "progress_percentage": 75.0,
-        "current_phase": "result_processing",
-        "routing_decision": {"supervisor": "research"},
-        "supervisor_type": "research",
-        "agent_results": {"key": "value"},
-        "quality_scores": {"overall": 0.9},
-        "final_output": None,
-        "workers_used": 3,
-        "errors": [],
-        "warnings": [],
-        "retry_count": 1,
-    }
-
-    restored_data = {
-        "checkpoint_id": str(uuid.uuid4()),
-        "workflow_id": execution_id,
-        "project_id": str(project_id),
-        "phase": "result_processing",
-        "checkpoint_data": checkpoint_data,
-        "recovery_metadata": {},
-        "created_at": datetime.now(UTC).isoformat(),
-    }
-
-    mock_checkpoint = MagicMock(spec=WorkflowCheckpoint)
-    mock_checkpoint.id = uuid.uuid4()
-
-    with patch(
-        "src.api.services.direct_execution_service.CheckpointRepository"
-    ) as mock_repo_cls:
-        mock_repo_instance = AsyncMock(spec=CheckpointRepository)
-        mock_repo_instance.get_recovery_point.return_value = mock_checkpoint
-        mock_repo_instance.restore_from_checkpoint.return_value = restored_data
-        mock_repo_cls.return_value = mock_repo_instance
-
-        result_execution_id = await execution_service_with_checkpoint.resume_execution(
-            project_id, organization_id=ORG
+    """A checkpoint is a diagnostic snapshot: resume raises and registers nothing."""
+    with (
+        patch(
+            "src.api.services.direct_execution_service.CheckpointRepository"
+        ) as mock_repo_cls,
+        pytest.raises(ResumeUnsupportedError) as refused,
+    ):
+        await execution_service_with_checkpoint.resume_execution(
+            uuid.uuid4(), organization_id=ORG
         )
 
-        # Verify execution was resumed
-        assert result_execution_id == execution_id
-        assert execution_id in execution_service_with_checkpoint.active_executions
-
-        # Verify ExecutionStatus was rebuilt correctly
-        restored_status = execution_service_with_checkpoint.active_executions[
-            execution_id
-        ]
-        assert restored_status.execution_id == execution_id
-        assert restored_status.project_id == str(project_id)
-        assert restored_status.status == "running"
-        assert restored_status.progress_percentage == 75.0
-        assert restored_status.current_phase == "result_processing"
-        assert restored_status.supervisor_type == "research"
-        assert restored_status.workers_used == 3
-        assert restored_status.retry_count == 1
+    assert refused.value.code == "RESUME_UNSUPPORTED"
+    _project_in_caller_org.return_value.get.assert_awaited_once()
+    assert _project_in_caller_org.return_value.get.await_args.kwargs == {
+        "organization_id": ORG
+    }
+    mock_repo_cls.assert_not_called()
+    assert execution_service_with_checkpoint.active_executions == {}
 
 
 @pytest.mark.asyncio
-async def test_resume_execution_returns_none_when_no_checkpoint(
-    execution_service_with_checkpoint,
+async def test_resume_execution_reads_as_not_found_for_a_project_outside_the_org(
+    execution_service_with_checkpoint, _project_in_caller_org
 ):
-    """Test that resume_execution returns None when no checkpoint exists."""
-    project_id = uuid.uuid4()
+    _project_in_caller_org.return_value.get = AsyncMock(return_value=None)
 
-    with patch(
-        "src.api.services.direct_execution_service.CheckpointRepository"
-    ) as mock_repo_cls:
-        mock_repo_instance = AsyncMock(spec=CheckpointRepository)
-        mock_repo_instance.get_recovery_point.return_value = None
-        mock_repo_cls.return_value = mock_repo_instance
+    result = await execution_service_with_checkpoint.resume_execution(
+        uuid.uuid4(), organization_id=ORG
+    )
 
-        result = await execution_service_with_checkpoint.resume_execution(
-            project_id, organization_id=ORG
-        )
-
-        assert result is None
+    assert result is None
 
 
 @pytest.mark.asyncio
@@ -276,31 +224,6 @@ async def test_resume_execution_returns_none_without_database(
     )
 
     assert result is None
-
-
-@pytest.mark.asyncio
-async def test_resume_execution_handles_restore_failure(
-    execution_service_with_checkpoint,
-):
-    """Test that resume_execution handles restore_from_checkpoint returning None."""
-    project_id = uuid.uuid4()
-
-    mock_checkpoint = MagicMock(spec=WorkflowCheckpoint)
-    mock_checkpoint.id = uuid.uuid4()
-
-    with patch(
-        "src.api.services.direct_execution_service.CheckpointRepository"
-    ) as mock_repo_cls:
-        mock_repo_instance = AsyncMock(spec=CheckpointRepository)
-        mock_repo_instance.get_recovery_point.return_value = mock_checkpoint
-        mock_repo_instance.restore_from_checkpoint.return_value = None
-        mock_repo_cls.return_value = mock_repo_instance
-
-        result = await execution_service_with_checkpoint.resume_execution(
-            project_id, organization_id=ORG
-        )
-
-        assert result is None
 
 
 @pytest.mark.asyncio

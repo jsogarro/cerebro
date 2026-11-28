@@ -5,7 +5,7 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 
 import structlog
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Gauge, Histogram
 from structlog import get_logger
 
 logger = get_logger(__name__)
@@ -50,6 +50,33 @@ llm_cost_drift_events_total = Counter(
     "llm_cost_drift_events_total",
     "Count of request-level LLM cost drift events beyond the alert threshold",
     ["method", "route", "direction"],
+)
+
+run_ownership_expired_total = Counter(
+    "cerebro_run_ownership_expired_total",
+    "Runs whose owner's lease expired and that reconciliation took over",
+)
+
+run_reconciliation_failures_total = Counter(
+    "cerebro_run_reconciliation_failures_total",
+    "Expired-owner runs whose reconciliation did not commit",
+)
+
+run_cancellation_delay_seconds = Histogram(
+    "cerebro_run_cancellation_delay_seconds",
+    "Seconds from a cancellation request to the run's terminal cancellation",
+    buckets=(0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 300.0),
+)
+
+outbox_rows = Gauge(
+    "cerebro_outbox_rows",
+    "Run-event outbox rows by delivery status; pending and failed are the backlog",
+    ["status"],
+)
+
+outbox_dead_lettered_total = Counter(
+    "cerebro_outbox_dead_lettered_total",
+    "Outbox rows that exhausted their delivery attempts",
 )
 
 

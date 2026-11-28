@@ -233,6 +233,7 @@ Alembic scripts are in `alembic/versions/`; `alembic/env.py` reads `DATABASE_URL
 | `b8e3f1a5c7d9` | `similarity_checks`, `similarity_matches`, `egress_events`; row-level security |
 | `c4d7a2e9f1b6` | `model_call_reservations` with its CHECKs, unique call id per organization and tenant policy |
 | `f1c8a4d7e2b6` | `NULLIF` tenant policies, `FORCE ROW LEVEL SECURITY`, `cerebro_maint` policies and grants |
+| `d5a1c8e2b7f3` | `owner_instance_id`, `lease_expires_at` and `fencing_token` on `agent_runs`, with a non-negative token CHECK, a CHECK that owner and expiry are both set or both null, and an index on the expiry |
 
 Migrations that create row-level security or triggers do so inside an `_is_postgresql()` guard; on another dialect they create tables and indexes only.
 

@@ -15,6 +15,7 @@ from src.api.routes import agent_api, query_api
 from src.api.services.agent_execution_service import (
     get_application_agent_execution_service,
 )
+from src.api.services.direct_execution_service import ResumeUnsupportedError
 from src.api.services.research_kernel import (
     compose_application_research_kernel,
     get_application_research_kernel,
@@ -101,7 +102,9 @@ class _DirectExecutionBackend:
         self, project_id: UUID, *, organization_id: str | None = None
     ) -> str | None:
         self.calls.append(("resume", project_id, organization_id))
-        return "kernel-resumed" if project_id == UUID(int=1) else None
+        if project_id == UUID(int=1):
+            raise ResumeUnsupportedError(project_id)
+        return None
 
 
 class _AgentExecutionBackend:
@@ -153,11 +156,11 @@ async def test_composed_kernel_preserves_query_status_result_and_resume_reads() 
 
     status = await get_kernel_execution_status(kernel, "kernel-execution")
     results = await get_kernel_execution_results(kernel, "kernel-execution")
-    resumed = await resume_kernel_execution(kernel, UUID(int=1))
+    with pytest.raises(ResumeUnsupportedError):
+        await resume_kernel_execution(kernel, UUID(int=1))
 
     assert status.status == "running"
     assert results == {"output": "legacy"}
-    assert resumed == "kernel-resumed"
     assert [call[0] for call in backend.calls] == ["status", "results", "resume"]
 
 
@@ -170,17 +173,15 @@ async def test_query_operation_adapter_preserves_success_and_not_found_contracts
 
     status = await query_api.get_execution_status("kernel-execution", kernel, TENANT)
     results = await query_api.get_execution_results("kernel-execution", kernel, TENANT)
-    resumed = await query_api.resume_execution(str(UUID(int=1)), kernel, TENANT)
 
     assert status["status"] == "running"
     assert status["current_phase"] == "masr_routing"
     assert results == {"output": "legacy"}
-    assert resumed == {
-        "execution_id": "kernel-resumed",
-        "project_id": str(UUID(int=1)),
-        "status": "resumed",
-        "message": "Execution resumed from checkpoint",
-    }
+
+    with pytest.raises(HTTPException) as unsupported:
+        await query_api.resume_execution(str(UUID(int=1)), kernel, TENANT)
+    assert unsupported.value.status_code == 409
+    assert unsupported.value.detail["code"] == "RESUME_UNSUPPORTED"
 
     with pytest.raises(HTTPException) as missing_status:
         await query_api.get_execution_status("missing", kernel, TENANT)
@@ -197,9 +198,7 @@ async def test_query_operation_adapter_preserves_success_and_not_found_contracts
     with pytest.raises(HTTPException) as missing_resume:
         await query_api.resume_execution(str(UUID(int=2)), kernel, TENANT)
     assert missing_resume.value.status_code == 404
-    assert missing_resume.value.detail == (
-        f"No recoverable checkpoint found for project {UUID(int=2)}"
-    )
+    assert missing_resume.value.detail == f"Project {UUID(int=2)} not found"
 
     with pytest.raises(HTTPException) as invalid_resume:
         await query_api.resume_execution("not-a-uuid", kernel, TENANT)

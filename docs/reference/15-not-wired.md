@@ -140,3 +140,4 @@ Consequences:
 
 - Under `cerebro_app` those sessions would read no rows and fail their inserts. The default compose stack therefore keeps `DATABASE_URL` on the `research` superuser, which bypasses row-level security, so for execution-service sessions the repository `organization_id` predicates are the effective boundary.
 - A deployment that points `DATABASE_URL` at `cerebro_app` before these sessions adopt `tenant_session` loses run persistence.
+- `reconcile_expired_runs` is cross-tenant but runs on the application factory, so under `cerebro_app` it would find no expired leases and leave interrupted runs and their open model-call reservations unsettled. It moves to the maintenance factory with the rest of this work.

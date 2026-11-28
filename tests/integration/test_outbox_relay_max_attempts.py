@@ -19,6 +19,7 @@ from sqlalchemy.orm import sessionmaker
 
 from src.api.services.outbox_relay import OutboxRelay
 from src.core.contracts import Run, RunStatus
+from src.core.observability import outbox_dead_lettered_total
 from src.models.db.run_event import AgentRunEventOutbox, EventDeliveryStatus
 from src.repositories.run_event_repository import RunEventRepository
 from src.repositories.run_lifecycle_repository import RunLifecycleRepository
@@ -116,6 +117,8 @@ async def test_a_permanently_failing_row_stops_retrying_after_max_attempts(
         session_factory=session_factory, event_publisher=publisher, max_attempts=2
     )
 
+    dead_letters_before = outbox_dead_lettered_total._value.get()
+
     # Attempt 1: fails, backed off, still under the ceiling.
     assert await relay.run_once() == 0
     row = await _load_row(session_factory, event_id)
@@ -135,6 +138,7 @@ async def test_a_permanently_failing_row_stops_retrying_after_max_attempts(
     assert "dead-letter" in row.last_error.lower()
     assert "2" in row.last_error  # names the attempt count it gave up at
     dead_lettered_error = row.last_error
+    assert outbox_dead_lettered_total._value.get() == dead_letters_before + 1
 
     # A third round, even after forcing the backoff window open again, must
     # not reclaim the row at all: max_attempts is a hard ceiling, not a
@@ -199,7 +203,10 @@ async def test_a_row_abandoned_in_flight_at_the_ceiling_is_dead_lettered(
         session_factory=session_factory, event_publisher=publisher, max_attempts=2
     )
 
+    dead_letters_before = outbox_dead_lettered_total._value.get()
+
     assert await relay.run_once() == 0
+    assert outbox_dead_lettered_total._value.get() == dead_letters_before + 1
     # The row must never be handed to the publisher again: its attempt
     # budget is already spent, so redelivering it would exceed max_attempts.
     assert publisher.call_count == 0
