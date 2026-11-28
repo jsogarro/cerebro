@@ -10,6 +10,8 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from src.security.content_sanitizer import escape_for_delimited_prompt
+
 if TYPE_CHECKING:
     from src.core.contracts import WorkerAssignment
 
@@ -32,9 +34,13 @@ class DelegationContract:
         ]
 
     def render(self) -> str:
-        """A delimited prompt block; ``<`` is escaped so field text cannot close it."""
+        """A delimited prompt block.
+
+        Each field is one escaped line: markup cannot close the block and a
+        line break cannot start a forged ``name:`` line.
+        """
         lines = "\n".join(
-            f"{name}: {value}".replace("<", "\\u003c")
+            f"{name}: {escape_for_delimited_prompt(' '.join(value.splitlines()))}"
             for name, value in vars(self).items()
         )
         return f"<delegation_brief>\n{lines}\n</delegation_brief>"
@@ -43,7 +49,8 @@ class DelegationContract:
 def brief_for_worker(worker: "WorkerAssignment") -> DelegationContract:
     schema = json.dumps(dict(worker.output_schema), sort_keys=True, default=str)
     return DelegationContract(
-        objective=worker.objective,
+        # A blank objective would invalidate the whole brief and drop it silently.
+        objective=worker.objective.strip() or "Complete the assigned task.",
         output_format=(
             f"Output must satisfy this JSON Schema: {schema}"
             if worker.output_schema

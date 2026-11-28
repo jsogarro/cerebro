@@ -56,7 +56,9 @@ class CitationAgent(LLMWorkerAgentBase):
                 return cached_result
 
             # Step 1: Format citations using MCP Citation Tool
-            citation_result = await self._format_citations_with_mcp(sources, style)
+            citation_result = await self._format_citations_with_mcp(
+                sources, style, task
+            )
 
             # Step 2: Verify source credibility and DOIs
             verification_result = await self._verify_sources_with_mcp(sources)
@@ -261,7 +263,10 @@ class CitationAgent(LLMWorkerAgentBase):
         }
 
     async def _format_citations_with_mcp(
-        self, sources: list[dict[str, Any]], style: str
+        self,
+        sources: list[dict[str, Any]],
+        style: str,
+        task: AgentTask | None = None,
     ) -> dict[str, Any]:
         """
         Format citations using MCP Citation Tool or Gemini structured output.
@@ -275,7 +280,7 @@ class CitationAgent(LLMWorkerAgentBase):
         """
         if not self.mcp_integration:
             self.log_warning("MCP integration not available, using Gemini fallback")
-            return await self._format_citations_with_gemini(sources, style)
+            return await self._format_citations_with_gemini(sources, style, task)
 
         result = await self.mcp_integration.format_citations(
             sources=sources, style=style
@@ -290,10 +295,13 @@ class CitationAgent(LLMWorkerAgentBase):
         self.log_error(
             f"MCP citation formatting failed: {result.get('error', 'Unknown error')}"
         )
-        return await self._format_citations_with_gemini(sources, style)
+        return await self._format_citations_with_gemini(sources, style, task)
 
     async def _format_citations_with_gemini(
-        self, sources: list[dict[str, Any]], style: str
+        self,
+        sources: list[dict[str, Any]],
+        style: str,
+        task: AgentTask | None = None,
     ) -> dict[str, Any]:
         """
         Format citations using Gemini structured output when MCP unavailable.
@@ -319,7 +327,7 @@ Return formatted citations as structured JSON."""
 
         try:
             result = await self._generate_structured_with_routing(
-                prompt, CitationSchema, task=None, tier="simple"
+                prompt, CitationSchema, task=task, tier="simple"
             )
 
             formatted_citations = [

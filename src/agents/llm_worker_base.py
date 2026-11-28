@@ -281,6 +281,20 @@ class LLMWorkerAgentBase(BaseAgent):
         """
         pass
 
+    @staticmethod
+    def _with_brief(prompt: str, task: AgentTask | None) -> str:
+        """Append the plan's brief; every model call goes through this.
+
+        Agents override ``execute`` and build their own prompts, so the one
+        place they share is the generation entry. Only a ``DelegationContract``
+        the runtime put in context is rendered, never a client-shaped dict.
+        """
+        brief = task.context.get(DELEGATION_BRIEF_CONTEXT_KEY) if task else None
+        if not isinstance(brief, DelegationContract) or brief.validate():
+            return prompt
+        block = brief.render()
+        return prompt if block in prompt else f"{prompt}\n\n{block}\n"
+
     def _get_tool_registry(self) -> ToolRegistry:
         """Get or create the tool registry for this agent.
 
@@ -591,6 +605,7 @@ class LLMWorkerAgentBase(BaseAgent):
             PlanProviderUnavailableError: the plan-backed primary provider
                 failed and no fallback is permitted.
         """
+        prompt = self._with_brief(prompt, task)
         route = self._select_generation_route(task)
         if route is None:
             return await self._generate_with_gemini(prompt, task)
@@ -755,6 +770,7 @@ class LLMWorkerAgentBase(BaseAgent):
         """
         self.last_structured_truncated = False
 
+        prompt = self._with_brief(prompt, task)
         route = self._select_generation_route(task)
         if route is None:
             gemini = self._ensure_gemini_service()
@@ -1216,10 +1232,6 @@ class LLMWorkerAgentBase(BaseAgent):
         computed = self._precompute(task)
 
         prompt = self._build_prompt(query, task)
-
-        brief = task.context.get(DELEGATION_BRIEF_CONTEXT_KEY)
-        if isinstance(brief, DelegationContract) and not brief.validate():
-            prompt += f"\n\n{brief.render()}\n"
 
         # Append procedural memory context if available (feature-flagged)
         procedural_context = await self._get_procedural_context(task)

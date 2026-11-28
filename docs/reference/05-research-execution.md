@@ -127,7 +127,7 @@ A worker with direct predecessors receives their validated outputs in the reserv
 
 `RESERVED_RUNTIME_INPUT_KEYS` (`upstream_results`, `previous_result`, `agent_outputs`, `background`) belong to the runtime: client-supplied values for them are dropped before a worker is called, and `objective`, `output_schema`, `permission_scopes`, `tool_allowlist` and `provider_model_policy` are always set from the plan.
 
-Each worker's task context carries a `DelegationContract` brief (`src/agents/delegation_contract.py`) that `brief_for_worker` builds from the assignment: the objective, the output schema, the tool allowlist and the permission scopes. `LLMWorkerAgentBase.execute` appends it to the prompt as an escaped `<delegation_brief>` block only when the context value is a `DelegationContract` instance, so a dict supplied by a client is never rendered.
+Each worker's task context carries a `DelegationContract` brief (`src/agents/delegation_contract.py`), which `brief_for_worker` builds from the assignment: the objective (a blank one is replaced by a generic line), the output schema, the tool allowlist and the permission scopes. `LLMWorkerAgentBase._generate_with_routing` and `_generate_structured_with_routing`, the entry every LLM worker's model call passes through, append it as a `<delegation_brief>` block with each field escaped onto a single line. A context value that is not a `DelegationContract` instance is ignored, so a client-supplied dict is never rendered. `FinancialCalculatorAgent` makes no model call and so receives no brief. The brief is not part of the recorded prompt identity.
 
 ## Fixture mode
 
