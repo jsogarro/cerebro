@@ -48,6 +48,7 @@ from src.api.routes import (
     research,
     run_evidence,
     run_stream,
+    runs,
     similarity_checks,
     supervisor_api,
     talkhier_api,
@@ -673,6 +674,7 @@ app.include_router(talkhier_api.router, tags=["talkhier"])
 app.include_router(websocket.router, tags=["websocket"])
 app.include_router(run_evidence.router, prefix="/api/v1", tags=["run-evidence"])
 app.include_router(run_stream.router, prefix="/api/v1", tags=["run-stream"])
+app.include_router(runs.router, prefix="/api/v1", tags=["runs"])
 
 
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:

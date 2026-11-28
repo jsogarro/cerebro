@@ -155,9 +155,13 @@ class EvidenceRepository:
         return result.scalar_one_or_none()
 
     async def list_evidence_for_run(
-        self, run_id: str, *, organization_id: OrganizationId = None
+        self,
+        run_id: str,
+        *,
+        organization_id: OrganizationId = None,
+        limit: int | None = None,
     ) -> list[AgentEvidence]:
-        """Return every evidence row for a run, in acquisition order."""
+        """Return a run's evidence in acquisition order, up to ``limit`` when given."""
         query = (
             select(AgentEvidence)
             .where(AgentEvidence.run_id == run_id)
@@ -166,6 +170,8 @@ class EvidenceRepository:
         query = scope_to_organization(
             query, AgentEvidence.organization_id, organization_id
         )
+        if limit is not None:
+            query = query.limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
 

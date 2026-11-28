@@ -91,9 +91,13 @@ class ArtifactRepository:
         )
 
     async def list_artifacts_for_run(
-        self, run_id: str, *, organization_id: OrganizationId = None
+        self,
+        run_id: str,
+        *,
+        organization_id: OrganizationId = None,
+        limit: int | None = None,
     ) -> list[AgentArtifact]:
-        """Return every artifact for a run, in creation order."""
+        """Return a run's artifacts in creation order, up to ``limit`` when given."""
         query = (
             select(AgentArtifact)
             .where(AgentArtifact.run_id == run_id)
@@ -102,6 +106,8 @@ class ArtifactRepository:
         query = scope_to_organization(
             query, AgentArtifact.organization_id, organization_id
         )
+        if limit is not None:
+            query = query.limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
 

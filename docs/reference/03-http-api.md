@@ -18,6 +18,7 @@ The FastAPI application in `src/api/main.py` serves the HTTP and WebSocket API u
 | Supervisors | Active | `/api/v1/supervisors/*` | `src/api/routes/supervisor_api.py` (`router`) |
 | TalkHier sessions | Active | `/api/v1/talkhier/*` | `src/api/routes/talkhier_api.py` (`router`) |
 | Workflow catalogue | Active | `GET /api/v1/workflows` | `src/api/routes/workflows.py` (`list_workflows`) |
+| Run reads | Active | `GET /api/v1/runs`, `/runs/{run_id}` and its `/tasks`, `/evidence`, `/artifacts`, `/evaluations`, `/event-history` | `src/api/routes/runs.py` (`router`) |
 | Run event stream (SSE) | Active | `GET /api/v1/runs/{run_id}/events` | `src/api/routes/run_stream.py` (`stream_run_events`) |
 | WebSockets | Active | `/ws`, `/ws/projects/{project_id}`, `/ws/cli/{project_id}`, `/ws/runs/{run_id}` | `src/api/routes/websocket.py` (`router`) |
 | Idempotency keys | Active | `Idempotency-Key` header on `POST /api/v1/query/*` | `src/api/middleware/idempotency.py` (`IdempotencyMiddleware`) |
@@ -80,6 +81,7 @@ The domain routers add `get_current_token` as a router-level or route-level depe
 | `/api/v1/supervisors` | `src/api/routes/supervisor_api.py` | none; `get_current_token` on each HTTP route | per route | [Supervisors](#supervisors) |
 | `/api/v1/talkhier` | `src/api/routes/talkhier_api.py` | none; `get_current_token` on each HTTP route | per route | [TalkHier](#talkhier) |
 | `/api/v1` (`/workflows`) | `src/api/routes/workflows.py` | none; route uses `get_current_token` | no | [Workflows](#workflows) |
+| `/api/v1/runs` | `src/api/routes/runs.py` | none; `get_tenant_context` on each route | no | [Run reads](#run-reads) |
 | `/api/v1` (`/runs/{run_id}/events`) | `src/api/routes/run_stream.py` | none; route uses `get_current_token` | yes | [Run events](#run-events) |
 | none (`/ws...`) | `src/api/routes/websocket.py` | none; query-token dependency on WebSocket routes | per route | [WebSockets](#websockets) |
 
@@ -323,6 +325,22 @@ Mounted at `/api/v1/talkhier`. `get_current_token` is a dependency on every HTTP
 | `GET` | `/api/v1/workflows` | Lists the enabled entries of the trusted workflow catalogue (`workflow_id`, `workflow_version`, `name`, `description`, `task_types`, `input_schema`, `output_schema`, `routing_policy_id`, `supports_dry_run`) and the catalogue's `catalog_hash`. | 200 | 401 |
 
 The catalogue is deployment configuration (`src/api/services/workflow_catalog.py`), validated at first use without a model call: an enabled entry whose collaboration mode is unsupported, whose worker is not registered or whose budget disagrees with its policy raises `WorkflowCatalogError`. `WorkflowLaunchService.select` (`src/api/services/workflow_launch_service.py`) resolves a `WorkflowLaunchRequest` against it. The request rejects unknown fields and ownership or authority keys (`user_id`, `tenant_id`, `authority_id` and the others in `RESERVED_LAUNCH_KEYS`), also inside `inputs`. Rejections carry `WorkflowLaunchRejectedError.http_status`: 400 missing idempotency key, 404 unknown or disabled workflow, 422 for a mode other than the workflow's (so `debate` is refused), a provider policy the workflow does not pin, or a budget above the catalogue ceiling. `dry_run` is part of the request and of the launch digest. `inputs` plus the objective must satisfy the workflow's `input_schema` (422 `INPUTS_INVALID`), and reserved keys are rejected at any depth and in any case. The mode hint is part of the launch digest. The first entry allows the `deepseek` provider only. The catalogue is loaded in the application lifespan, so an invalid enabled entry stops startup. No route launches a run yet.
+
+## Run reads
+
+All routes are `GET`, read-only, and scoped to the caller's organization through `get_tenant_context`. A run that does not exist and a run another organization owns both return `404`, and no child route answers for a run the caller cannot see. The service is `RunReadService` (`src/api/services/run_read_service.py`).
+
+| Path | Purpose | Notable errors |
+|---|---|---|
+| `/api/v1/runs` | The caller's runs, newest first. Query: `limit` (1 to 200, default 50), `cursor`, `workflow_id`, `status`. Returns `items` and `next_cursor`. | 400 invalid cursor, 422 unknown `status` |
+| `/api/v1/runs/{run_id}` | One run: workflow and routing policy versions, status and reason, timestamps and `objective` (the first task's objective, `null` before any task exists). | 404 |
+| `/api/v1/runs/{run_id}/tasks` | Tasks with their attempts nested. | 404 |
+| `/api/v1/runs/{run_id}/evidence` | Stored evidence: source, snapshot artifact, content digest, locator, trust. No excerpt text. | 404 |
+| `/api/v1/runs/{run_id}/artifacts` | Artifact metadata: kind as `type`, media type, digest, status, trust. The storage location is not returned. | 404 |
+| `/api/v1/runs/{run_id}/evaluations` | The latest stored result per evaluator and subject, plus `evaluator_states`: one entry per registered evaluator, `not_attempted` when it has no stored row. | 404 |
+| `/api/v1/runs/{run_id}/event-history` | The durable events as JSON in sequence order. Query: `limit`, `cursor`. | 400 invalid cursor, 404 |
+
+The child collections (`tasks`, `evidence`, `artifacts`, `evaluations`) return `items` and `truncated`; `truncated` is `true` when more rows exist than `limit`. The run list cursor is opaque and bound to the organization, `workflow_id` and `status` it was issued for, so a cursor replayed with another filter or by another organization is rejected with `400`. The `event-history` cursor is the same `RunEventCursor` token the stream uses and is bound to its run, so a stream `cursor` resumes the history and the reverse.
 
 ## Run events
 

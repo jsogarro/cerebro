@@ -116,7 +116,7 @@ A report without a `run_id` keeps its project or caller citations as supplied an
 
 ## Unbacked web pages
 
-The web workbench pages for runs, run detail and memory, and the run form on the workflows page, call API routes that are not mounted (`GET /api/v1/workflows` is) and its dashboard, QA, costs and benchmarks pages show fixed values. The page-by-page table is in [CLI and web clients](13-cli-and-web-clients.md).
+The web workbench's run form on the workflows page, the cancel button on the runs page and the memory page call API routes that are not mounted (`GET /api/v1/workflows` and the run read routes are), and its dashboard, QA, costs and benchmarks pages show fixed values. The run read routes return no `mode`, `inputs` or child id lists, because the run row stores none of them; the web adapters also require task `phase`, artifact `schema_version`, `workflow_id` and `workflow_version`, event `version` and `summary` and evaluation `explanation`, which the routes do not return, so those items render as malformed. No route launches or cancels a run. The page-by-page table is in [CLI and web clients](13-cli-and-web-clients.md).
 
 ## MCP server
 

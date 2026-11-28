@@ -1,0 +1,438 @@
+"""Read-only, tenant-scoped projections of durable runs.
+
+Every read starts from the caller's organization. A run that does not exist and
+a run another organization owns raise the same ``RunNotFoundError``, so run ids
+cannot be probed across tenants. Projections carry what a client may see; they
+never hand back ORM rows, storage locations or an unscoped id.
+"""
+
+import base64
+import binascii
+import hashlib
+import json
+import uuid
+from datetime import datetime
+from typing import Any, Generic, TypeVar
+
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.contracts import RunEventCursor
+from src.core.evaluation.registry import build_default_registry, evaluation_states
+from src.repositories.artifact_repository import ArtifactRepository
+from src.repositories.evaluation_result_repository import EvaluationResultRepository
+from src.repositories.evidence_repository import EvidenceRepository
+from src.repositories.run_event_repository import RunEventRepository
+from src.repositories.run_lifecycle_repository import RunLifecycleRepository
+
+MAX_PAGE = 200
+DEFAULT_PAGE = 50
+
+
+class RunNotFoundError(LookupError):
+    """No run with this id is visible to the caller."""
+
+
+class InvalidCursorError(ValueError):
+    """The cursor is malformed or was issued for a different request."""
+
+
+class RunSummary(BaseModel):
+    run_id: str
+    workflow_id: str
+    workflow_version: str
+    routing_policy_id: str
+    routing_policy_version: str
+    status: str
+    status_reason: str | None
+    objective: str | None
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    cancellation_requested_at: datetime | None
+
+
+class RunPage(BaseModel):
+    items: list[RunSummary]
+    next_cursor: str | None
+
+
+class AttemptView(BaseModel):
+    attempt_id: str
+    ordinal: int
+    status: str
+    status_reason: str | None
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
+class TaskView(BaseModel):
+    task_id: str
+    run_id: str
+    task_key: str
+    task_type: str
+    objective: str
+    dependency_ids: list[str]
+    status: str
+    status_reason: str | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    attempts: list[AttemptView]
+
+
+class EvidenceView(BaseModel):
+    evidence_id: str
+    run_id: str
+    task_id: str
+    source_type: str
+    source_uri: str
+    snapshot_artifact_id: str
+    content_sha256: str
+    locator: str
+    locator_scheme: str
+    trust: str
+    producer_kind: str
+    acquired_at: datetime
+
+
+class ArtifactView(BaseModel):
+    artifact_id: str
+    run_id: str
+    task_id: str | None
+    type: str
+    media_type: str
+    content_sha256: str
+    status: str
+    trust: str
+    producer: str
+    created_at: datetime
+
+
+class EvaluationView(BaseModel):
+    evaluation_id: str
+    run_id: str
+    task_id: str | None
+    artifact_id: str | None
+    evaluator_id: str
+    evaluator_version: str
+    dimension: str
+    status: str
+    method: str
+    score: float | None
+    error_code: str | None
+    rationale: str | None
+    trigger: str
+    completed_at: datetime
+
+
+class EvaluatorState(BaseModel):
+    evaluator_id: str
+    evaluator_version: str
+    dimension: str
+    status: str
+
+
+class EventView(BaseModel):
+    event_id: str
+    run_id: str
+    sequence: int
+    event_type: str
+    event_type_version: str
+    occurred_at: datetime
+    payload: dict[str, Any]
+
+
+_T = TypeVar("_T")
+
+
+class Collection(BaseModel, Generic[_T]):
+    """A bounded child collection; ``truncated`` says rows were left out."""
+
+    items: list[_T]
+    truncated: bool
+
+
+class EvaluationCollection(Collection[EvaluationView]):
+    """Stored results plus one state per registered evaluator, so a dimension
+    that never ran reads ``not_attempted`` instead of being absent."""
+
+    evaluator_states: list[EvaluatorState]
+
+
+class EventPage(BaseModel):
+    items: list[EventView]
+    next_cursor: str | None
+
+
+def _filter_binding(organization_id: uuid.UUID, **filters: str | None) -> str:
+    material = json.dumps([str(organization_id), sorted(filters.items())])
+    return hashlib.sha256(material.encode()).hexdigest()[:16]
+
+
+def _encode_run_cursor(created_at: datetime, run_id: str, binding: str) -> str:
+    raw = json.dumps({"t": created_at.isoformat(), "r": run_id, "f": binding})
+    return base64.urlsafe_b64encode(raw.encode()).decode("ascii")
+
+
+def _decode_run_cursor(token: str, binding: str) -> tuple[datetime, str]:
+    try:
+        raw = json.loads(base64.urlsafe_b64decode(token.encode("ascii")))
+        position = (datetime.fromisoformat(raw["t"]), str(raw["r"]))
+        issued_for = raw["f"]
+    except (binascii.Error, ValueError, KeyError, TypeError) as error:
+        raise InvalidCursorError("cursor is not valid") from error
+    if issued_for != binding:
+        raise InvalidCursorError("cursor does not belong to this request")
+    return position
+
+
+def _limit(limit: int | None) -> int:
+    return min(max(limit or DEFAULT_PAGE, 1), MAX_PAGE)
+
+
+class RunReadService:
+    def __init__(self, session: AsyncSession, organization_id: str) -> None:
+        self._org = uuid.UUID(organization_id)
+        self._runs = RunLifecycleRepository(session)
+        self._evidence = EvidenceRepository(session)
+        self._artifacts = ArtifactRepository(session)
+        self._evaluations = EvaluationResultRepository(session)
+        self._events = RunEventRepository(session)
+
+    async def _require_run(self, run_id: str) -> Any:
+        run = await self._runs.get_run(run_id, organization_id=self._org)
+        if run is None:
+            raise RunNotFoundError(run_id)
+        return run
+
+    async def _summaries(self, rows: list[Any]) -> list[RunSummary]:
+        objectives = (
+            await self._runs.first_task_objectives(
+                [row.run_id for row in rows], organization_id=self._org
+            )
+            if rows
+            else {}
+        )
+        return [
+            RunSummary(
+                run_id=row.run_id,
+                workflow_id=row.workflow_definition_id,
+                workflow_version=row.workflow_definition_version,
+                routing_policy_id=row.routing_policy_id,
+                routing_policy_version=row.routing_policy_version,
+                status=row.status,
+                status_reason=row.status_reason,
+                objective=objectives.get(row.run_id),
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+                started_at=row.started_at,
+                completed_at=row.completed_at,
+                cancellation_requested_at=row.cancellation_requested_at,
+            )
+            for row in rows
+        ]
+
+    async def list_runs(
+        self,
+        *,
+        limit: int | None,
+        cursor: str | None,
+        workflow_id: str | None,
+        status: str | None,
+    ) -> RunPage:
+        size = _limit(limit)
+        binding = _filter_binding(self._org, workflow_id=workflow_id, status=status)
+        after = _decode_run_cursor(cursor, binding) if cursor else None
+        rows = await self._runs.list_runs_page(
+            organization_id=self._org,
+            limit=size + 1,
+            workflow_id=workflow_id,
+            status=status,
+            after=after,
+        )
+        page, more = rows[:size], len(rows) > size
+        next_cursor = (
+            _encode_run_cursor(page[-1].created_at, page[-1].run_id, binding)
+            if more
+            else None
+        )
+        return RunPage(items=await self._summaries(page), next_cursor=next_cursor)
+
+    async def get_run(self, run_id: str) -> RunSummary:
+        return (await self._summaries([await self._require_run(run_id)]))[0]
+
+    async def tasks(self, run_id: str, *, limit: int | None) -> Collection[TaskView]:
+        await self._require_run(run_id)
+        size = _limit(limit)
+        rows = await self._runs.get_tasks_for_run(
+            run_id, organization_id=self._org, limit=size + 1
+        )
+        attempts: dict[str, list[AttemptView]] = {}
+        for attempt in await self._runs.get_attempts_for_run(
+            run_id, organization_id=self._org
+        ):
+            attempts.setdefault(attempt.task_id, []).append(
+                AttemptView(
+                    attempt_id=attempt.attempt_id,
+                    ordinal=attempt.ordinal,
+                    status=attempt.status,
+                    status_reason=attempt.status_reason,
+                    started_at=attempt.started_at,
+                    completed_at=attempt.completed_at,
+                )
+            )
+        return Collection(
+            items=[
+                TaskView(
+                    task_id=task.task_id,
+                    run_id=task.run_id,
+                    task_key=task.task_key,
+                    task_type=task.task_type,
+                    objective=task.objective,
+                    dependency_ids=list(task.dependency_ids),
+                    status=task.status,
+                    status_reason=task.status_reason,
+                    started_at=task.started_at,
+                    completed_at=task.completed_at,
+                    attempts=attempts.get(task.task_id, []),
+                )
+                for task in rows[:size]
+            ],
+            truncated=len(rows) > size,
+        )
+
+    async def evidence(
+        self, run_id: str, *, limit: int | None
+    ) -> Collection[EvidenceView]:
+        await self._require_run(run_id)
+        size = _limit(limit)
+        rows = await self._evidence.list_evidence_for_run(
+            run_id, organization_id=self._org, limit=size + 1
+        )
+        return Collection(
+            items=[
+                EvidenceView(
+                    evidence_id=row.evidence_id,
+                    run_id=row.run_id,
+                    task_id=row.task_id,
+                    source_type=row.source_type,
+                    source_uri=row.source_uri,
+                    snapshot_artifact_id=row.snapshot_artifact_id,
+                    content_sha256=row.content_sha256,
+                    locator=row.locator,
+                    locator_scheme=row.locator_scheme,
+                    trust=row.trust,
+                    producer_kind=row.producer_kind,
+                    acquired_at=row.acquired_at,
+                )
+                for row in rows[:size]
+            ],
+            truncated=len(rows) > size,
+        )
+
+    async def artifacts(
+        self, run_id: str, *, limit: int | None
+    ) -> Collection[ArtifactView]:
+        await self._require_run(run_id)
+        size = _limit(limit)
+        rows = await self._artifacts.list_artifacts_for_run(
+            run_id, organization_id=self._org, limit=size + 1
+        )
+        return Collection(
+            items=[
+                ArtifactView(
+                    artifact_id=row.artifact_id,
+                    run_id=row.run_id,
+                    task_id=row.task_id,
+                    type=row.kind,
+                    media_type=row.media_type,
+                    content_sha256=row.content_sha256,
+                    status=row.status,
+                    trust=row.trust,
+                    producer=row.producer,
+                    created_at=row.created_at,
+                )
+                for row in rows[:size]
+            ],
+            truncated=len(rows) > size,
+        )
+
+    async def evaluations(
+        self, run_id: str, *, limit: int | None
+    ) -> EvaluationCollection:
+        await self._require_run(run_id)
+        size = _limit(limit)
+        rows = await self._evaluations.list_evaluations_for_run(
+            run_id, organization_id=self._org, latest_only=True, limit=size + 1
+        )
+        states = evaluation_states(build_default_registry(), rows[:size])
+        return EvaluationCollection(
+            items=[
+                EvaluationView(
+                    evaluation_id=row.evaluation_result_id,
+                    run_id=row.run_id,
+                    task_id=row.task_id,
+                    artifact_id=row.artifact_id,
+                    evaluator_id=row.evaluator_id,
+                    evaluator_version=row.evaluator_version,
+                    dimension=row.dimension,
+                    status=row.status,
+                    method="deterministic" if row.deterministic else "model-assisted",
+                    score=row.score,
+                    error_code=row.error_code,
+                    rationale=row.rationale,
+                    trigger=row.trigger,
+                    completed_at=row.completed_at,
+                )
+                for row in rows[:size]
+            ],
+            truncated=len(rows) > size,
+            evaluator_states=[
+                EvaluatorState(
+                    evaluator_id=evaluator,
+                    evaluator_version=version,
+                    dimension=dimension,
+                    status=status,
+                )
+                for (evaluator, version, dimension), status in states.items()
+            ],
+        )
+
+    async def event_history(
+        self, run_id: str, *, limit: int | None, cursor: str | None
+    ) -> EventPage:
+        await self._require_run(run_id)
+        after = 0
+        if cursor:
+            try:
+                position = RunEventCursor.decode(cursor)
+            except ValueError as error:
+                raise InvalidCursorError("cursor is not valid") from error
+            if position.run_id != run_id:
+                raise InvalidCursorError("cursor does not belong to this run")
+            after = position.last_sequence
+        size = _limit(limit)
+        rows = await self._events.read_events_after(
+            run_id, after_sequence=after, limit=size + 1, organization_id=self._org
+        )
+        page = rows[:size]
+        return EventPage(
+            items=[
+                EventView(
+                    event_id=row.event_id,
+                    run_id=row.run_id,
+                    sequence=row.sequence,
+                    event_type=row.event_type,
+                    event_type_version=row.event_type_version,
+                    occurred_at=row.occurred_at,
+                    payload=row.payload,
+                )
+                for row in page
+            ],
+            next_cursor=(
+                RunEventCursor(run_id=run_id, last_sequence=page[-1].sequence).encode()
+                if len(rows) > size
+                else None
+            ),
+        )
