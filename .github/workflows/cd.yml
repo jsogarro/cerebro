@@ -87,7 +87,7 @@ jobs:
         run: |
           curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
           sudo mv kustomize /usr/local/bin/
-          kustomize build k8s/ > /tmp/rendered.yaml
+          python scripts/verify_deployment_assets.py --allow-placeholder-digest k8s
 
   build-image:
     name: Build and Push API Image
@@ -96,7 +96,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      tag: ${{ steps.image-tags.outputs.tag }}
+      digest: ${{ steps.build.outputs.digest }}
 
     steps:
       - name: Checkout code
@@ -126,6 +126,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build and push API image
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -166,12 +167,28 @@ jobs:
           curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
           sudo mv kustomize /usr/local/bin/
       
+      - name: Set up Python for manifest validation
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Install manifest validator dependency
+        run: pip install pyyaml==6.0.4
+
       - name: Update Kubernetes manifests
+        env:
+          IMAGE_DIGEST: ${{ needs.build-image.outputs.digest }}
         run: |
+          # `kustomize edit set image X=Y@` with an empty digest exits 0 and
+          # drops the digest, which would deploy :latest.
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "invalid image digest: '$IMAGE_DIGEST'" >&2; exit 1; }
           cd k8s
           kustomize edit set image \
-            gcr.io/PROJECT_ID/research-platform-api=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-api:${{ needs.build-image.outputs.tag }}
+            gcr.io/PROJECT_ID/research-platform-api=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-api@"$IMAGE_DIGEST"
           kustomize edit set namespace staging
+          cd ..
+          python scripts/verify_deployment_assets.py k8s
       
       - name: Deploy to staging
         run: |
@@ -244,13 +261,28 @@ jobs:
         run: |
           kubectl create namespace production --dry-run=client -o yaml | kubectl apply -f -
       
+      - name: Set up Python for manifest validation
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Install manifest validator dependency
+        run: pip install pyyaml==6.0.4
+
       - name: Deploy new version
+        env:
+          IMAGE_DIGEST: ${{ needs.build-image.outputs.digest }}
         run: |
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "invalid image digest: '$IMAGE_DIGEST'" >&2; exit 1; }
           cd k8s
 
           kustomize edit set image \
-            gcr.io/PROJECT_ID/research-platform-api=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-api:${{ needs.build-image.outputs.tag }}
+            gcr.io/PROJECT_ID/research-platform-api=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/research-platform-api@"$IMAGE_DIGEST"
           kustomize edit set namespace production
+
+          # The edited overlay must carry a real digest, not the placeholder.
+          python ../scripts/verify_deployment_assets.py .
 
           kustomize build . | kubectl apply -f -
 

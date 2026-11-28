@@ -100,6 +100,15 @@ jobs:
         run: |
           pytest -o addopts='' tests/regression -q
       
+      - name: Install kustomize
+        run: |
+          curl -fsSL -o kustomize.tgz \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.7.1/kustomize_v5.7.1_linux_amd64.tar.gz"
+          echo "ea375e7372f9aa029129d4b2d16c66b7750b7f1213c4f66f910d981c895818d8  kustomize.tgz" | sha256sum -c -
+          tar -xzf kustomize.tgz kustomize
+          sudo mv kustomize /usr/local/bin/
+          kustomize version
+
       - name: Run tests with coverage
         env:
           DATABASE_URL: postgresql://test:test@localhost:5432/research_test
