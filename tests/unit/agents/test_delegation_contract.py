@@ -2,7 +2,7 @@
 
 import contextlib
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -146,6 +146,15 @@ _INPUT = {
 }
 
 
+_SEARCH_RESULT = {
+    "success": True,
+    "data_source": "mcp_tools",
+    "sources": [{"title": "T", "url": "https://e.org", "abstract": "a"}],
+    "total_found": 1,
+    "databases_searched": ["arxiv"],
+}
+
+
 class _CapturedError(Exception):
     pass
 
@@ -180,6 +189,9 @@ async def test_every_worker_prompt_that_reaches_a_model_carries_the_brief(name):
         patch.object(agent, "_select_generation_route", return_value=route),
         contextlib.suppress(Exception),
     ):
+        if hasattr(agent, "_search_academic_sources"):
+            # The literature worker only prompts over sources its search found.
+            agent._search_academic_sources = AsyncMock(return_value=_SEARCH_RESULT)
         await agent.execute(task)
     assert prompts, f"{name} never reached a model call"
     assert all("OBJ-SENTINEL" in p for p in prompts)
