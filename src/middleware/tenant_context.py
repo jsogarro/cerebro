@@ -8,7 +8,7 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.auth.models import TokenPayload
+from src.auth.models import PersonalAccessTokenPayload, TokenPayload
 from src.middleware.auth_middleware import get_current_token
 from src.models.db.session import get_session
 
@@ -42,7 +42,9 @@ def owner_ids(tenant_context: TenantContext) -> OwnerIds:
         ) from exc
 
 
-def require_organization_id(token_payload: TokenPayload) -> str:
+def require_organization_id(
+    token_payload: TokenPayload | PersonalAccessTokenPayload,
+) -> str:
     """Return organization_id from a token payload or fail closed."""
     if not token_payload.organization_id:
         raise HTTPException(

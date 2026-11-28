@@ -6,10 +6,16 @@ Pydantic models for authentication requests and responses.
 
 import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+PAT_PREFIX: Final[str] = "crb_pat_"
+PAT_SCOPE_READ: Final[str] = "mcp:read"
+PAT_SCOPE_START: Final[str] = "mcp:start"
+PAT_ALLOWED_SCOPES: Final[frozenset[str]] = frozenset({PAT_SCOPE_READ, PAT_SCOPE_START})
+PAT_MAX_LIFETIME_DAYS: Final[int] = 90
 
 
 class TokenPayload(BaseModel):
@@ -46,6 +52,70 @@ class TokenPayload(BaseModel):
         return datetime.now(UTC) > self.exp
 
     model_config = ConfigDict(json_encoders={datetime: lambda v: v.isoformat()})
+
+
+class PersonalAccessTokenPayload(BaseModel):
+    """Validated personal access token identity (distinct from JWT TokenPayload)."""
+
+    sub: str = Field(..., description="Subject (user ID)")
+    email: str | None = Field(None, description="User email")
+    roles: list[str] = Field(default_factory=list, description="User roles")
+    permissions: list[str] = Field(default_factory=list, description="User permissions")
+    organization_id: str = Field(..., description="Tenant organization ID")
+    pat_id: str = Field(..., description="Personal access token ID")
+    scopes: list[str] = Field(..., description="Granted PAT scopes")
+    iat: datetime = Field(..., description="Issued at timestamp")
+    exp: datetime = Field(..., description="Expiration timestamp")
+
+    def has_scope(self, scope: str) -> bool:
+        return scope in self.scopes
+
+
+class PersonalAccessTokenCreateRequest(BaseModel):
+    """Request body for minting a personal access token."""
+
+    name: str = Field(..., min_length=1, max_length=120)
+    expires_in_days: int = Field(..., ge=1, le=PAT_MAX_LIFETIME_DAYS)
+    scopes: list[str] = Field(default_factory=lambda: [PAT_SCOPE_READ])
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Token name must not be empty")
+        return cleaned
+
+    @field_validator("scopes")
+    @classmethod
+    def validate_scopes(cls, value: list[str]) -> list[str]:
+        if not value:
+            raise ValueError("At least one scope is required")
+        unknown = [scope for scope in value if scope not in PAT_ALLOWED_SCOPES]
+        if unknown:
+            raise ValueError(f"Unsupported scope(s): {', '.join(unknown)}")
+        return list(dict.fromkeys(value))
+
+
+class PersonalAccessTokenResponse(BaseModel):
+    """Personal access token metadata (never includes the secret or its hash)."""
+
+    id: UUID
+    name: str
+    token_prefix: str
+    scopes: list[str]
+    expires_at: datetime
+    revoked_at: datetime | None = None
+    last_used_at: datetime | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PersonalAccessTokenCreateResponse(PersonalAccessTokenResponse):
+    """Creation response carrying the plaintext secret once."""
+
+    token: str
 
 
 class TokenPair(BaseModel):

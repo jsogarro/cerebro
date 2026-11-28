@@ -12,6 +12,7 @@ Callers authenticate with RS256-signed JWTs issued by the `/api/v1/auth` routes 
 | Anonymous WebSocket project access | Off by default | `DEV_ALLOW_ANONYMOUS_WEBSOCKETS` | `src/api/websocket/auth.py` (`verify_project_access`) |
 | RS256 access and refresh tokens | Active | `/api/v1/auth/login`, `/register`, `/refresh` | `src/auth/jwt_service.py` (`JWTService`) |
 | Token and session revocation | Active | `/api/v1/auth/logout`, `/revoke-all`, `/sessions/{device_id}` | `src/auth/jwt_service.py` (`revoke_token`, `revoke_all_user_tokens`) |
+| Personal access tokens (`/mcp` only) | Active | `/api/v1/auth/tokens`, `research-cli tokens` | `src/auth/pat_service.py`, `src/api/auth/tokens_router.py`, `src/models/db/personal_access_token.py` |
 | Password policy and history | Active | register, reset, change | `src/auth/password_service.py` (`PasswordService`) |
 | Failed-login lockout | Active | `POST /api/v1/auth/login` | `src/security/login_throttle.py` (`LoginThrottle`) |
 | Tenant context and RLS setting | Active | `get_tenant_context` | `src/middleware/tenant_context.py` |
@@ -59,6 +60,7 @@ Without that opt-in, `verify_project_access` allows a project subscription only 
 - **Refresh.** `POST /api/v1/auth/refresh` validates the refresh token, requires the user to exist, be active and belong to an organization (`401` otherwise; `503` if the account store fails), mints the new pair from the account's current email, roles, permissions and organization, rejects a `device_id` that differs from the token's and consumes the `refresh:token:<jti>` record with `GETDEL`, so each refresh token works once. A missing record returns `401`.
 - **Sessions.** Revoking the refresh record (`logout`, `DELETE /sessions/{device_id}`, `revoke-all`) ends the session: its refresh token cannot be exchanged.
 - **One service per process.** `get_jwt_service` builds one `JWTService` (one Redis client and parsed key pair) and caches it; the application lifespan closes it through `close_jwt_service`.
+- **Personal access tokens.** `crb_pat_`-prefixed 256-bit tokens stored as SHA-256 hashes in `personal_access_tokens` (forced RLS plus `cerebro_maint` lookup and `last_used_at` update policies). Accepted by `AuthMiddleware` on `/mcp` only and rejected on every other route (including PAT management and password change). Each request checks the Postgres row (not revoked, not expired, active user, non-null matching `organization_id`), checks the user-wide Redis revocation marker (`_is_user_token_revoked`, so `/revoke-all` and password changes invalidate PATs), resolves roles from the user record, updates `last_used_at`, and records `pat_id` in HTTP and MCP tool audit metadata. `/.well-known/oauth-protected-resource` is not served.
 
 ## Auth endpoints
 
@@ -78,6 +80,9 @@ All routes are in `src/api/auth/auth_router.py`, mounted at `/api/v1/auth`.
 | `DELETE` | `/sessions/{device_id}` | none | 204 | Deletes the refresh record of the caller's session for that `device_id` (`404` if there is none). An access token already issued stays valid until it expires. |
 | `POST` | `/revoke-all` | none | 204 | Writes the user-wide revocation marker and deletes the user's refresh records (`503` if the store is unavailable). |
 | `GET` | `/me` | none | `UserResponse` | Returns the caller's user record (`404` if the user does not exist). |
+| `POST` | `/tokens` | `PersonalAccessTokenCreateRequest` | `PersonalAccessTokenCreateResponse` (201) | JWT-only. Mints a `crb_pat_`-prefixed personal access token bound to the caller's user and organization (expiry required, 1–90 days; scopes `mcp:read` default, `mcp:start` opt-in). Returns the plaintext secret once and stores only its SHA-256 hash. |
+| `GET` | `/tokens` | none | `list[PersonalAccessTokenResponse]` | JWT-only. Lists metadata (`id`, `name`, `token_prefix`, `scopes`, `expires_at`, `revoked_at`, `last_used_at`, `created_at`) for the caller's tokens in the caller's organization. |
+| `DELETE` | `/tokens/{pat_id}` | none | 204 | JWT-only. Revokes a token within the caller's organization (caller's own token, or any token in the same organization for an `admin`). Foreign-organization IDs return `404`. |
 
 **`RegisterRequest`.** `email`, `username` (3 to 50 characters; letters, digits, `_` and `-`; stored lower-case), `password`, `confirm_password` (must equal `password`), `full_name` (optional, up to 255), `organization` (optional free text, up to 255), `accept_terms` (must be `true`). `organization` is stored on the user as profile text and has no tenancy effect; `accept_terms` is validated and not stored.
 
@@ -150,6 +155,7 @@ The `oauth_accounts` table (migration `5bf6a31d1957`) and its `OAuthAccount` mod
 - `src/middleware/tenant_context.py`: `TenantContext`, `get_tenant_context`, `get_tenant_identity`, `require_organization_id`, `set_postgres_tenant_context`.
 - `src/api/auth/auth_router.py`: `/api/v1/auth` routes, `provisioned_organization_id`, `get_login_throttle`.
 - `src/auth/jwt_service.py`: token issue, validation, refresh, revocation, key loading.
+- `src/auth/pat_service.py`, `src/api/auth/tokens_router.py`, `src/models/db/personal_access_token.py`, `src/repositories/personal_access_token_repository.py`: personal access token generation, validation, persistence, and `/api/v1/auth/tokens` routes.
 - `src/auth/password_service.py`: password policy, history, breach check, reset and verification tokens.
 - `src/auth/models.py`: request, response and `TokenPayload` models.
 - `src/security/login_throttle.py`: failed-login lockout.

@@ -96,6 +96,9 @@ class AuditTrailMiddleware:
         }
         if status_code is not None:
             metadata["status_code"] = status_code
+        pat_id = getattr(request.state, "pat_id", None)
+        if pat_id is not None:
+            metadata["pat_id"] = pat_id
 
         await audit_logger.log_event(
             event_type=self._event_type(request, status_code),

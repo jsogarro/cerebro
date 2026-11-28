@@ -275,3 +275,30 @@ class ResearchAPIClient:
         response = await self._request("POST", path, json_data=json_data)
         result: dict[str, Any] = response.json()
         return result
+
+    async def create_personal_access_token(
+        self,
+        *,
+        name: str,
+        expires_in_days: int,
+        scopes: list[str],
+    ) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            "/api/v1/auth/tokens",
+            json_data={
+                "name": name,
+                "expires_in_days": expires_in_days,
+                "scopes": scopes,
+            },
+        )
+        result: dict[str, Any] = response.json()
+        return result
+
+    async def list_personal_access_tokens(self) -> list[dict[str, Any]]:
+        response = await self._request("GET", "/api/v1/auth/tokens")
+        result: list[dict[str, Any]] = response.json()
+        return result
+
+    async def revoke_personal_access_token(self, pat_id: str) -> None:
+        await self._request("DELETE", f"/api/v1/auth/tokens/{pat_id}")

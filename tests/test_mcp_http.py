@@ -114,6 +114,9 @@ class _StubBackend:
     async def restore_active_executions(self) -> int:
         return 0
 
+    def start_expired_run_reconciliation(self) -> None:
+        return None
+
     async def close(self) -> None:
         return None
 
