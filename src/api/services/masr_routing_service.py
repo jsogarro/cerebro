@@ -7,7 +7,7 @@ Based on "MasRouter: Learning to Route LLMs" research patterns.
 """
 
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -52,6 +52,7 @@ from src.utils.type_coercion import coerce_float
 logger = get_logger()
 
 _MAX_LABELLED_FEEDBACK = 1000
+_MAX_ROUTING_HISTORY = 1000
 
 
 @dataclass(frozen=True)
@@ -123,7 +124,8 @@ class MASRRoutingService:
         self.feedback_learner = SupervisionFeedbackLearner()
 
         # Tracking and metrics
-        self.routing_history: dict[str, RoutingDecision] = {}
+        self.routing_history: OrderedDict[str, RoutingDecision] = OrderedDict()
+        self._routing_owners: dict[str, str | None] = {}
         self.labelled_feedback: deque[LabelledRoutingFeedback] = deque(
             maxlen=_MAX_LABELLED_FEEDBACK
         )
@@ -149,6 +151,7 @@ class MASRRoutingService:
             return
         self.closed = True
         self.routing_history.clear()
+        self._routing_owners.clear()
         self.labelled_feedback.clear()
         if self._owns_bridge:
             try:
@@ -159,14 +162,31 @@ class MASRRoutingService:
                     error=type(exc).__name__,
                 )
 
+    def _record_routing_history(
+        self,
+        routing_id: str,
+        decision: RoutingDecision,
+        *,
+        organization_id: str | None,
+    ) -> None:
+        self.routing_history[routing_id] = decision
+        self._routing_owners[routing_id] = organization_id
+        while len(self.routing_history) > _MAX_ROUTING_HISTORY:
+            evicted_id, _ = self.routing_history.popitem(last=False)
+            self._routing_owners.pop(evicted_id, None)
+
     async def get_routing_decision(
-        self, request: RoutingRequest
+        self,
+        request: RoutingRequest,
+        *,
+        organization_id: str | None = None,
     ) -> RoutingDecisionResponse:
         """
         Get intelligent routing decision for a query.
 
         Args:
             request: Routing request with query and constraints
+            organization_id: Owning organization for tenant-scoped feedback lookup
 
         Returns:
             RoutingDecisionResponse with routing decision and allocations
@@ -179,8 +199,10 @@ class MASRRoutingService:
             # Generate unique routing ID
             routing_id = str(uuid.uuid4())
 
-            # Store for feedback tracking
-            self.routing_history[routing_id] = decision
+            # Store for bounded tenant-scoped feedback tracking
+            self._record_routing_history(
+                routing_id, decision, organization_id=organization_id
+            )
 
             supervisor_allocations = []
             if hasattr(decision.agent_allocation, "supervisors"):
@@ -460,7 +482,10 @@ class MASRRoutingService:
         organization_id: str | None = None,
     ) -> dict[str, Any]:
         """Store manual feedback as labelled evaluation data only (no live learning)."""
-        if feedback.routing_id not in self.routing_history:
+        if (
+            feedback.routing_id not in self.routing_history
+            or self._routing_owners.get(feedback.routing_id) != organization_id
+        ):
             raise ValueError(f"Unknown routing ID: {feedback.routing_id}")
 
         original_decision = self.routing_history[feedback.routing_id]
@@ -493,12 +518,6 @@ class MASRRoutingService:
                 recorded_at=datetime.now(UTC),
             )
         )
-
-        # Clean up old history entries (keep last 1000)
-        if len(self.routing_history) > 1000:
-            oldest_keys = sorted(self.routing_history.keys())[:100]
-            for key in oldest_keys:
-                del self.routing_history[key]
 
         return {
             "status": "accepted",

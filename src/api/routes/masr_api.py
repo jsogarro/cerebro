@@ -76,6 +76,7 @@ MASRServiceDependency = Annotated[
 async def get_routing_decision(
     request: RoutingRequest,
     routing_service: MASRServiceDependency,
+    token: Annotated[TokenPayload, Depends(get_current_token)],
 ) -> RoutingDecisionResponse:
     """
     Get intelligent routing decision for a query.
@@ -84,7 +85,9 @@ async def get_routing_decision(
     allocates supervisors and workers, and provides cost/latency estimates.
     """
     try:
-        return await routing_service.get_routing_decision(request)
+        return await routing_service.get_routing_decision(
+            request, organization_id=token.organization_id
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

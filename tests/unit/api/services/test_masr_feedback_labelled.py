@@ -22,18 +22,24 @@ from src.middleware.auth_middleware import get_jwt_service
 from src.models.masr_api_models import RoutingFeedback, RoutingRequest
 
 AUTH_ORG_ID = "11111111-1111-1111-1111-111111111111"
+OTHER_ORG_ID = "22222222-2222-2222-2222-222222222222"
 AUTH_TOKEN = "feedback-test-token"
+OTHER_TOKEN = "feedback-other-tenant-token"
 
 
 class _TestJWTService:
     async def validate_token(self, token: str) -> TokenPayload:
-        assert token == AUTH_TOKEN
+        org_by_token = {
+            AUTH_TOKEN: AUTH_ORG_ID,
+            OTHER_TOKEN: OTHER_ORG_ID,
+        }
+        assert token in org_by_token
         now = datetime.now(UTC)
         return TokenPayload(
-            sub="user-1",
+            sub=f"user-{token}",
             email="test@example.com",
-            organization_id=AUTH_ORG_ID,
-            jti="jti-feedback",
+            organization_id=org_by_token[token],
+            jti=f"jti-{token}",
             iat=now,
             exp=now + timedelta(minutes=5),
         )
@@ -58,7 +64,8 @@ async def test_submit_feedback_stores_labelled_record_without_live_learning() ->
     service = MASRRoutingService(router=router)
 
     decision_resp = await service.get_routing_decision(
-        RoutingRequest(query="Compare two empirical methods for causal inference")
+        RoutingRequest(query="Compare two empirical methods for causal inference"),
+        organization_id=AUTH_ORG_ID,
     )
     metrics_before = {k: dict(v) for k, v in service.performance_metrics.items()}
     route_before = await router.route(
@@ -148,3 +155,78 @@ def test_masr_feedback_route_stores_tenant_scoped_labelled_data_only() -> None:
     finally:
         app.dependency_overrides.pop(get_masr_routing_service, None)
         app.dependency_overrides.pop(get_jwt_service, None)
+
+
+def test_masr_feedback_rejects_cross_tenant_routing_id_without_existence_leak() -> None:
+    from src.api.main import app
+
+    router = MASRouter(
+        config={"adaptive_routing_enabled": False, "enable_caching": False}
+    )
+    service = MASRRoutingService(router=router)
+    app.dependency_overrides[get_masr_routing_service] = lambda: service
+    app.dependency_overrides[get_jwt_service] = _TestJWTService
+    try:
+        tenant_a = TestClient(app, headers={"Authorization": f"Bearer {AUTH_TOKEN}"})
+        tenant_b = TestClient(app, headers={"Authorization": f"Bearer {OTHER_TOKEN}"})
+
+        route_resp = tenant_a.post(
+            "/api/v1/masr/route",
+            json={"query": "Evaluate cross-tenant isolation on MASR feedback"},
+        )
+        assert route_resp.status_code == 200
+        tenant_a_routing_id = route_resp.json()["routing_id"]
+
+        cross_tenant_resp = tenant_b.post(
+            "/api/v1/masr/feedback",
+            json={
+                "routing_id": tenant_a_routing_id,
+                "actual_cost": 0.05,
+                "actual_latency_ms": 420,
+                "quality_score": 0.85,
+                "error_occurred": False,
+            },
+        )
+        unknown_resp = tenant_b.post(
+            "/api/v1/masr/feedback",
+            json={
+                "routing_id": "00000000-0000-0000-0000-000000000000",
+                "actual_cost": 0.05,
+                "actual_latency_ms": 420,
+                "quality_score": 0.85,
+                "error_occurred": False,
+            },
+        )
+        assert cross_tenant_resp.status_code == unknown_resp.status_code == 400
+        assert (
+            cross_tenant_resp.json()["error"]["code"]
+            == unknown_resp.json()["error"]["code"]
+            == "INVALID_FEEDBACK"
+        )
+        assert service.get_labelled_feedback() == []
+    finally:
+        app.dependency_overrides.pop(get_masr_routing_service, None)
+        app.dependency_overrides.pop(get_jwt_service, None)
+
+
+@pytest.mark.asyncio
+async def test_masr_routing_history_is_bounded_and_evicts_oldest_in_order() -> None:
+    router = MASRouter(
+        config={"adaptive_routing_enabled": False, "enable_caching": False}
+    )
+    base_decision = await router.route("Base query for history cap test")
+    router.route = AsyncMock(return_value=base_decision)  # type: ignore[method-assign]
+    service = MASRRoutingService(router=router)
+
+    routing_ids: list[str] = []
+    for i in range(1005):
+        resp = await service.get_routing_decision(
+            RoutingRequest(query=f"query-{i}"),
+        )
+        routing_ids.append(resp.routing_id)
+
+    assert len(service.routing_history) == 1000
+    for evicted_id in routing_ids[:5]:
+        assert evicted_id not in service.routing_history
+    for kept_id in routing_ids[5:]:
+        assert kept_id in service.routing_history
