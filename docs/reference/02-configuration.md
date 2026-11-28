@@ -166,10 +166,13 @@ A field is listed here when a production module outside `src/core/config.py` rea
 
 ### Tracing and telemetry
 
-> **Off by default.** Langfuse tracing (`LANGFUSE_ENABLED=true`, plus both keys) and compaction telemetry (`ENABLE_CONTEXT_COMPACTION_TELEMETRY=true`) are disabled.
+> **Off by default.** OpenTelemetry tracing (`ENABLE_TRACING=true`), Langfuse tracing (`LANGFUSE_ENABLED=true`, plus both keys) and compaction telemetry (`ENABLE_CONTEXT_COMPACTION_TELEMETRY=true`) are disabled. Setting `OTEL_EXPORTER_OTLP_ENDPOINT` alone does not activate OpenTelemetry tracing while `ENABLE_TRACING` is false, and setting `OTEL_SDK_DISABLED=true` overrides `ENABLE_TRACING=true`.
 
 | Setting | Default | Read by | Effect |
 |---|---|---|---|
+| `ENABLE_TRACING` | `false` | `src/core/otel.py` (`is_otel_enabled`) | activates the private OpenTelemetry `TracerProvider` and FastAPI, SQLAlchemy, httpx and workflow/worker/provider/tool instrumentation in the API lifespan; overridden by `OTEL_SDK_DISABLED=true` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | `src/core/otel.py` (`init_otel`) | OTLP/HTTP trace endpoint (standard port `4318`; a base URL without `/v1/traces` has `/v1/traces` appended); supports standard OTLP collectors and Langfuse's OTLP endpoint; when unset with `ENABLE_TRACING=true`, spans stay in-process with no network export |
+| `OTEL_SERVICE_NAME` | `cerebro-api` | `src/core/otel.py` (`init_otel`) | `service.name` resource attribute on the private OpenTelemetry `TracerProvider` |
 | `ENABLE_CONTEXT_COMPACTION_TELEMETRY` | `false` | `src/core/telemetry.py` (`telemetry_enabled`) | token-count measurements logged by supervisors and `DirectExecutionService` |
 | `LANGFUSE_ENABLED` | `false` | `src/core/tracing.py` (`_initialize_langfuse`), `src/api/main.py` (`lifespan`) | enables the Langfuse client, created eagerly at startup |
 | `LANGFUSE_PUBLIC_KEY` | unset | `src/core/tracing.py` (`_initialize_langfuse`) | required when enabled; with a missing key the client is not created and a warning is logged |
@@ -188,7 +191,7 @@ See [LLM providers](10-llm-providers.md) for how workers choose a provider.
 
 > **Not wired.** These fields are declared on `Settings`, and some are copied into `get_ai_brain_config()`. No production code reads them (the only caller of `get_ai_brain_config` reads just its `providers` entries), so setting them changes nothing.
 
-The table lists 96 rows: 95 fields of `Settings` and `OTEL_EXPORTER_OTLP_ENDPOINT`, which `Settings` does not declare. Together with the 62 `Settings` rows above they account for 157 of the 168 fields of `Settings`; the ten `DOCUMENT_*` fields are described in [uploaded documents](11a-documents.md) and `PROVIDER_TERMS_VERIFIED_ON` is not listed on this page.
+The table lists the declared-only `Settings` fields. The ten `DOCUMENT_*` fields are described in [uploaded documents](11a-documents.md) and `PROVIDER_TERMS_VERIFIED_ON` is not listed on this page.
 
 | Setting | Default | Family |
 |---|---|---|
@@ -202,7 +205,6 @@ The table lists 96 rows: 95 fields of `Settings` and `OTEL_EXPORTER_OTLP_ENDPOIN
 | `WORKER_CONCURRENCY` | `10` | Workers, MCP server and Temporal |
 | `TASK_TIMEOUT_SECONDS` | `300` | Workers and Temporal |
 | `ENABLE_METRICS` | `true` | Mounts `/metrics` when true |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Monitoring and caching flags |
 | `ENABLE_CACHE` | `true` | Monitoring and caching flags |
 | `JWT_ALGORITHM` | `RS256` | Authentication, sessions and OAuth |
 | `PASSWORD_HISTORY_LIMIT` | `5` | Authentication, sessions and OAuth |
@@ -397,11 +399,11 @@ The production compose file also sets literal environment entries that no code r
 | `.env.production.example` | production template; copy and fill in |
 | `.env.cli.example` | `research-cli` settings (`RESEARCH_*`); every key is read |
 
-`.env.example` holds 54 uncommented keys, plus the commented `SOURCE_SNAPSHOT_DIR`. 28 are read by code or interpolated by a compose file. The other 26 are read by nothing: `ALERT_EMAIL`, `ALERT_WEBHOOK_URL`, `API_HOST`, `API_PORT`, `API_WORKERS`, `AVAILABILITY_ZONE`, `DB_HOST`, `DB_NAME`, `DB_PORT`, `DB_USER`, `ENABLE_CACHE`, `INSTANCE_ID`, `JWT_ALGORITHM`, `MCP_TOOLS_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `REDIS_DB`, `REDIS_HOST`, `REDIS_PORT`, `REGION`, `SECRETS_PROVIDER`, `TASK_TIMEOUT_SECONDS`, `TEMPORAL_HOST`, `TEMPORAL_NAMESPACE`, `TEMPORAL_PORT`, `VALIDATE_ENV_VARS`, `WORKER_CONCURRENCY`.
+`.env.example` holds 54 uncommented keys, plus the commented `SOURCE_SNAPSHOT_DIR`. 29 are read by code or interpolated by a compose file (including `OTEL_EXPORTER_OTLP_ENDPOINT`). The other 25 are read by nothing: `ALERT_EMAIL`, `ALERT_WEBHOOK_URL`, `API_HOST`, `API_PORT`, `API_WORKERS`, `AVAILABILITY_ZONE`, `DB_HOST`, `DB_NAME`, `DB_PORT`, `DB_USER`, `ENABLE_CACHE`, `INSTANCE_ID`, `JWT_ALGORITHM`, `MCP_TOOLS_ENABLED`, `REDIS_DB`, `REDIS_HOST`, `REDIS_PORT`, `REGION`, `SECRETS_PROVIDER`, `TASK_TIMEOUT_SECONDS`, `TEMPORAL_HOST`, `TEMPORAL_NAMESPACE`, `TEMPORAL_PORT`, `VALIDATE_ENV_VARS`, `WORKER_CONCURRENCY`.
 
 The file also sets values that differ from the code defaults: `DEBUG=true` (default false), and `ENABLE_RATE_LIMITING=false` (default true).
 
-`.env.production.example` holds 68 keys. 14 are read by code or interpolated by `docker-compose.production.yml`: `CORS_ORIGINS`, `DATABASE_URL`, `DB_PASSWORD`, `DEBUG`, `ENABLE_METRICS`, `ENABLE_RATE_LIMITING`, `ENVIRONMENT`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `MAX_REQUESTS_PER_MINUTE`, `REDIS_PASSWORD`, `REDIS_URL` and `SECRET_KEY`. `GEMINI_MODEL=gemini-pro` overrides the default `gemini-2.5-flash` through `GeminiConfig.from_env`. `LOG_LEVEL` is read as well. The other 54 are read by nothing. The non-secret ones are `ALERT_EMAIL`, `ALERT_WEBHOOK_URL`, `API_HOST`, `API_PORT`, `API_WORKERS`, `AUDIT_LOG_FILE`, `AUDIT_LOGGING_ENABLED`, `AVAILABILITY_ZONE`, `BACKUP_ENABLED`, `BACKUP_RETENTION_DAYS`, `BACKUP_S3_BUCKET`, `CDN_ENABLED`, `CDN_URL`, `COMPRESSION_LEVEL`, `CSP_POLICY`, `DB_HOST`, `DB_NAME`, `DB_PORT`, `DB_USER`, `ENABLE_CACHE`, `ENABLE_HTTP2`, `ENABLE_KEEPALIVE`, `ENABLE_RESPONSE_COMPRESSION`, `INSTANCE_ID`, `JWT_ALGORITHM`, `JWT_EXPIRATION_MINUTES`, `KEEPALIVE_TIMEOUT`, `MAX_CONCURRENT_REQUESTS`, `MAX_REQUEST_SIZE`, `MAX_UPLOAD_SIZE`, `MAX_WEBSOCKET_CONNECTIONS`, `MCP_TOOLS_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `RATE_LIMIT_PER_DAY`, `RATE_LIMIT_PER_HOUR`, `RATE_LIMIT_PER_MINUTE`, `REDIS_DB`, `REDIS_HOST`, `REDIS_PORT`, `REGION`, `SECURITY_HEADERS_ENABLED`, `SSL_CA_FILE`, `SSL_CERT_FILE`, `TASK_TIMEOUT_SECONDS`, `TEMPORAL_HOST`, `TEMPORAL_NAMESPACE`, `TEMPORAL_PORT`, `VALIDATE_ENV_VARS` and `WORKER_CONCURRENCY`. The remainder are a JWT secret entry, a TLS key entry, `SECRETS_PROVIDER` and the secret-provider keys. JWT signing uses the RSA key files named by `JWT_PRIVATE_KEY_PATH` and `JWT_PUBLIC_KEY_PATH`, which the production compose file sets to `/run/secrets/jwt_private.pem` and `/run/secrets/jwt_public.pem`.
+`.env.production.example` holds 68 keys. 15 are read by code or interpolated by `docker-compose.production.yml`: `CORS_ORIGINS`, `DATABASE_URL`, `DB_PASSWORD`, `DEBUG`, `ENABLE_METRICS`, `ENABLE_RATE_LIMITING`, `ENVIRONMENT`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `MAX_REQUESTS_PER_MINUTE`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `REDIS_PASSWORD`, `REDIS_URL` and `SECRET_KEY`, plus `LOG_LEVEL`. `GEMINI_MODEL=gemini-pro` overrides the default `gemini-2.5-flash` through `GeminiConfig.from_env`. The other 53 are read by nothing. The non-secret ones are `ALERT_EMAIL`, `ALERT_WEBHOOK_URL`, `API_HOST`, `API_PORT`, `API_WORKERS`, `AUDIT_LOG_FILE`, `AUDIT_LOGGING_ENABLED`, `AVAILABILITY_ZONE`, `BACKUP_ENABLED`, `BACKUP_RETENTION_DAYS`, `BACKUP_S3_BUCKET`, `CDN_ENABLED`, `CDN_URL`, `COMPRESSION_LEVEL`, `CSP_POLICY`, `DB_HOST`, `DB_NAME`, `DB_PORT`, `DB_USER`, `ENABLE_CACHE`, `ENABLE_HTTP2`, `ENABLE_KEEPALIVE`, `ENABLE_RESPONSE_COMPRESSION`, `INSTANCE_ID`, `JWT_ALGORITHM`, `JWT_EXPIRATION_MINUTES`, `KEEPALIVE_TIMEOUT`, `MAX_CONCURRENT_REQUESTS`, `MAX_REQUEST_SIZE`, `MAX_UPLOAD_SIZE`, `MAX_WEBSOCKET_CONNECTIONS`, `MCP_TOOLS_ENABLED`, `RATE_LIMIT_PER_DAY`, `RATE_LIMIT_PER_HOUR`, `RATE_LIMIT_PER_MINUTE`, `REDIS_DB`, `REDIS_HOST`, `REDIS_PORT`, `REGION`, `SECURITY_HEADERS_ENABLED`, `SSL_CA_FILE`, `SSL_CERT_FILE`, `TASK_TIMEOUT_SECONDS`, `TEMPORAL_HOST`, `TEMPORAL_NAMESPACE`, `TEMPORAL_PORT`, `VALIDATE_ENV_VARS` and `WORKER_CONCURRENCY`. The remainder are a JWT secret entry, a TLS key entry, `SECRETS_PROVIDER` and the secret-provider keys. JWT signing uses the RSA key files named by `JWT_PRIVATE_KEY_PATH` and `JWT_PUBLIC_KEY_PATH`, which the production compose file sets to `/run/secrets/jwt_private.pem` and `/run/secrets/jwt_public.pem`.
 
 ## Validation and environment-dependent behaviour
 

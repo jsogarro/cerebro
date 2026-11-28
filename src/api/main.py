@@ -261,6 +261,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except (SQLAlchemyError, OSError, ImportError) as e:
             logger.warning(f"Database initialization failed: {e}")
 
+        from src.core.otel import init_otel, shutdown_otel
+
+        if init_otel(
+            app=app,
+            engines=tuple(
+                engine
+                for engine in (db_session._engine, db_session._maintenance_engine)
+                if engine is not None
+            ),
+        ):
+            resources.push_async_callback(
+                _close_lifespan_resource,
+                "otel_tracing",
+                lambda: asyncio.to_thread(shutdown_otel),
+            )
+            logger.info("OpenTelemetry tracing initialized")
+
         gemini_service = None
         if settings.GEMINI_API_KEY:
             try:

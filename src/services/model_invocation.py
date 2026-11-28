@@ -33,6 +33,7 @@ from src.core.budget import (
     BudgetLedger,
     ReportedUsage,
 )
+from src.core.otel import record_provider_span_outcome, trace_provider_span
 from src.core.tracing import end_model_attempt, start_model_attempt
 
 logger = get_logger()
@@ -317,28 +318,43 @@ async def _attempt(
         ctx.trace_parent,
         {"call_id": call_id, "attempt": n, "estimated_tokens": estimated_tokens},
     )
-    try:
-        response = await call(remaining)
-    except UnbilledTransportError as exc:
-        end_model_attempt(span, metadata={"outcome": type(exc).__name__})
-        await asyncio.shield(
-            _settle(ctx, call_id, reservation, ReportedUsage(0, Decimal(0)), marked)
+    with trace_provider_span(call_id=call_id, attempt=n) as otel_span:
+        try:
+            response = await call(remaining)
+        except UnbilledTransportError as exc:
+            end_model_attempt(span, metadata={"outcome": type(exc).__name__})
+            record_provider_span_outcome(otel_span, outcome=type(exc).__name__)
+            await asyncio.shield(
+                _settle(ctx, call_id, reservation, ReportedUsage(0, Decimal(0)), marked)
+            )
+            raise
+        except BaseException as exc:
+            end_model_attempt(span, metadata={"outcome": type(exc).__name__})
+            record_provider_span_outcome(otel_span, outcome=type(exc).__name__)
+            await asyncio.shield(_settle(ctx, call_id, reservation, None, marked))
+            raise
+        try:
+            result = normalize_response(response, attempts=n)
+            usage = _usage(result)
+        except Exception as exc:
+            # The provider answered, so the call may have been billed: a response
+            # we cannot read is unknown spend, never free.
+            end_model_attempt(span, metadata={"outcome": type(exc).__name__})
+            record_provider_span_outcome(otel_span, outcome=type(exc).__name__)
+            await asyncio.shield(_settle(ctx, call_id, reservation, None, marked))
+            raise
+        end_model_attempt(span, **_span_update(result))
+        record_provider_span_outcome(
+            otel_span,
+            provider=result.provider,
+            model=result.model,
+            response_id=result.request_id,
+            finish_reason=result.finish_reason,
+            input_tokens=result.prompt_tokens,
+            output_tokens=result.completion_tokens,
+            outcome=result.status.value,
+            usage_certainty=result.usage_certainty.value,
         )
-        raise
-    except BaseException as exc:
-        end_model_attempt(span, metadata={"outcome": type(exc).__name__})
-        await asyncio.shield(_settle(ctx, call_id, reservation, None, marked))
-        raise
-    try:
-        result = normalize_response(response, attempts=n)
-        usage = _usage(result)
-    except Exception as exc:
-        # The provider answered, so the call may have been billed: a response
-        # we cannot read is unknown spend, never free.
-        end_model_attempt(span, metadata={"outcome": type(exc).__name__})
-        await asyncio.shield(_settle(ctx, call_id, reservation, None, marked))
-        raise
-    end_model_attempt(span, **_span_update(result))
     await asyncio.shield(_settle(ctx, call_id, reservation, usage, marked))
     return result
 
