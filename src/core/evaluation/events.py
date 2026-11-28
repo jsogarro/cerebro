@@ -3,6 +3,8 @@
 import uuid
 from typing import Final
 
+EVALUATION_DESTINATION: Final = "evaluation"
+EVALUATION_TRIGGER_EVENT: Final = "run.succeeded"
 EVALUATOR_EXCEPTION_CODE: Final = "evaluator_exception"
 EVALUATOR_CONTRACT_VIOLATION_CODE: Final = "evaluator_contract_violation"
 

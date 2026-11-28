@@ -22,10 +22,13 @@ destination.
 
 import asyncio
 import contextlib
+import re
 import uuid
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, or_, select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from structlog import get_logger
 
@@ -35,8 +38,22 @@ from src.models.db.run_event import AgentRunEventOutbox, EventDeliveryStatus
 
 logger = get_logger()
 
+# The failures a handler's dependencies produce: a store or network being
+# down, or the handler timeout. Anything else is a bug in the handler; it
+# propagates, and the claimed row is retried once its lease expires.
+_HANDLER_FAILURES = (TimeoutError, SQLAlchemyError, OSError)
+
 _MAX_BACKOFF_SECONDS = 300
+_BUILTIN_DESTINATIONS = frozenset({"redis", "websocket"})
+# Destination names are stored in a 100-char column and echoed into logs and
+# idempotency keys, so a registered name is held to a short, lowercase token.
+_DESTINATION_NAME = re.compile(r"[a-z][a-z0-9_.-]{0,63}")
+
+OutboxHandler = Callable[[AgentRunEventOutbox], Awaitable[bool]]
 _DEFAULT_CLAIM_LEASE_SECONDS = 60.0
+# Well under the lease: a handler still running when the lease lapses would be
+# reclaimed by another relay and run twice.
+_DEFAULT_HANDLER_TIMEOUT_SECONDS = 20.0
 
 
 class OutboxRelay:
@@ -83,7 +100,21 @@ class OutboxRelay:
         max_attempts: int = 10,
         claim_lease_seconds: float = _DEFAULT_CLAIM_LEASE_SECONDS,
         stream_hub: RunStreamHub | None = None,
+        handlers: Mapping[str, OutboxHandler] | None = None,
+        handler_timeout_seconds: float = _DEFAULT_HANDLER_TIMEOUT_SECONDS,
     ) -> None:
+        """``handlers`` maps extra destination names to async delivery callables.
+
+        A handler returns ``True`` once the row is handled; ``False`` or any
+        exception counts as a failed attempt and takes the ordinary backoff and
+        dead-letter path, so a broken handler can only ever delay its own rows.
+        """
+        for name in handlers or {}:
+            if name in _BUILTIN_DESTINATIONS or not _DESTINATION_NAME.fullmatch(name):
+                raise ValueError(f"invalid outbox destination name {name!r}")
+        self.handlers = dict(handlers or {})
+        self.handler_timeout_seconds = handler_timeout_seconds
+        self._handler_errors: dict[int, str] = {}
         self.session_factory = session_factory
         self.event_publisher = event_publisher
         self.stream_hub = stream_hub if stream_hub is not None else run_stream_hub
@@ -131,16 +162,26 @@ class OutboxRelay:
             await self._dead_letter_abandoned_claims(session)
             await session.commit()
 
+        # Built-in destinations go first and serially; handler rows then run
+        # concurrently, each bounded by the handler timeout, so a slow handler
+        # delays neither them nor the other handlers past the claim lease.
+        core = [r for r in rows if r.destination not in self.handlers]
+        custom = [r for r in rows if r.destination in self.handlers]
         delivered = 0
-        for row in rows:
-            ok = await self._deliver(row)
-            async with self.session_factory() as session:
-                await self._finalize(session, row, delivered=ok)
-                await session.commit()
-            if ok:
-                delivered += 1
+        for row in core:
+            delivered += await self._deliver_and_finalize(row)
+        delivered += sum(
+            await asyncio.gather(*(self._deliver_and_finalize(r) for r in custom))
+        )
         self._notify_stream_subscribers(rows)
         return delivered
+
+    async def _deliver_and_finalize(self, row: AgentRunEventOutbox) -> int:
+        ok = await self._deliver(row)
+        async with self.session_factory() as session:
+            await self._finalize(session, row, delivered=ok)
+            await session.commit()
+        return int(ok)
 
     def _notify_stream_subscribers(self, rows: list[AgentRunEventOutbox]) -> None:
         """Wake local stream subscribers for every run this batch touched.
@@ -268,6 +309,22 @@ class OutboxRelay:
                 organization_id=row.organization_id, run_id=row.run_id
             )
             return True
+        handler = self.handlers.get(row.destination)
+        if handler is not None:
+            try:
+                return await asyncio.wait_for(
+                    handler(row), timeout=self.handler_timeout_seconds
+                )
+            except _HANDLER_FAILURES as exc:
+                # Class name only: the message may carry payload or credentials.
+                self._handler_errors[row.id] = type(exc).__name__
+                logger.warning(
+                    "outbox_relay_handler_failed",
+                    destination=row.destination,
+                    event_id=row.event_id,
+                    exception_class=type(exc).__name__,
+                )
+                return False
         logger.warning(
             "outbox_relay_unknown_destination",
             destination=row.destination,
@@ -353,6 +410,7 @@ class OutboxRelay:
         self, session: AsyncSession, row: AgentRunEventOutbox, *, delivered: bool
     ) -> None:
         now = datetime.now(UTC)
+        raised = self._handler_errors.pop(row.id, None)
         if delivered:
             await session.execute(
                 update(AgentRunEventOutbox)
@@ -364,6 +422,12 @@ class OutboxRelay:
             error = "redis publish unavailable or failed"
         elif row.destination == "websocket":
             error = "stream row has no organization to notify"
+        elif row.destination in self.handlers:
+            error = (
+                f"handler raised {raised}"
+                if raised
+                else f"handler for {row.destination!r} reported failure"
+            )
         else:
             error = f"unknown destination {row.destination!r}"
         if row.attempts >= self.max_attempts:

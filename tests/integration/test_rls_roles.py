@@ -638,3 +638,74 @@ async def test_the_migration_role_owns_the_schema_and_can_downgrade_and_upgrade(
     migrator_url = _role_url(seeded, "cerebro_migrator").replace("+asyncpg", "")
     for command in (["downgrade", "-1"], ["upgrade", "head"]):
         _run([str(ALEMBIC), *command], seeded, MIGRATION_DATABASE_URL=migrator_url)
+
+
+async def _queue_evaluation(admin_url: str, org: uuid.UUID) -> None:
+    engine = admin_engine(admin_url)
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO agent_run_event_outbox (event_id, run_id, organization_id, "
+                "destination, idempotency_key, payload, status, attempts, available_at) "
+                "VALUES (:e, :r, :o, 'evaluation', :k, "
+                "'{\"event_type\": \"run.succeeded\"}', 'pending', 0, now())"
+            ),
+            {"e": f"evt-{org}", "r": f"run-{org}", "o": org, "k": f"eval-{org}"},
+        )
+    await engine.dispose()
+
+
+async def test_the_evaluation_handler_writes_as_the_app_role_under_the_runs_tenant(
+    seeded: str, app_engine: AsyncEngine, maint_engine: AsyncEngine
+) -> None:
+    """The relay is the maintenance role, which has no policy on evaluation rows."""
+    from src.api.services.evaluation_outbox_handler import EvaluationOutboxHandler
+    from src.api.services.outbox_relay import OutboxRelay
+    from src.core.evaluation.registry import build_default_registry
+
+    await _queue_evaluation(seeded, ORG_A)
+    handler = EvaluationOutboxHandler(
+        session_factory=async_sessionmaker(app_engine, expire_on_commit=False),
+        registry=build_default_registry(),
+    )
+    relay = OutboxRelay(
+        session_factory=async_sessionmaker(maint_engine, expire_on_commit=False),
+        event_publisher=AsyncMock(),
+        handlers={"evaluation": handler},
+    )
+
+    assert await relay.run_once() == 1
+
+    admin = admin_engine(seeded)
+    async with admin.begin() as connection:
+        orgs = {
+            row[0]
+            for row in await connection.execute(
+                text("SELECT organization_id FROM agent_evaluation_results")
+            )
+        }
+    await admin.dispose()
+    assert orgs == {ORG_A}
+
+
+async def test_the_evaluation_handler_cannot_deliver_on_the_maintenance_role(
+    seeded: str, maint_engine: AsyncEngine
+) -> None:
+    """Negative control: without the app role the write is refused, not skipped."""
+    from src.api.services.evaluation_outbox_handler import EvaluationOutboxHandler
+    from src.api.services.outbox_relay import OutboxRelay
+    from src.core.evaluation.registry import build_default_registry
+
+    await _queue_evaluation(seeded, ORG_B)
+    maint_factory = async_sessionmaker(maint_engine, expire_on_commit=False)
+    relay = OutboxRelay(
+        session_factory=maint_factory,
+        event_publisher=AsyncMock(),
+        handlers={
+            "evaluation": EvaluationOutboxHandler(
+                session_factory=maint_factory, registry=build_default_registry()
+            )
+        },
+    )
+
+    assert await relay.run_once() == 0

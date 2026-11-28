@@ -40,15 +40,6 @@ KNOWN_UNREACHABLE: frozenset[str] = frozenset(
         "src.core.claims.citation_render",
         "src.core.claims.citation_validation",
         "src.core.contracts.citation",
-        # Storage, registry and dispatcher land before their only caller: the
-        # outbox handler registered in src/api/main.py (P10-A2). Remove these
-        # when that wiring merges.
-        "src.core.evaluation",
-        "src.core.evaluation.coverage",
-        "src.core.evaluation.dispatcher",
-        "src.core.evaluation.events",
-        "src.core.evaluation.registry",
-        "src.repositories.evaluation_result_repository",
         # Its production callers are the run-recovery and evaluator-lease owners
         # (P03-B, P10-A, P12); delete this line when the first one lands.
         "src.repositories.model_call_reservation_repository",

@@ -18,6 +18,7 @@ happens on a real restart.
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -356,3 +357,77 @@ async def test_main_lifespan_starts_and_stops_the_run_event_wakeup_subscriber(
         assert events == ["built", "start"]
 
     assert events == ["built", "start", "stop"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_main_lifespan_registers_the_evaluation_handler_only_when_enabled(
+    test_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    from src.api import main
+    from src.api.services import (
+        agent_execution_service,
+        masr_routing_service,
+        outbox_relay,
+        supervisor_coordination_service,
+        talkhier_session_service,
+    )
+    from src.models.db import session as db_session_module
+
+    db_session_module._engine = None
+    db_session_module._async_session_factory = None
+    connection_url = test_engine.url.render_as_string(hide_password=False)
+    monkeypatch.setattr(main.settings, "DATABASE_URL", connection_url)
+    monkeypatch.setattr(main.settings, "MAINTENANCE_DATABASE_URL", connection_url)
+
+    class _Runtime:
+        router = SimpleNamespace(route=AsyncMock())
+
+        async def close(self) -> None:
+            return None
+
+    class _LifespanService:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def close(self) -> None:
+            return None
+
+    captured: dict[str, object] = {}
+
+    class _RecordingRelay:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs["handlers"])
+
+        def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+    monkeypatch.setattr(main.settings, "EVALUATION_DISPATCH_ENABLED", enabled)
+    monkeypatch.setattr(outbox_relay, "OutboxRelay", _RecordingRelay)
+
+    monkeypatch.setattr(main.MASRRuntime, "create", AsyncMock(return_value=_Runtime()))
+    monkeypatch.setattr(main.settings, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(main.event_publisher, "initialize", AsyncMock())
+    monkeypatch.setattr(main.event_publisher, "shutdown", AsyncMock())
+    monkeypatch.setattr(
+        agent_execution_service,
+        "configure_agent_execution_service",
+        lambda **_kwargs: AsyncMock(),
+    )
+    monkeypatch.setattr(masr_routing_service, "MASRRoutingService", _LifespanService)
+    monkeypatch.setattr(
+        talkhier_session_service, "TalkHierSessionService", _LifespanService
+    )
+    monkeypatch.setattr(
+        supervisor_coordination_service,
+        "SupervisorCoordinationService",
+        _LifespanService,
+    )
+
+    with TestClient(FastAPI(lifespan=main.lifespan)):
+        pass
+
+    assert list(captured) == (["evaluation"] if enabled else [])
