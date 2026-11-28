@@ -32,7 +32,6 @@ KNOWN_UNSERVED = {
     ("GET", "/runs/{}"),
     ("POST", "/runs/{}/cancel"),
     ("GET", "/runs/{}/tasks"),
-    ("GET", "/runs/{}/evidence"),
     ("GET", "/runs/{}/artifacts"),
     ("GET", "/runs/{}/evaluations"),
     ("GET", "/workflows/{}"),
