@@ -112,7 +112,7 @@ pytestmark.append(pytest.mark.asyncio(loop_scope="module"))
 
 def _orm_default(column: Any) -> str:
     arg = column.server_default.arg
-    return str(getattr(arg, "text", arg))
+    return str(getattr(arg, "text", arg)).split("::")[0].strip("'")
 
 
 def _db_default(rendered: str) -> str:
