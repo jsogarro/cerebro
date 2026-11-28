@@ -21,6 +21,26 @@ services:
       - cerebro-prod
     restart: "no"
 
+  # One-shot: migrates as the schema owner, so only this container holds that
+  # credential; the API runs as cerebro_app with SKIP_MIGRATIONS=1.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    entrypoint: ["alembic"]
+    command: ["upgrade", "head"]
+    environment:
+      - MIGRATION_DATABASE_URL=postgresql+asyncpg://cerebro_migrator:${CEREBRO_MIGRATOR_PASSWORD:?}@postgres:5432/research_db
+    depends_on:
+      db-roles:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    networks:
+      - cerebro-prod
+    restart: "no"
+
   # FastAPI Application (Production)
   api:
     build:
@@ -33,7 +53,7 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://cerebro_app:${CEREBRO_APP_PASSWORD:?}@postgres:5432/research_db
-      - MIGRATION_DATABASE_URL=postgresql+asyncpg://cerebro_migrator:${CEREBRO_MIGRATOR_PASSWORD:?}@postgres:5432/research_db
+      - SKIP_MIGRATIONS=1
       - MAINTENANCE_DATABASE_URL=postgresql+asyncpg://cerebro_maint:${CEREBRO_MAINT_PASSWORD:?}@postgres:5432/research_db
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       # Direct execution uses the FastAPI-owned in-process MASR runtime.
@@ -55,7 +75,7 @@ services:
       
       # Performance settings
     depends_on:
-      db-roles:
+      migrate:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy

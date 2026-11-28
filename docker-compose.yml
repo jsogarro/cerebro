@@ -1,6 +1,44 @@
 version: '3.9'
 
 services:
+  # One-shots: roles and migrations run with the admin and owner credentials,
+  # which the API container never holds.
+  db-roles:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    entrypoint: ["python", "/docker/apply_roles.py"]
+    environment:
+      - ROLES_ADMIN_DATABASE_URL=postgresql+asyncpg://research:research123@postgres:5432/research_db
+      - CEREBRO_MIGRATOR_PASSWORD=migrator-dev-only
+      - CEREBRO_APP_PASSWORD=app-dev-only
+      - CEREBRO_MAINT_PASSWORD=maint-dev-only
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - research-network
+    restart: "no"
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    entrypoint: ["alembic"]
+    command: ["upgrade", "head"]
+    environment:
+      - MIGRATION_DATABASE_URL=postgresql+asyncpg://cerebro_migrator:migrator-dev-only@postgres:5432/research_db
+    depends_on:
+      db-roles:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    networks:
+      - research-network
+    restart: "no"
+
   # FastAPI Application
   api:
     build:
@@ -27,11 +65,7 @@ services:
       - SOURCE_SNAPSHOT_DIR=/var/lib/cerebro/source_snapshots
       # The runtime is bound by row-level security; migrations run as the owner.
       - DATABASE_URL=postgresql+asyncpg://cerebro_app:app-dev-only@postgres:5432/research_db
-      - MIGRATION_DATABASE_URL=postgresql+asyncpg://cerebro_migrator:migrator-dev-only@postgres:5432/research_db
-      - ROLES_ADMIN_DATABASE_URL=postgresql+asyncpg://research:research123@postgres:5432/research_db
-      - CEREBRO_MIGRATOR_PASSWORD=migrator-dev-only
-      - CEREBRO_APP_PASSWORD=app-dev-only
-      - CEREBRO_MAINT_PASSWORD=maint-dev-only
+      - SKIP_MIGRATIONS=1
       - MAINTENANCE_DATABASE_URL=postgresql+asyncpg://cerebro_maint:maint-dev-only@postgres:5432/research_db
       - REDIS_URL=redis://redis:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
@@ -46,6 +80,8 @@ services:
       - MEMORY_INFORMED_ROUTING_ENABLED=${MEMORY_INFORMED_ROUTING_ENABLED:-false}
       - MCP_SERVER_ENABLED=${MCP_SERVER_ENABLED:-true}
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

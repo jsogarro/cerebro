@@ -9,6 +9,9 @@ and omits both from its INSERTs, but the migrations that created these tables
 gave the NOT NULL columns no default, so on a migrated PostgreSQL database
 every first write to them failed. Tests that build the schema with
 ``create_all`` never saw it.
+
+``oauth_accounts.first_connected_at`` is corrected here too: its default was the
+timestamp of the migration run, so every row inserted later would have carried it.
 """
 
 from collections.abc import Sequence
@@ -37,9 +40,13 @@ def upgrade() -> None:
     for table in _TABLES:
         for column in ("created_at", "updated_at"):
             op.alter_column(table, column, server_default=sa.func.now())
+    op.alter_column(
+        "oauth_accounts", "first_connected_at", server_default=sa.func.now()
+    )
 
 
 def downgrade() -> None:
     for table in _TABLES:
         for column in ("created_at", "updated_at"):
             op.alter_column(table, column, server_default=None)
+    op.alter_column("oauth_accounts", "first_connected_at", server_default=None)

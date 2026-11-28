@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.ai_brain.memory.multi_tier_memory import MultiTierMemorySystem
 from src.auth.jwt_service import JWTService, JWTServiceUnavailableError
 from src.middleware.auth_middleware import get_current_active_user, get_jwt_service
+from src.middleware.tenant_context import set_postgres_tenant_context
 from src.models.db.audit_log import AuditEventType
 from src.models.db.generated_report import GeneratedReport
 from src.models.db.research_project import ResearchProject
@@ -83,6 +84,15 @@ async def delete_user_gdpr(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Token revocation unavailable; erasure not performed",
         ) from exc
+
+    # Every table below is under row-level security, so the erasure runs in the
+    # target user's organization. ``users`` carries no policy, which is how the
+    # organization is read before the tenant is set.
+    organization_id = await db.scalar(
+        select(User.organization_id).where(User.id == user_id)
+    )
+    if organization_id is not None:
+        await set_postgres_tenant_context(db, str(organization_id))
 
     # Core deletes bypass ORM cascades, and these FKs have no ON DELETE, so
     # delete dependents first. report_formats go via the DB-level cascade.

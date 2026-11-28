@@ -6,22 +6,15 @@ session that forgets its tenant reads nothing and cannot insert.
 """
 
 import uuid
-from collections.abc import AsyncIterator, Callable, Iterator
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 import pytest_asyncio
+from prometheus_client import REGISTRY
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
-from testcontainers.postgres import PostgresContainer
 
 from src.api.services.direct_execution_service import (
     DirectExecutionService,
@@ -34,64 +27,19 @@ from src.repositories.model_call_reservation_repository import (
 )
 from src.repositories.run_lifecycle_repository import ResearchRunJournalOwner
 from tests.integration.crash_fixtures import make_binding, make_project
-from tests.integration.test_rls_roles import (
-    ALEMBIC,
-    _apply_roles,
-    _role_url,
-    _run,
+from tests.integration.rls_fixtures import (  # noqa: F401
+    Factory,
+    admin_fixture,
+    app_fixture,
+    engines_fixture,
+    maint_fixture,
+    server_fixture,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 ORG_A = str(uuid.uuid4())
 ORG_B = str(uuid.uuid4())
-Factory = Callable[[], AsyncSession]
-
-
-@pytest.fixture(name="server", scope="module")
-def server_fixture() -> Iterator[PostgresContainer]:
-    with PostgresContainer(image="postgres:16-alpine") as container:
-        yield container
-
-
-@pytest_asyncio.fixture(name="engines", scope="module", loop_scope="module")
-async def engines_fixture(
-    server: PostgresContainer,
-) -> AsyncIterator[dict[str, AsyncEngine]]:
-    host, port = server.get_container_host_ip(), server.get_exposed_port(5432)
-    admin_url = f"postgresql://{server.username}:{server.password}@{host}:{port}/{server.dbname}"
-    _apply_roles(admin_url)
-    _run([str(ALEMBIC), "upgrade", "head"], admin_url)
-    _apply_roles(admin_url)
-    engines = {
-        "admin": create_async_engine(
-            admin_url.replace("postgresql://", "postgresql+asyncpg://")
-        ),
-        "app": create_async_engine(_role_url(admin_url, "cerebro_app")),
-        "maint": create_async_engine(_role_url(admin_url, "cerebro_maint")),
-    }
-    yield engines
-    for engine in engines.values():
-        await engine.dispose()
-
-
-def _factory(engine: AsyncEngine) -> Factory:
-    return async_sessionmaker(engine, expire_on_commit=False)
-
-
-@pytest.fixture(name="app")
-def app_fixture(engines: dict[str, AsyncEngine]) -> Factory:
-    return _factory(engines["app"])
-
-
-@pytest.fixture(name="maint")
-def maint_fixture(engines: dict[str, AsyncEngine]) -> Factory:
-    return _factory(engines["maint"])
-
-
-@pytest.fixture(name="admin")
-def admin_fixture(engines: dict[str, AsyncEngine]) -> Factory:
-    return _factory(engines["admin"])
 
 
 def _service(app: Factory, maint: Factory | None = None) -> DirectExecutionService:
@@ -162,6 +110,16 @@ async def clean(admin: Factory) -> None:
 pytestmark.append(pytest.mark.asyncio(loop_scope="module"))
 
 
+def _orm_default(column: Any) -> str:
+    arg = column.server_default.arg
+    return str(getattr(arg, "text", arg))
+
+
+def _db_default(rendered: str) -> str:
+    """``'1.0'::character varying`` -> ``1.0``; ``now()`` stays as it is."""
+    return rendered.split("::")[0].strip("'")
+
+
 async def test_the_migrated_schema_carries_every_orm_server_default(
     admin: Factory,
 ) -> None:
@@ -170,30 +128,26 @@ async def test_the_migrated_schema_carries_every_orm_server_default(
     async with admin() as session:
         rows = await session.execute(
             text(
-                "SELECT table_name, column_name FROM information_schema.columns "
-                "WHERE table_schema = 'public' AND column_default IS NOT NULL"
+                "SELECT table_name, column_name, column_default "
+                "FROM information_schema.columns WHERE table_schema = 'public'"
             )
         )
-        defaulted = {(table, column) for table, column in rows}
-        existing = {
-            (table, column)
-            for table, column in await session.execute(
-                text(
-                    "SELECT table_name, column_name FROM information_schema.columns "
-                    "WHERE table_schema = 'public'"
-                )
-            )
-        }
-    missing = sorted(
-        (table.name, column.name)
+        in_db = {(table, column): default for table, column, default in rows}
+    wrong = sorted(
+        (
+            table.name,
+            column.name,
+            _orm_default(column),
+            in_db[(table.name, column.name)],
+        )
         for table in Base.metadata.sorted_tables
         for column in table.columns
         if column.server_default is not None
-        and (table.name, column.name) in existing
-        and (table.name, column.name) not in defaulted
+        and (table.name, column.name) in in_db
+        and _db_default(in_db[(table.name, column.name)] or "") != _orm_default(column)
     )
 
-    assert not missing
+    assert not wrong
 
 
 async def test_a_run_lives_its_whole_life_under_the_app_role(
@@ -372,3 +326,36 @@ async def test_a_live_run_of_another_replica_is_restored_not_failed(
     restarted = _service(app, maint)
     assert await restarted.restore_active_executions() == 1
     assert await _statuses(admin) == ["queued"]
+
+
+async def _orphan_run(admin: Factory) -> None:
+    """An interrupted run with no organization, which no tenant scope can reach."""
+    async with admin() as session:
+        await session.execute(
+            text(
+                "INSERT INTO agent_runs (id, run_id, tenant_id, organization_id, "
+                "workflow_definition_id, workflow_definition_version, routing_policy_id, "
+                "routing_policy_version, idempotency_key, requested_by, status, "
+                "owner_instance_id, lease_expires_at) VALUES (gen_random_uuid(), "
+                "'orphan', 't', NULL, 'w', '1', 'p', '1', 'k', 'u', 'running', 'dead', "
+                "clock_timestamp() - interval '1 second')"
+            )
+        )
+        await session.commit()
+
+
+def _skipped() -> float:
+    return REGISTRY.get_sample_value("cerebro_run_recovery_skipped_total") or 0.0
+
+
+async def test_a_recovery_scan_counts_a_run_with_no_organization(
+    app: Factory, maint: Factory, admin: Factory
+) -> None:
+    await _orphan_run(admin)
+    before = _skipped()
+
+    assert await _service(app, maint).reconcile_expired_runs() == 0
+    assert await _service(app, maint).restore_active_executions() == 0
+
+    assert _skipped() == before + 2
+    assert await _statuses(admin) == ["running"]

@@ -51,6 +51,7 @@ from src.core.observability import (
     run_cancellation_delay_seconds,
     run_ownership_expired_total,
     run_reconciliation_failures_total,
+    run_recovery_skipped_total,
 )
 from src.core.telemetry import count_tokens, telemetry_enabled
 from src.models.db.run_event import EVENT_ENVELOPE_VERSION
@@ -682,6 +683,17 @@ class DirectExecutionService:
         )
 
         return token_count
+
+    @staticmethod
+    def _has_no_organization(run_row: Any) -> bool:
+        """Whether recovery must skip this run because no tenant scope can reach it."""
+        if run_row.organization_id is not None:
+            return False
+        run_recovery_skipped_total.inc()
+        logger.warning(
+            "run_recovery_skipped_without_organization", run_id=run_row.run_id
+        )
+        return True
 
     def _tenant_session(
         self, organization_id: str | uuid.UUID | None
@@ -1770,6 +1782,8 @@ class DirectExecutionService:
                 if run_row.run_id in parked:
                     # This process is still trying to record its outcome.
                     continue
+                if self._has_no_organization(run_row):
+                    continue
                 # The maintenance role reads only the run rows; the rest of the
                 # run is rebuilt under its own tenant.
                 async with self._tenant_session(run_row.organization_id) as session:
@@ -2454,6 +2468,8 @@ class DirectExecutionService:
                 runs = await scan_repo.list_non_terminal_runs(organization_id=None)
                 expired = {row.run_id for row in await scan_repo.list_expired_runs()}
             for run_row in runs:
+                if self._has_no_organization(run_row):
+                    continue
                 # Everything past the scan is the run's own tenant's business.
                 async with self._tenant_session(run_row.organization_id) as session:
                     execution_status = await self._rehydrate_execution(
