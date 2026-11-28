@@ -154,7 +154,7 @@ Symptom: `ResourceExhausted: 429 Quota exceeded`.
 2. Two limiters apply: the HTTP rate limiter (`MAX_REQUESTS_PER_MINUTE`, default 100, on requests to the API) and the Gemini token bucket (10 calls per 60 seconds and 2 concurrent per service instance by default). See [performance tuning](performance-tuning.md). Reduce request volume or wait for the provider quota to reset.
 3. Watch model volume and cost with the `llm_*` series (the token is required). These series cover only the provider package; calls made through `GeminiService`, the default client, are not counted ([LLM providers](reference/10-llm-providers.md)):
    ```bash
-   curl -s -H "Authorization: Bearer <access-token>" http://localhost:8000/metrics | grep -E "llm_call_duration_seconds|llm_tokens_total|llm_cost_usd_total"
+   curl -s -H "Authorization: Bearer <metrics-token>" http://localhost:8000/metrics | grep -E "llm_call_duration_seconds|llm_tokens_total|llm_cost_usd_total"
    ```
 
 Provider selection is described in [LLM providers](reference/10-llm-providers.md).

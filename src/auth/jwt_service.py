@@ -11,7 +11,7 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Final
 from uuid import uuid4
 
 import redis.asyncio as redis
@@ -26,6 +26,10 @@ from src.core.config import settings
 from src.utils.serialization import deserialize_from_cache, serialize_for_cache
 
 logger = structlog.get_logger(__name__)
+
+
+METRICS_AUDIENCE: Final = "cerebro-metrics"
+METRICS_PERMISSION: Final = "metrics:read"
 
 
 @dataclass(frozen=True)
@@ -354,14 +358,41 @@ class JWTService:
             expires_in=self.access_token_expire_minutes * 60,
         )
 
+    def generate_metrics_token(self) -> str:
+        """Mint the scraper credential, valid for ``METRICS_TOKEN_EXPIRE_DAYS``.
+
+        Access tokens last minutes, which a secret-manager-held scrape token
+        cannot survive; this one carries its own ``exp`` instead.
+        """
+        now = datetime.now(UTC)
+        token: str = jwt.encode(
+            {
+                "sub": "metrics-scraper",
+                "jti": str(uuid4()),
+                "iat": now,
+                "iat_ns": time.time_ns(),
+                "exp": now + timedelta(days=settings.METRICS_TOKEN_EXPIRE_DAYS),
+                "token_type": "access",
+                "aud": METRICS_AUDIENCE,
+                "permissions": [METRICS_PERMISSION],
+            },
+            self.private_key,
+            algorithm=self.algorithm,
+        )
+        return token
+
     async def validate_token(
         self,
         token: str,
         token_type: str = "access",
         verify_blacklist: bool = True,
+        audience: str | None = None,
     ) -> TokenPayload:
         """
         Validate and decode JWT token.
+
+        ``audience`` is required for a token that carries ``aud`` and rejects
+        one that does not; with ``None`` any token carrying ``aud`` is refused.
 
         Args:
             token: JWT token to validate
@@ -380,8 +411,13 @@ class JWTService:
                 token,
                 self.public_key,
                 algorithms=[self.algorithm],
+                audience=audience,
                 options={"verify_exp": True},
             )
+
+            # python-jose skips the audience check when the claim is absent.
+            if audience is not None and payload.get("aud") != audience:
+                raise JWTError("Invalid audience")
 
             # Verify token type
             if payload.get("token_type") != token_type:

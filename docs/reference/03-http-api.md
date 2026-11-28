@@ -7,7 +7,7 @@ The FastAPI application in `src/api/main.py` serves the HTTP and WebSocket API u
 | Feature | Status | Entry point | Source |
 |---|---|---|---|
 | Health, readiness, liveness probes | Active | `GET /health`, `GET /ready`, `GET /live` | `src/api/routes/health.py` (`router`) |
-| Prometheus metrics | Active | `GET /metrics` (bearer token required) | `src/api/main.py` (`metrics_app`) |
+| Prometheus metrics | Active | `GET /metrics` (metrics credential required) | `src/api/main.py` |
 | Authentication | Active | `/api/v1/auth/*` | `src/api/auth/auth_router.py` (`router`) |
 | User data erasure | Active | `DELETE /api/v1/users/{user_id}/gdpr` | `src/api/routes/users.py` (`delete_user_gdpr`) |
 | Research projects | Active | `/api/v1/research/*` | `src/api/routes/research.py` (`router`) |
@@ -90,7 +90,7 @@ The domain routers add `get_current_token` as a router-level or route-level depe
 | `GET` | `/health` | Returns `{"status": "healthy", "service": "research-platform-api"}`. | 200 | none |
 | `GET` | `/ready` | Probes the database (`SELECT 1`), Redis (`PING`), the audit logger (its flush task is running) and the JWT signing keys (the shared `JWTService` loads), each with a 2-second timeout. Returns `{"status": "ready" \| "not_ready", "service", "checks": {"database", "redis", "audit_logger", "jwt_keys", "providers"}}`. The first four are `ok` or `unavailable`. `providers` is informational: `unknown` when any provider is configured (nothing probes a provider) or `unconfigured`; it never affects the status code. | 200 | 503 when any of the first four checks is `unavailable` |
 | `GET` | `/live` | Returns `{"status": "alive"}`. | 200 | none |
-| `GET` | `/metrics` | Prometheus exposition from `prometheus_client.make_asgi_app()`. Requires a bearer token. | 200 | 401 |
+| `GET` | `/metrics` | Prometheus exposition from `prometheus_client.make_asgi_app()`. Requires the metrics credential (`aud` `cerebro-metrics`, permission `metrics:read`); mounted only when `ENABLE_METRICS` is true. | 200 | 401, 403 |
 | `GET` | `/ws/health` | WebSocket service statistics; see [Fixed responses](#fixed-responses). | 200 | none |
 
 ## Auth

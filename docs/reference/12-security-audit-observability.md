@@ -122,7 +122,7 @@ Rate-limit behaviour and its response headers are documented in the [HTTP API](0
 
 ## Metrics
 
-`GET /metrics` serves the default Prometheus registry through an ASGI app mounted in `src/api/main.py`. It is not in the public-route allowlist, so a scrape needs a valid bearer token like any other protected route. Series defined in `src/core/observability.py`:
+`GET /metrics` serves the default Prometheus registry through an ASGI app mounted in `src/api/main.py`. The mount exists only when `ENABLE_METRICS` is true. A scrape needs a bearer token whose `aud` is `cerebro-metrics` and whose permissions include `metrics:read`; tenant tokens and other audiences are denied. Series defined in `src/core/observability.py`:
 
 | Series | Type | Labels |
 |---|---|---|

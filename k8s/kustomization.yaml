@@ -19,9 +19,12 @@ resources:
   - hpa.yaml
   - networkpolicy.yaml
 
+# CD replaces this placeholder digest with the digest of the image built from
+# the commit under deployment (`kustomize edit set image NAME=NAME@sha256:...`).
+# A tag is never deployed.
 images:
   - name: gcr.io/PROJECT_ID/research-platform-api
-    newTag: latest
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 
 configMapGenerator:
   - name: research-platform-config
