@@ -227,6 +227,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # only.
             if "sqlite" in settings.DATABASE_URL:
                 from src.models.db.base import Base
+                from src.models.db.evaluation_result import AgentEvaluationResult
+                from src.models.db.model_call_reservation import ModelCallReservation
                 from src.models.db.research_project import ResearchProject as DBProject
                 from src.models.db.research_result import ResearchResult
                 from src.models.db.run_config_snapshot import AgentRunConfigSnapshot
@@ -251,6 +253,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         AgentRunConfigSnapshot,
                         AgentRunEvent,
                         AgentRunEventOutbox,
+                        AgentEvaluationResult,
+                        ModelCallReservation,
                     ]
                     if t.__tablename__ in Base.metadata.tables
                 ]

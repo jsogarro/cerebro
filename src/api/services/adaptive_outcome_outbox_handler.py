@@ -173,9 +173,11 @@ class AdaptiveOutcomeOutboxHandler:
         *,
         session_factory: Callable[[], AsyncSession],
         outcome_recorder: RoutingOutcomeRecorder,
+        max_attempts: int = 10,
     ) -> None:
         self._session_factory = session_factory
         self._outcome_recorder = outcome_recorder
+        self._max_attempts = max_attempts
 
     async def __call__(self, row: AgentRunEventOutbox) -> bool:
         envelope = row.payload or {}
@@ -187,13 +189,17 @@ class AdaptiveOutcomeOutboxHandler:
 
         organization = row.organization_id
         event_payload = envelope.get("payload") or {}
+        eval_settled = True
 
         async with tenant_session(self._session_factory, organization) as session:
             if event_type == EVALUATION_TRIGGER_EVENT:
                 eval_settled = await self._evaluation_settled(
                     session, event_id=row.event_id, organization_id=organization
                 )
-                if not eval_settled:
+                # Defer while sibling evaluation is still in progress, except on
+                # the final delivery attempt where falling back to unavailable
+                # prevents dead-lettering the run's adaptive outcome.
+                if not eval_settled and (row.attempts or 0) < self._max_attempts:
                     return False
 
             run_row = (
@@ -227,9 +233,11 @@ class AdaptiveOutcomeOutboxHandler:
                 await EvaluationResultRepository(session).list_evaluations_for_run(
                     row.run_id,
                     organization_id=organization,
+                    trigger=EVALUATION_TRIGGER_EVENT,
+                    limit=10_000,
                     latest_only=True,
                 )
-                if event_type == EVALUATION_TRIGGER_EVENT
+                if event_type == EVALUATION_TRIGGER_EVENT and eval_settled
                 else []
             )
 
@@ -295,11 +303,10 @@ class AdaptiveOutcomeOutboxHandler:
         result = await self._outcome_recorder.record(decision, observation)
         return not result.retryable
 
-    @staticmethod
     async def _evaluation_settled(
-        session: AsyncSession, *, event_id: str, organization_id: Any
+        self, session: AsyncSession, *, event_id: str, organization_id: Any
     ) -> bool:
-        """True once any sibling evaluation outbox row finished or dead-lettered."""
+        """True once any sibling evaluation outbox row finished or exhausted retries."""
         eval_row = (
             await session.execute(
                 select(AgentRunEventOutbox).where(
@@ -315,6 +322,7 @@ class AdaptiveOutcomeOutboxHandler:
             return True
         return eval_row.status == EventDeliveryStatus.FAILED.value and (
             "dead-lettered" in (eval_row.last_error or "")
+            or (eval_row.attempts or 0) >= self._max_attempts
         )
 
 
