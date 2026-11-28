@@ -4,14 +4,14 @@ Tests for Literature Review Agent.
 Following TDD principles - tests written before implementation.
 """
 
-from unittest.mock import AsyncMock, patch
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.agents.models import AgentResult, AgentTask
 from src.agents.schemas.literature_review import (
     AcademicSource,
-    LiteratureAnalysisSchema,
 )
 from src.core.config import settings
 
@@ -23,29 +23,41 @@ def _mock_gemini_two_call(
     methodologies_used=None,
     quality_assessment="Good",
 ):
-    """Build an AsyncMock for gemini_service whose generate_structured_content
-    returns the source list on the first call and the analysis on the second.
+    """Stub a search that retrieved ``sources`` and a model reply analysing them.
 
-    Production calls generate_structured_content twice in sequence:
-    1. _search_sources_structured(prompt, SourceListSchema) -> only `.sources` is read
-    2. _analyze_sources_structured(prompt, LiteratureAnalysisSchema) -> reads
-       .key_findings, .research_gaps, .methodologies_used, .quality_assessment
-
-    LiteratureAnalysisSchema satisfies both shapes (it has .sources too).
+    Returns ``(mcp_integration, model_reply)`` for ``_agent``.
     """
-    mock = AsyncMock()
-    mock.generate_structured_content = AsyncMock(
-        side_effect=[
-            LiteratureAnalysisSchema(sources=sources),
-            LiteratureAnalysisSchema(
-                key_findings=key_findings or [],
-                research_gaps=research_gaps or [],
-                methodologies_used=methodologies_used or [],
-                quality_assessment=quality_assessment,
-            ),
-        ]
+    mcp = MagicMock(enable_fallback=False)
+    mcp.search_academic_sources = AsyncMock(
+        return_value={
+            "success": True,
+            "data_source": "mcp_tools",
+            "sources": [s.model_dump() for s in sources],
+            "total_found": len(sources),
+        }
     )
-    return mock
+    mcp.build_knowledge_graph = AsyncMock(return_value={"entities": []})
+    mcp.format_citations = AsyncMock(return_value={"citations": []})
+    reply = json.dumps(
+        {
+            "literature_analysis": {
+                "key_findings": key_findings or [],
+                "research_gaps": research_gaps or [],
+                "methodologies_used": methodologies_used or [],
+                "quality_assessment": quality_assessment,
+            }
+        }
+    )
+    return mcp, reply
+
+
+def _agent(grounded, **kwargs):
+    from src.agents.literature_review_agent import LiteratureReviewAgent
+
+    mcp, reply = grounded
+    agent = LiteratureReviewAgent(config={"mcp_integration": mcp}, **kwargs)
+    agent._generate_with_routing = AsyncMock(return_value=(reply, 0.9))
+    return agent
 
 
 @pytest.fixture(autouse=True)
@@ -65,7 +77,6 @@ class TestLiteratureReviewAgent:
     @pytest.mark.asyncio
     async def test_execute_literature_review(self):
         """Test successful literature review execution."""
-        from src.agents.literature_review_agent import LiteratureReviewAgent
 
         mock_gemini = _mock_gemini_two_call(
             sources=[
@@ -91,7 +102,7 @@ class TestLiteratureReviewAgent:
             quality_assessment="High quality sources with peer review",
         )
 
-        agent = LiteratureReviewAgent(gemini_service=mock_gemini)
+        agent = _agent(mock_gemini)
 
         task = AgentTask(
             id="lit-001",
@@ -117,7 +128,6 @@ class TestLiteratureReviewAgent:
     @pytest.mark.asyncio
     async def test_source_ranking(self):
         """Test that sources are ranked by relevance."""
-        from src.agents.literature_review_agent import LiteratureReviewAgent
 
         mock_gemini = _mock_gemini_two_call(
             sources=[
@@ -137,7 +147,7 @@ class TestLiteratureReviewAgent:
             quality_assessment="Good",
         )
 
-        agent = LiteratureReviewAgent(gemini_service=mock_gemini)
+        agent = _agent(mock_gemini)
 
         task = AgentTask(
             id="lit-002",
@@ -155,7 +165,6 @@ class TestLiteratureReviewAgent:
 
     @pytest.mark.asyncio
     async def test_research_gap_identification(self):
-        from src.agents.literature_review_agent import LiteratureReviewAgent
 
         mock_gemini = _mock_gemini_two_call(
             sources=[
@@ -173,7 +182,7 @@ class TestLiteratureReviewAgent:
             quality_assessment="Moderate",
         )
 
-        agent = LiteratureReviewAgent(gemini_service=mock_gemini)
+        agent = _agent(mock_gemini)
 
         task = AgentTask(
             id="lit-003",
@@ -212,7 +221,6 @@ class TestLiteratureReviewAgent:
     @pytest.mark.asyncio
     async def test_caching_literature_search(self):
         """Test that literature searches are cached."""
-        from src.agents.literature_review_agent import LiteratureReviewAgent
 
         mock_cache = AsyncMock()
         mock_cache.get = AsyncMock(return_value=None)
@@ -230,9 +238,7 @@ class TestLiteratureReviewAgent:
             quality_assessment="Good",
         )
 
-        agent = LiteratureReviewAgent(
-            gemini_service=mock_gemini, cache_client=mock_cache
-        )
+        agent = _agent(mock_gemini, cache_client=mock_cache)
 
         task = AgentTask(
             id="lit-005",
@@ -251,7 +257,6 @@ class TestLiteratureReviewAgent:
     @pytest.mark.asyncio
     async def test_confidence_scoring(self):
         """Test confidence scoring based on source quality and quantity."""
-        from src.agents.literature_review_agent import LiteratureReviewAgent
 
         mock_gemini_high = _mock_gemini_two_call(
             sources=[
@@ -266,7 +271,7 @@ class TestLiteratureReviewAgent:
             quality_assessment="High quality peer-reviewed sources",
         )
 
-        agent_high = LiteratureReviewAgent(gemini_service=mock_gemini_high)
+        agent_high = _agent(mock_gemini_high)
 
         task = AgentTask(
             id="lit-006",
@@ -294,7 +299,7 @@ class TestLiteratureReviewAgent:
             quality_assessment="Limited sources available",
         )
 
-        agent_low = LiteratureReviewAgent(gemini_service=mock_gemini_low)
+        agent_low = _agent(mock_gemini_low)
 
         result_low = await agent_low.execute(task)
         assert result_low.confidence < result_high.confidence
@@ -335,14 +340,19 @@ class TestLiteratureReviewAgent:
     @pytest.mark.asyncio
     async def test_gemini_error_handling(self):
         """A failing model call is reported as a failed task, not as zero sources."""
-        from src.agents.literature_review_agent import LiteratureReviewAgent
 
-        mock_gemini = AsyncMock()
-        mock_gemini.generate_structured_content = AsyncMock(
+        agent = _agent(
+            _mock_gemini_two_call(
+                [
+                    AcademicSource(
+                        title="P", authors=["A"], year=2024, relevance_score=0.9
+                    )
+                ]
+            )
+        )
+        agent._generate_with_routing = AsyncMock(
             side_effect=Exception("Gemini API error")
         )
-
-        agent = LiteratureReviewAgent(gemini_service=mock_gemini)
 
         task = AgentTask(
             id="lit-007",
@@ -359,7 +369,6 @@ class TestLiteratureReviewAgent:
     @pytest.mark.asyncio
     async def test_depth_level_handling(self):
         """Test that agent respects research depth level."""
-        from src.agents.literature_review_agent import LiteratureReviewAgent
         from src.models.research_project import ResearchDepth
 
         mock_gemini = _mock_gemini_two_call(
@@ -375,7 +384,7 @@ class TestLiteratureReviewAgent:
             quality_assessment="Extensive coverage",
         )
 
-        agent = LiteratureReviewAgent(gemini_service=mock_gemini)
+        agent = _agent(mock_gemini)
 
         task = AgentTask(
             id="lit-008",
@@ -393,6 +402,35 @@ class TestLiteratureReviewAgent:
 
         assert len(result.output["sources_found"]) > 50
         assert "exhaustive" in result.output.get("search_strategy", "").lower()
+
+
+class TestModelNamedSourcesAreNeverEvidence:
+    """A model asked for papers invents them; with no search tool the agent
+    fails rather than let it."""
+
+    @pytest.mark.asyncio
+    async def test_an_llm_without_a_search_tool_fails_with_no_sources(self):
+        from src.agents.literature_review_agent import LiteratureReviewAgent
+
+        gemini = AsyncMock()
+        agent = LiteratureReviewAgent(gemini_service=gemini)
+        agent._generate_with_routing = AsyncMock()
+
+        result = await agent.execute(
+            AgentTask(
+                id="lit-gk-1",
+                agent_type="literature_review",
+                input_data={"query": "inflation"},
+            )
+        )
+
+        assert result.status == "failed"
+        assert result.output["error_code"] == "INSUFFICIENT_EVIDENCE"
+        assert result.output["analysis_status"] == "no_evidence"
+        assert result.output["sources_found"] == []
+        assert result.output["key_findings"] == []
+        gemini.generate_structured_content.assert_not_awaited()
+        agent._generate_with_routing.assert_not_awaited()
 
 
 class TestToolPathSearchesForReal:

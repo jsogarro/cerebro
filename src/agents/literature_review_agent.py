@@ -60,70 +60,54 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 self.log_info(f"Using cached result for task {task.id}")
                 return cached_result
 
-            # Search and analyze using structured output (consolidates source search + analysis)
-            if self.gemini_service and self.mcp_integration is None:
-                literature_analysis = await self._search_and_analyze_structured(
-                    task.input_data
+            academic_sources = await self._search_academic_sources(
+                task.input_data, task
+            )
+            # Only sources the tool boundary retrieved count, and when
+            # evidence is recorded only those that became evidence. Anything
+            # less is a failed run, never model-named or canned findings.
+            if not (
+                academic_sources.get("data_source") == "mcp_tools"
+                and academic_sources.get("sources")
+            ):
+                return self._failed_result(
+                    task,
+                    academic_sources,
+                    "INSUFFICIENT_EVIDENCE",
+                    str(
+                        academic_sources.get("error_code")
+                        or academic_sources.get("tool_outcome")
+                        or "no_sources_retrieved"
+                    ),
                 )
-                # Extract sources from structured response
-                academic_sources: dict[str, Any] = {
-                    "success": True,
-                    "sources": [s.model_dump() for s in literature_analysis.sources],
-                    "total_found": len(literature_analysis.sources),
-                    "databases_searched": ["gemini_knowledge"],
-                    "search_strategy": "LLM-assisted structured source identification and analysis",
-                }
-            else:
-                academic_sources = await self._search_academic_sources(
-                    task.input_data, task
+            if not self._select_sources(academic_sources):
+                return self._failed_result(
+                    task,
+                    academic_sources,
+                    "INSUFFICIENT_EVIDENCE",
+                    "no_source_became_evidence",
                 )
-                # Only sources the tool boundary retrieved count, and when
-                # evidence is recorded only those that became evidence. Anything
-                # less is a failed run, never model-named or canned findings.
-                if not (
-                    academic_sources.get("data_source") == "mcp_tools"
-                    and academic_sources.get("sources")
-                ):
-                    return self._failed_result(
-                        task,
-                        academic_sources,
-                        "INSUFFICIENT_EVIDENCE",
-                        str(
-                            academic_sources.get("error_code")
-                            or academic_sources.get("tool_outcome")
-                            or "no_sources_retrieved"
-                        ),
-                    )
-                if not self._select_sources(academic_sources):
-                    return self._failed_result(
-                        task,
-                        academic_sources,
-                        "INSUFFICIENT_EVIDENCE",
-                        "no_source_became_evidence",
-                    )
-                try:
-                    literature_analysis_dict = (
-                        await self._analyze_literature_with_gemini(
-                            task.input_data, academic_sources, task
-                        )
-                    )
-                except LiteratureAnalysisError as error:
-                    return self._failed_result(
-                        task, academic_sources, "ANALYSIS_FAILED", str(error)
-                    )
-                from src.agents.schemas import LiteratureAnalysisSchema
+            try:
+                literature_analysis_dict = await self._analyze_literature_with_gemini(
+                    task.input_data, academic_sources, task
+                )
+            except LiteratureAnalysisError as error:
+                return self._failed_result(
+                    task, academic_sources, "ANALYSIS_FAILED", str(error)
+                )
+            from src.agents.schemas import LiteratureAnalysisSchema
 
-                literature_analysis = LiteratureAnalysisSchema(
-                    sources=[],
-                    key_findings=literature_analysis_dict.get("key_findings", []),
-                    research_gaps=literature_analysis_dict.get("research_gaps", []),
-                    methodologies_used=literature_analysis_dict.get(
-                        "methodologies_used", []
-                    ),
-                    quality_assessment=literature_analysis_dict.get(
-                        "quality_assessment", ""
-                    ),
-                )
+            literature_analysis = LiteratureAnalysisSchema(
+                sources=[],
+                key_findings=literature_analysis_dict.get("key_findings", []),
+                research_gaps=literature_analysis_dict.get("research_gaps", []),
+                methodologies_used=literature_analysis_dict.get(
+                    "methodologies_used", []
+                ),
+                quality_assessment=literature_analysis_dict.get(
+                    "quality_assessment", ""
+                ),
+            )
 
             # Step 3: Build knowledge graph of relationships
             knowledge_graph = await self._build_literature_knowledge_graph(
@@ -166,16 +150,14 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
                 "databases_searched": academic_sources.get("databases_searched", []),
                 "formatted_citations": formatted_citations,
                 "knowledge_graph": knowledge_graph,
-                "analysis_status": "grounded"
-                if academic_sources.get("data_source") == "mcp_tools"
-                else "model_recalled",
+                "analysis_status": "grounded",
                 "source_evidence": academic_sources.get("source_evidence", {}),
                 # Reported by the tool boundary, not inferred here. The
                 # expression this replaces read `success` alone, and every
                 # fallback set `success: True` -- so a fabricated stand-in was
                 # labelled `mcp_tools`. The flag is now trustworthy, and taking
                 # the label from its source removes the inference entirely.
-                "data_source": academic_sources.get("data_source", "gemini_structured"),
+                "data_source": academic_sources["data_source"],
                 "mcp_integration_status": self._get_mcp_status(),
             }
 
@@ -746,113 +728,6 @@ class LiteratureReviewAgent(LLMWorkerAgentBase):
             blocks.append(line)
 
         return "\n\n".join(blocks)
-
-    async def _search_sources_structured(
-        self, input_data: dict[str, Any]
-    ) -> list[dict[str, Any]]:
-        """Find academic sources using structured output."""
-        from pydantic import BaseModel, Field
-
-        from src.agents.schemas.literature_review import AcademicSource
-
-        class SourceListSchema(BaseModel):
-            sources: list[AcademicSource] = Field(
-                description="List of academic sources"
-            )
-
-        query = input_data.get("query", "")
-        domains = input_data.get("domains", [])
-        max_sources = min(input_data.get("max_sources", 10), 10)
-        domains_str = ", ".join(domains) if domains else "general research"
-
-        prompt = f"""You are an academic research librarian. Identify {max_sources} real, published academic papers relevant to:
-
-"{query}"
-
-Domains: {domains_str}
-
-Requirements:
-- Only include papers you are confident actually exist
-- Prioritize influential, highly-cited papers from top venues (NeurIPS, ICML, Nature, Science, AAAI, ACL, etc.)
-- Include a mix of recent (2022-2025) and foundational papers
-- Provide accurate metadata: exact title, real author names, correct year, actual venue
-- Include 2-3 sentence abstracts
-- Include DOI when known"""
-
-        result = await self._generate_structured_with_routing(
-            prompt, SourceListSchema, task=None
-        )
-        self.log_info(f"Found {len(result.sources)} sources")
-        return [s.model_dump() for s in result.sources]
-
-    async def _analyze_sources_structured(
-        self, query: str, sources: list[dict[str, Any]]
-    ) -> dict[str, Any]:
-        """Analyze found sources using structured output."""
-        from src.agents.schemas import LiteratureAnalysisSchema
-
-        sources_text = "\n".join(
-            f"- {s.get('title', 'N/A')} ({s.get('year', 'N/A')}): {s.get('abstract', 'N/A')[:150]}"
-            for s in sources[:10]
-        )
-
-        prompt = f"""You are a research analyst. Based on these {len(sources)} academic papers:
-
-{sources_text}
-
-Research Question: "{query}"
-
-Analyze the literature and provide:
-1. key_findings: 5-8 major findings synthesized across all papers
-2. research_gaps: 3-5 gaps in the current research
-3. methodologies_used: List of research methodologies observed across papers
-4. quality_assessment: Overall quality assessment of this literature corpus"""
-
-        result = await self._generate_structured_with_routing(
-            prompt, LiteratureAnalysisSchema, task=None
-        )
-        return {
-            "key_findings": result.key_findings,
-            "research_gaps": result.research_gaps,
-            "methodologies_used": result.methodologies_used,
-            "quality_assessment": result.quality_assessment,
-        }
-
-    async def _search_and_analyze_structured(
-        self, input_data: dict[str, Any]
-    ) -> Any:  # Returns LiteratureAnalysisSchema
-        """
-        Search for sources and analyze using structured output (two sequential calls).
-
-        Splits into two calls to prevent token exhaustion:
-        1. Source discovery (capped at 10 sources)
-        2. Analysis of found sources
-
-        Args:
-            input_data: Task input data
-
-        Returns:
-            LiteratureAnalysisSchema instance with sources and analysis
-        """
-        from src.agents.schemas import LiteratureAnalysisSchema
-        from src.agents.schemas.literature_review import AcademicSource
-
-        # Step 1: Find sources
-        sources = await self._search_sources_structured(input_data)
-
-        # Step 2: Analyze sources (separate call to avoid token exhaustion)
-        query = input_data.get("query", "")
-        analysis = {}
-        if sources:
-            analysis = await self._analyze_sources_structured(query, sources)
-
-        return LiteratureAnalysisSchema(
-            sources=[AcademicSource(**s) for s in sources],
-            key_findings=analysis.get("key_findings", ["No findings available"]),
-            research_gaps=analysis.get("research_gaps", ["No gaps identified"]),
-            methodologies_used=analysis.get("methodologies_used", []),
-            quality_assessment=analysis.get("quality_assessment", "Unable to assess"),
-        )
 
     def _get_mcp_status(self) -> dict[str, Any]:
         """Get MCP integration status."""
