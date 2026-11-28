@@ -19,7 +19,7 @@ from src.auth.pat_service import generate_personal_access_token
 from src.middleware.auth_middleware import get_current_token
 from src.middleware.tenant_context import TenantContext, get_tenant_context, owner_ids
 from src.models.db.audit_log import AuditEventType
-from src.models.db.session import get_session
+from src.models.db.session import SessionDep
 from src.repositories.personal_access_token_repository import (
     PersonalAccessTokenRepository,
 )
@@ -70,7 +70,7 @@ async def create_personal_access_token(
     request: Request,
     _token_payload: TokenPayload = Depends(get_current_token),
     tenant: TenantContext = Depends(get_tenant_context),
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
 ) -> PersonalAccessTokenCreateResponse:
     """Create a personal access token; plaintext is returned once."""
     ids = owner_ids(tenant)
@@ -130,7 +130,7 @@ async def create_personal_access_token(
 async def list_personal_access_tokens(
     _token_payload: TokenPayload = Depends(get_current_token),
     tenant: TenantContext = Depends(get_tenant_context),
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
 ) -> list[PersonalAccessTokenResponse]:
     """List personal access token metadata for the authenticated user."""
     ids = owner_ids(tenant)
@@ -146,7 +146,7 @@ async def revoke_personal_access_token(
     request: Request,
     token_payload: TokenPayload = Depends(get_current_token),
     tenant: TenantContext = Depends(get_tenant_context),
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
 ) -> None:
     """Revoke a personal access token within the caller's organization."""
     ids = owner_ids(tenant)

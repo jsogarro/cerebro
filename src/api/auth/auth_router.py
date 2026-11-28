@@ -439,7 +439,7 @@ def _require_enrolment_enabled() -> None:
 async def mfa_enroll(
     request: MfaEnrollRequest,
     req: Request,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     user: User = Depends(get_current_user),
     throttle: LoginThrottle = Depends(get_login_throttle),
 ) -> MfaEnrollResponse:
@@ -473,7 +473,7 @@ async def mfa_enroll(
 async def mfa_verify(
     request: MfaCodeRequest,
     req: Request,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     user: User = Depends(get_current_user),
     throttle: LoginThrottle = Depends(get_login_throttle),
     jwt_service: JWTService = Depends(get_jwt_service),
@@ -507,7 +507,7 @@ async def mfa_verify(
 async def mfa_disable(
     request: MfaCodeRequest,
     req: Request,
-    db: AsyncSession = Depends(get_session),
+    db: AsyncSession = SessionDep,
     user: User = Depends(get_current_user),
     throttle: LoginThrottle = Depends(get_login_throttle),
     jwt_service: JWTService = Depends(get_jwt_service),
