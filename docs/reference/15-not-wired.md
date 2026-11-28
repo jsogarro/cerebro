@@ -7,7 +7,7 @@ This page lists code and settings present in the repository that no production p
 | Feature | Status | Entry point | Source |
 |---|---|---|---|
 | Multi-tier memory | Not wired | none | `src/ai_brain/memory/` |
-| A/B experimentation framework | Not wired | none | `src/ai_brain/experimentation/` (all but the adaptive allocation engine) |
+| A/B experimentation framework | Not wired | none | `src/ai_brain/experimentation/statistical/`, `src/models/db/experiment.py` |
 | Learning and self-improvement | Not wired | none | `src/ai_brain/learning/supervision_feedback.py` |
 | Model configuration manager | Not wired | none | `src/ai_brain/config/`, `configs/models/` |
 | Prompt manager and versioning | Not wired | none | `src/prompts/` |
@@ -38,9 +38,7 @@ Tests that exercise it: `tests/test_memory_architecture_ttl.py`, `tests/test_con
 
 ## A/B experimentation framework
 
-> **Not wired.** `statistical/enhanced_statistical_engine.py` (`FrequentistAnalyzer`, `BayesianAnalyzer`, `EnhancedStatisticalEngine`) is imported only by the `eval/` subpackage and tests, apart from `MultiBanditOptimizer` and `BanditAlgorithm`, which `core/adaptive_allocation_engine.py` uses: `MASRouter` builds an `AdaptiveAllocationEngine` only when `ADAPTIVE_ROUTING_ENABLED` is true, and the setting defaults to `false`. See [MASR routing](06-masr-routing.md).
-
-The `eval/` subpackage (`adaptive_routing_eval.py`, `adaptive_routing_promotion.py`) is imported only by `scripts/run_adaptive_routing_eval.py` and `scripts/evaluate_adaptive_routing_promotion.py`.
+> **Not wired.** `statistical/enhanced_statistical_engine.py` (`FrequentistAnalyzer`, `BayesianAnalyzer`, `EnhancedStatisticalEngine`) has no production caller apart from `MultiBanditOptimizer` and `BanditAlgorithm`, which `core/adaptive_allocation_engine.py` uses. `MASRouter` records terminal run outcomes into `AdaptiveAllocationEngine` in dark mode while `ADAPTIVE_ROUTING_ENABLED` defaults to `false` (leaving route selection unchanged). The offline evaluation and promotion scripts (`scripts/run_adaptive_routing_eval.py`, `scripts/evaluate_adaptive_routing_promotion.py`) are standalone entry points for `src/ai_brain/experimentation/eval/`. See [MASR routing](06-masr-routing.md).
 
 The five tables `experiments`, `experiment_variants`, `experiment_assignments`, `experiment_results` and `experiment_analyses` are defined in `src/models/db/experiment.py` and created by Alembic migrations. No repository and no route reads or writes them.
 

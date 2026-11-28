@@ -6,8 +6,9 @@ That is how the security audit trail, the claim-support recorder, and a forked
 MASR router all shipped "covered" while nothing executed them.
 
 This is a static import graph (``ast``, including function-local imports) from
-the processes the repository actually starts: the API (``uvicorn
-src.api.main:app``), the ``research-cli`` script, and the live agent cost pilot.
+the processes and scripts the repository actually starts: the API (``uvicorn
+src.api.main:app``), the ``research-cli`` script, the live agent cost pilot,
+and standalone operational scripts under ``scripts/*.py``.
 
 It is a **ratchet**. ``KNOWN_UNREACHABLE`` lists today's unreachable modules and
 may only shrink: a new unreachable module fails, and so does a baseline entry
@@ -22,6 +23,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "src"
+SCRIPTS = REPO_ROOT / "scripts"
 
 # The last entry is the agent cost pilot, run by evals/live/test_cost_pilot.py.
 ENTRY_POINTS = (
@@ -33,9 +35,6 @@ ENTRY_POINTS = (
 KNOWN_UNREACHABLE: frozenset[str] = frozenset(
     {
         "src.ai_brain.config.integration_service",
-        "src.ai_brain.experimentation.eval",
-        "src.ai_brain.experimentation.eval.adaptive_routing_eval",
-        "src.ai_brain.experimentation.eval.adaptive_routing_promotion",
         # Its production callers are the run-recovery and evaluator-lease owners
         # (P03-B, P10-A, P12); delete this line when the first one lands.
         "src.services.evaluation_regression",
@@ -78,10 +77,19 @@ def _imported_modules(name: str, path: Path, index: dict[str, Path]) -> set[str]
     return found
 
 
+def _script_entry_points() -> list[tuple[str, Path]]:
+    return [
+        (f"scripts.{path.stem}", path)
+        for path in sorted(SCRIPTS.glob("*.py"))
+    ]
+
+
 def unreachable_modules() -> set[str]:
     index = _module_index()
     seen: set[str] = set()
     stack = list(ENTRY_POINTS)
+    for script_name, script_path in _script_entry_points():
+        stack.extend(_imported_modules(script_name, script_path, index) - seen)
     while stack:
         name = stack.pop()
         if name not in seen:

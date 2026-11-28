@@ -17,11 +17,11 @@ MASR (Multi-Agent System Router) turns a query into a routing decision: a comple
 | Routing decision cache | Active | `MASRouter.route` | `src/ai_brain/router/routing_cache.py` (`RoutingCacheManager`) |
 | Routing circuit breaker | Active | `MASRouter.route` | `src/core/tools/circuit.py` (`CircuitBreaker`) |
 | MASR HTTP API (8 routes) | Active | `/api/v1/masr/*` | `src/api/routes/masr_api.py` (`router`) |
-| `POST /api/v1/masr/feedback` learning | Not wired | `MASRRoutingService.submit_feedback` | `src/api/services/masr_routing_service.py` (`SupervisionFeedbackLearner`) |
+| `POST /api/v1/masr/feedback` | Active (labelled data only) | `MASRRoutingService.submit_feedback` | `src/api/services/masr_routing_service.py` (`LabelledRoutingFeedback`) |
 | History-based strategy heuristic | Active | `MASRouter._select_routing_strategy` | `src/ai_brain/router/routing_metrics.py` (`RoutingMetricsCollector.get_adaptive_strategy`) |
-| Adaptive worker allocation (Thompson sampling) | Off by default | `ADAPTIVE_ROUTING_ENABLED=true` | `src/ai_brain/router/masr.py` (`MASRouter._get_adaptive_allocation_adjustment`) |
+| Adaptive worker allocation (Thompson sampling) | Off by default (dark recording active) | `ADAPTIVE_ROUTING_ENABLED=true` | `src/ai_brain/router/masr.py` (`MASRouter._get_adaptive_allocation_adjustment`) |
 | Memory-informed routing | Not wired | `MEMORY_INFORMED_ROUTING_ENABLED=true` | `src/ai_brain/router/masr.py` (`MASRouter._get_episodic_routing_prior`) |
-| Routing outcome recorder | Not wired | none | `src/ai_brain/router/outcome_recorder.py` (`RoutingOutcomeRecorder`) |
+| Routing outcome recorder | Active (dark recording) | `OutboxRelay` (`adaptive_outcome` destination) | `src/api/services/adaptive_outcome_outbox_handler.py`, `src/ai_brain/router/outcome_recorder.py` |
 | Adaptive routing metrics | Active | Prometheus registry | `src/ai_brain/router/routing_observability.py` |
 
 ## Role in execution
@@ -183,9 +183,9 @@ The models are in `src/models/masr_api_models.py`. The handlers are in `src/api/
 
 ### `POST /feedback`
 
-> **Not wired.** `MASRRoutingService` constructs a `SupervisionFeedbackLearner` and never calls it, and `_update_performance_from_feedback` has no caller. The endpoint validates the request and acknowledges it without learning from it.
+`MASRRoutingService.submit_feedback` stores accepted submissions as `LabelledRoutingFeedback` records in a bounded in-memory buffer (`labelled_feedback`, capacity 1000) tagged with the caller's `organization_id` and `eligible_for_live_learning=False`. It never calls `MASRouter.record_routing_outcome`, `SupervisionFeedbackLearner`, or `_update_performance_from_feedback`, and never alters live routing weights or bandit state.
 
-`RoutingFeedback` fields: `routing_id`, `actual_cost`, `actual_latency_ms`, `quality_score` (0 to 1), `user_satisfaction` (0 to 1, optional), `error_occurred` and `error_message`. An unknown `routing_id` returns 400 with the code `INVALID_FEEDBACK`. A known one returns a fixed acknowledgment: `status` `accepted`, `routing_id`, `feedback_processed` `true`, `learning_updated` `false`, `recorded` `false`, `eligible` `false`, `duplicate` `false`, `source` `manual` and `reason` `manual_feedback_has_no_executed_allocation_or_evaluator_proof`.
+`RoutingFeedback` fields: `routing_id`, `actual_cost`, `actual_latency_ms`, `quality_score` (0 to 1), `user_satisfaction` (0 to 1, optional), `error_occurred` and `error_message`. An unknown `routing_id` returns 400 with the code `INVALID_FEEDBACK`. A known one stores the labelled record and returns the acknowledgment: `status` `accepted`, `routing_id`, `feedback_processed` `true`, `learning_updated` `false`, `recorded` `false`, `eligible` `false`, `duplicate` `false`, `source` `manual` and `reason` `manual_feedback_has_no_executed_allocation_or_evaluator_proof`.
 
 ### `GET /status`
 
@@ -245,7 +245,7 @@ Two offline scripts evaluate the allocation policy without enabling it; see the 
 - `RoutingMetricsCollector` (`routing_metrics.py`) keeps a deque of up to 10,000 decisions and a counter of total decisions. `get_metrics` returns that counter; the other `RoutingMetrics` fields stay at zero, and `adapt_from_decision` does nothing.
 - `RoutingOutcome` (`routing_outcome.py`) is the typed outcome record: opaque identifiers, source, collaboration mode, proposed and applied arm, final worker count, execution status, latency, cost and quality with their availability and an eligibility result. It has no field for query text or output.
 
-> **Not wired.** `RoutingOutcomeRecorder` (`outcome_recorder.py`) turns an executed allocation into a `RoutingOutcome` with retry-stable identifiers and delivers it to `MASRouter.record_routing_outcome`. `DirectExecutionService` constructs one as `outcome_recorder` and nothing calls `record`, so production runs do not record outcomes. The offline evaluation scripts call `record_routing_outcome` directly.
+- `RoutingOutcomeRecorder` (`outcome_recorder.py`) turns an executed allocation into a `RoutingOutcome` with retry-stable identifiers and delivers it to `MASRouter.record_routing_outcome`. Every durable terminal run event (`run.succeeded`, `run.failed`, `run.budget_exceeded`, `run.cancelled`, `run.interrupted`) enqueues an `adaptive_outcome` outbox row handled by `AdaptiveOutcomeOutboxHandler` (`src/api/services/adaptive_outcome_outbox_handler.py`) inside a tenant-scoped application session. On `run.succeeded`, the handler waits for any sibling `evaluation` outbox row to settle (and `OutboxRelay` runs `evaluation` before `adaptive_outcome` in the same batch), reads the canonical evaluation row (or falls back to `unavailable` when evaluation was not attempted or unmeasured, never lexical scoring), and sums known spend from `model_call_reservations` while keeping missing, `open`, or `settled_unknown` spend `unavailable` (never coerced to 0). With `ADAPTIVE_ROUTING_ENABLED=false` (default), outcomes update the bandit state in dark mode while routing decisions remain byte-identical. The offline evaluation scripts call `record_routing_outcome` directly.
 
 - `routing_observability.py` exports the Prometheus series `cerebro_masr_adaptive_effective_state` (one-hot gauge over `disabled`, `fixture_off`, `cold`, `degraded`, `active`), `cerebro_masr_outcomes_total` and `cerebro_masr_outcome_metric_availability_total`. The gauge is updated by the router; the two counters are updated only by `RoutingOutcomeRecorder.record`. Labels are fixed enumerations. See [security, audit and observability](12-security-audit-observability.md).
 - When `LANGFUSE_ENABLED` is `true`, `MASRouter.route` is wrapped in `trace_masr_routing` (`src/core/tracing.py`), which sends a redacted, length-capped query prefix and routing metadata.
